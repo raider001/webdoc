@@ -1,7 +1,7 @@
 {
   "siteTitle": "Web Document Tool",
   "sources": [
-    { "name": "Guides", "path": "docs" }
+    { "name": "Guides", "path": "docs", "component": "GUIDE" }
   ],
   "defaultDoc": "Guides/getting-started",
   "theme": "auto"

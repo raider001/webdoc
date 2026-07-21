@@ -1,12 +1,13 @@
 // main.js - application entry point. Wires the shell together:
 // theme, discovery, hash routing, the render pipeline, the drawer and search.
 import { loadSite, discover, loadDoc } from './catalog.js';
-import { renderMarkdown, INTERIM } from './markdown.js';
+import { renderMarkdown, INTERIM } from './commonmark.js';
 import { sanitizeToFragment } from './sanitize.js';
 import { numberHeadings, buildTOC } from './numbering.js';
 import { renderTree, markActive, filterTree } from './tree.js';
 import { createGraph } from './graph.js';
-import { buildRequirementIndex, renderRequirements, revealRequirement, reqFromQuery, setupRequirementsView } from './requirements.js';
+import { highlightWithin } from './highlighter.js';
+import { buildRequirementIndex, preprocessRequirements, renderRequirements, revealRequirement, reqFromQuery, requirementTraceEdges } from './requirements.js';
 
 const el = id => document.getElementById(id);
 const state = { site: null, docs: [], byId: new Map(), current: null, spy: null };
@@ -70,8 +71,8 @@ function renderDoc(doc) {
   const article = document.createElement('article');
   article.className = 'doc';
 
-  // pipeline: parse -> sanitize (inert) -> adopt -> number + TOC
-  const html = renderMarkdown(doc.body || '');
+  // pipeline: extract requirement groups -> parse -> sanitize (inert) -> adopt
+  const html = renderMarkdown(preprocessRequirements(doc.body || '', doc.id));
   article.appendChild(sanitizeToFragment(html));
   content.appendChild(article);
 
@@ -89,8 +90,11 @@ function renderDoc(doc) {
   tocList.textContent = '';
   tocList.appendChild(buildTOC(toc, content));
 
-  // Requirement cards: post-sanitize decoration, same pattern as numbering.
-  renderRequirements(article);
+  // Requirement-group tables: post-sanitize, replace the reqgroup placeholders.
+  renderRequirements(article, doc.id);
+
+  // Syntax highlighting: post-sanitize, over the remaining code blocks.
+  highlightWithin(article);
 
   setupScrollSpy(article, tocList);
 
@@ -226,9 +230,11 @@ function setupGraphButton() {
     if (graphApi) graphApi.destroy();
     graphApi = createGraph(stage, state.docs, {
       currentId: state.current && state.current.id,
-      onOpenDoc: (id) => { close(); navigate(id); }
+      traceEdges: requirementTraceEdges(),
+      onSelect: (id) => { navigate(id); },            // click: select it, stay on the map
+      onActivate: (id) => { close(); navigate(id); }  // double-click: open the doc and leave
     });
-    el('live').textContent = 'Opened the document map. Press Escape to close.';
+    el('live').textContent = 'Opened the document map. Click a document to select it; double-click to open it. Escape closes.';
   };
   const close = () => {
     if (overlay.hidden) return;
@@ -296,10 +302,9 @@ async function boot() {
   await Promise.all(state.docs.map(d => loadDoc(d).catch(() => d)));
   state.docs.forEach(d => state.byId.set(d.id, d));
 
-  // Build the global requirement trace index from every loaded doc body, then
-  // wire the header entry point + the traceability view (matrix + coverage).
-  buildRequirementIndex(state.docs);
-  setupRequirementsView({ navigate });
+  // Build the global requirement trace index (composed ids + calculated trace-from)
+  // from every loaded doc body. Component ids come from the per-source config.
+  await buildRequirementIndex(state.docs, state.site.sources);
 
   renderTree(el('treeList'), state.docs, id => { navigate(id); drawer.close(); });
   el('treeSearch').addEventListener('input', e => filterTree(el('treeList'), state.docs, e.target.value));

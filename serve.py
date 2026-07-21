@@ -57,7 +57,14 @@ def load_config(path):
         folder = os.path.abspath(os.path.join(HERE, src["path"]))
         if not os.path.isdir(folder):
             print(f"  ! source '{name}' path not found: {folder}")
-        sources.append({"name": name, "path": folder})
+        # A component id is required per source - it's the first segment of every
+        # composed requirement id ({component}_{group}_{no}). Fail loudly if absent.
+        component = src.get("component")
+        if not component or not str(component).strip():
+            raise SystemExit(
+                f"config error: source '{name}' is missing a required 'component' name"
+            )
+        sources.append({"name": name, "path": folder, "component": str(component).strip()})
     return {
         "siteTitle": cfg.get("siteTitle", "Documentation"),
         "defaultDoc": cfg.get("defaultDoc"),
@@ -135,7 +142,7 @@ class DocHandler(BaseHTTPRequestHandler):
             "defaultDoc": cfg["defaultDoc"],
             "theme": cfg["theme"],
             "sources": [
-                {"name": s["name"], "url": "/docs/" + s["name"] + "/"}
+                {"name": s["name"], "url": "/docs/" + s["name"] + "/", "component": s["component"]}
                 for s in cfg["sources"]
             ],
         })

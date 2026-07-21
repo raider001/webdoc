@@ -174,7 +174,23 @@
   -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px);
   max-width:calc(100% - 24px);
 }
-.graph-legend-item { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.graph-legend-item { display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+  cursor:pointer; background:none; border:none; font:inherit; color:inherit; padding:2px 5px; border-radius:5px; }
+.graph-legend-item:hover { background:var(--surface-2); }
+.graph-legend-item.is-off { opacity:.42; text-decoration:line-through; }
+.graph-legend-item:focus-visible { outline:2px solid var(--focus-ring); outline-offset:1px; }
+
+/* Requirement-trace edges + legend toggles */
+:root { --req-trace:#7c3aed; }
+:root[data-theme="dark"] { --req-trace:#a78bfa; }
+.graph-legend-swatch.trace { border-top-color:var(--req-trace); border-top-style:dotted; }
+.graph-edge-trace { stroke:var(--req-trace); stroke-width:1.6; stroke-dasharray:2 3; fill:none; }
+.graph-arrow-trace path { fill:var(--req-trace); }
+.graph-viewport.hide-prereq  .graph-edge-prereq  { display:none; }
+.graph-viewport.hide-recnext .graph-edge-recnext { display:none; }
+.graph-viewport.hide-trace   .graph-edge-trace   { display:none; }
+.graph-viewport.hide-missing .graph-node.is-missing { display:none; }
+.graph-viewport.hide-missing .graph-edge-tomissing  { display:none; }
 .graph-legend-swatch { width:22px; height:0; border-top-width:2px; border-top-style:solid; display:inline-block; }
 .graph-legend-swatch.prereq  { border-top-color:var(--prereq); }
 .graph-legend-swatch.recnext { border-top-color:var(--recnext); border-top-style:dashed; }

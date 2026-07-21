@@ -324,8 +324,11 @@ function edgePath(points) {
 // ---------------------------------------------------------------------------
 export function createGraph(container, docs, options) {
   const opts = options || {};
-  const currentId = opts.currentId || null;
+  let currentId = opts.currentId || null;
   const onOpenDoc = typeof opts.onOpenDoc === 'function' ? opts.onOpenDoc : function () {};
+  const onSelect = typeof opts.onSelect === 'function' ? opts.onSelect : onOpenDoc;     // single click / Enter
+  const onActivate = typeof opts.onActivate === 'function' ? opts.onActivate : onOpenDoc; // double click
+  const traceEdges = Array.isArray(opts.traceEdges) ? opts.traceEdges : [];
 
   container.classList.add('graph-root');
   container.textContent = '';
@@ -339,6 +342,7 @@ export function createGraph(container, docs, options) {
   const defs = svg('defs');
   defs.appendChild(marker('graph-arrow-prereq', 'graph-arrow-prereq'));
   defs.appendChild(marker('graph-arrow-recnext', 'graph-arrow-recnext'));
+  defs.appendChild(marker('graph-arrow-trace', 'graph-arrow-trace'));
   svgEl.appendChild(defs);
 
   const viewport = svg('g', { class: 'graph-viewport' });
@@ -359,9 +363,13 @@ export function createGraph(container, docs, options) {
   }
 
   // ---- Edges ----
+  function touchesMissing(from, to) {
+    const a = model.nodes.get(from), b = model.nodes.get(to);
+    return (a && a.missing) || (b && b.missing);
+  }
   for (const e of layout.edges) {
     const p = svg('path', {
-      class: 'graph-edge graph-edge-' + e.type,
+      class: 'graph-edge graph-edge-' + e.type + (touchesMissing(e.from, e.to) ? ' graph-edge-tomissing' : ''),
       d: edgePath(e.points),
       'data-from': e.from, 'data-to': e.to, 'data-type': e.type
     });
@@ -382,6 +390,31 @@ export function createGraph(container, docs, options) {
     const p = svg('path', { class: 'graph-edge graph-edge-' + sl.type, d: d, 'data-from': sl.id, 'data-to': sl.id, 'data-type': sl.type });
     p.setAttribute('marker-end', 'url(#graph-arrow-' + sl.type + ')');
     edgesG.appendChild(p);
+  }
+
+  // ---- Requirement-trace edges (overlay; do NOT affect the hierarchy layout) ----
+  // Each {from,to} means a requirement in `from` traces to one in `to`.
+  function borderPoint(n, towardX, towardY) {
+    const cx = n.x + n.w / 2, cy = n.y + n.h / 2;
+    const dx = towardX - cx, dy = towardY - cy;
+    if (dx === 0 && dy === 0) return { x: cx, y: cy };
+    const sx = dx !== 0 ? (n.w / 2) / Math.abs(dx) : Infinity;
+    const sy = dy !== 0 ? (n.h / 2) / Math.abs(dy) : Infinity;
+    const s = Math.min(sx, sy);
+    return { x: cx + dx * s, y: cy + dy * s };
+  }
+  for (const te of traceEdges) {
+    const a = layout.nodes.get(te.from), b = layout.nodes.get(te.to);
+    if (!a || !b) continue;
+    const p0 = borderPoint(a, b.x + b.w / 2, b.y + b.h / 2);
+    const p1 = borderPoint(b, a.x + a.w / 2, a.y + a.h / 2);
+    const path = svg('path', {
+      class: 'graph-edge graph-edge-trace',
+      d: 'M ' + fmt(p0.x) + ' ' + fmt(p0.y) + ' L ' + fmt(p1.x) + ' ' + fmt(p1.y),
+      'data-from': te.from, 'data-to': te.to, 'data-type': 'trace'
+    });
+    path.setAttribute('marker-end', 'url(#graph-arrow-trace)');
+    edgesG.appendChild(path);
   }
 
   // ---- Nodes ----
@@ -449,10 +482,29 @@ export function createGraph(container, docs, options) {
 
   const legend = document.createElement('div');
   legend.className = 'graph-legend';
-  legend.innerHTML =
-    '<span class="graph-legend-item"><span class="graph-legend-swatch prereq"></span>Prerequisite</span>' +
-    '<span class="graph-legend-item"><span class="graph-legend-swatch recnext"></span>Recommended next</span>' +
-    '<span class="graph-legend-item"><span class="graph-legend-swatch missing"></span>Missing</span>';
+  // Each legend entry is a toggle: click to hide/show that category. Hiding only
+  // adds a class to the viewport (CSS does the display:none); positions stay put.
+  function legendToggle(swatchCls, label, hideCls) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'graph-legend-item';
+    b.setAttribute('aria-pressed', 'true');
+    b.title = 'Toggle ' + label;
+    const sw = document.createElement('span');
+    sw.className = 'graph-legend-swatch ' + swatchCls;
+    b.appendChild(sw);
+    b.appendChild(document.createTextNode(label));
+    b.addEventListener('click', function () {
+      const hidden = viewport.classList.toggle(hideCls);
+      b.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+      b.classList.toggle('is-off', hidden);
+    });
+    return b;
+  }
+  legend.appendChild(legendToggle('prereq', 'Prerequisite', 'hide-prereq'));
+  legend.appendChild(legendToggle('recnext', 'Recommended next', 'hide-recnext'));
+  if (traceEdges.length) legend.appendChild(legendToggle('trace', 'Requirement trace', 'hide-trace'));
+  legend.appendChild(legendToggle('missing', 'Missing', 'hide-missing'));
   container.appendChild(legend);
 
   // Minimap (small, best-effort; never allowed to break the main view).
@@ -579,6 +631,15 @@ export function createGraph(container, docs, options) {
     return true;
   }
 
+  // Move the "current" highlight to a node (used when selecting on the map).
+  function setCurrent(id) {
+    currentId = id;
+    nodesG.querySelectorAll('.graph-node.is-current').forEach(x => x.classList.remove('is-current'));
+    const g = nodesG.querySelector('[data-node-id="' + cssEscape(id) + '"]');
+    if (g && g.getAttribute('data-missing') !== 'true') g.classList.add('is-current');
+    buildMinimap(); // rebuilds minimap nodes with the new current flag
+  }
+
   // Ordered id list for deterministic search.
   const sortedIds = Array.from(model.nodes.keys()).sort();
   function search(query) {
@@ -603,8 +664,13 @@ export function createGraph(container, docs, options) {
   function on(target, type, fn, opt) { target.addEventListener(type, fn, opt); listeners.push({ target: target, type: type, fn: fn, opt: opt }); }
 
   let dragging = false, moved = false, sx = 0, sy = 0, sTx = 0, sTy = 0;
+  let lastClickId = null, lastClickTime = 0, downNodeId = null;
   on(svgEl, 'pointerdown', function (e) {
     if (e.button !== 0) return;
+    // Record the pressed node NOW: setPointerCapture (below) retargets the later
+    // pointerup to the SVG root, so we can't read the node from pointerup.target.
+    const dg = e.target && e.target.closest ? e.target.closest('.graph-node') : null;
+    downNodeId = (dg && dg.getAttribute('data-missing') !== 'true') ? dg.getAttribute('data-node-id') : null;
     dragging = true; moved = false;
     sx = e.clientX; sy = e.clientY; sTx = tx; sTy = ty;
     svgEl.classList.add('is-panning');
@@ -621,13 +687,19 @@ export function createGraph(container, docs, options) {
     dragging = false;
     svgEl.classList.remove('is-panning');
     try { svgEl.releasePointerCapture(e.pointerId); } catch (err) {}
-    if (!moved) {
-      const g = e.target && e.target.closest ? e.target.closest('.graph-node') : null;
-      if (g && g.getAttribute('data-missing') !== 'true') {
-        const id = g.getAttribute('data-node-id');
-        if (id) onOpenDoc(id);
+    if (!moved && downNodeId) {
+      const id = downNodeId;
+      const now = Date.now();
+      if (lastClickId === id && (now - lastClickTime) < 350) {
+        lastClickId = null;
+        onActivate(id);           // double click -> open the doc and leave the map
+      } else {
+        lastClickId = id; lastClickTime = now;
+        setCurrent(id);
+        onSelect(id);             // single click -> select it, stay on the map
       }
     }
+    downNodeId = null;
   });
   on(svgEl, 'pointercancel', function () { dragging = false; svgEl.classList.remove('is-panning'); });
 
@@ -646,7 +718,7 @@ export function createGraph(container, docs, options) {
     if (g && g.getAttribute('data-missing') !== 'true') {
       e.preventDefault();
       const id = g.getAttribute('data-node-id');
-      if (id) onOpenDoc(id);
+      if (id) { setCurrent(id); onSelect(id); }
     }
   });
 
@@ -704,7 +776,7 @@ export function createGraph(container, docs, options) {
     container.classList.remove('graph-root');
   }
 
-  return { destroy: destroy, focus: focus, fit: fit, search: search };
+  return { destroy: destroy, focus: focus, fit: fit, search: search, setCurrent: setCurrent };
 }
 
 function cssEscape(id) {
