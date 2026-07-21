@@ -191,6 +191,24 @@
 .graph-viewport.hide-trace   .graph-edge-trace   { display:none; }
 .graph-viewport.hide-missing .graph-node.is-missing { display:none; }
 .graph-viewport.hide-missing .graph-edge-tomissing  { display:none; }
+
+/* Page-link edges + external-link nodes (in-body markdown links) */
+:root { --page-link:#0d9488; }
+:root[data-theme="dark"] { --page-link:#2dd4bf; }
+.graph-legend-swatch.pagelink { border-top-color:var(--page-link); border-top-style:dashed; }
+.graph-edge-pagelink { stroke:var(--page-link); stroke-width:1.6; stroke-dasharray:5 3; fill:none; }
+.graph-arrow-pagelink path { fill:var(--page-link); }
+.graph-viewport.hide-pagelink .graph-edge-pagelink { display:none; }
+.graph-viewport.hide-pagelink .graph-ext-node { display:none; }
+.graph-ext-node { cursor:pointer; }
+.graph-ext-node:hover .graph-ext-box, .graph-ext-node:focus-visible .graph-ext-box { stroke-width:2.25; }
+.graph-ext-node:focus-visible { outline:none; }
+.graph-ext-box { fill:var(--surface); stroke:var(--page-link); stroke-width:1.25; stroke-dasharray:4 3; }
+.graph-ext-body { box-sizing:border-box; width:100%; height:100%; display:flex; align-items:center; padding:6px 12px 6px 10px; overflow:hidden; }
+.graph-ext-url { font:12px ui-monospace, "Cascadia Code", Consolas, monospace; color:var(--text);
+  overflow:hidden; word-break:break-all; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.graph-ext-bubble circle { fill:var(--page-link); }
+.graph-ext-bubble text { fill:var(--bg); font:700 11px ui-sans-serif, system-ui, sans-serif; }
 .graph-legend-swatch { width:22px; height:0; border-top-width:2px; border-top-style:solid; display:inline-block; }
 .graph-legend-swatch.prereq  { border-top-color:var(--prereq); }
 .graph-legend-swatch.recnext { border-top-color:var(--recnext); border-top-style:dashed; }

@@ -329,6 +329,8 @@ export function createGraph(container, docs, options) {
   const onSelect = typeof opts.onSelect === 'function' ? opts.onSelect : onOpenDoc;     // single click / Enter
   const onActivate = typeof opts.onActivate === 'function' ? opts.onActivate : onOpenDoc; // double click
   const traceEdges = Array.isArray(opts.traceEdges) ? opts.traceEdges : [];
+  const pageLinks = Array.isArray(opts.pageLinks) ? opts.pageLinks : [];
+  const externalNodes = Array.isArray(opts.externalNodes) ? opts.externalNodes : [];
 
   container.classList.add('graph-root');
   container.textContent = '';
@@ -337,12 +339,46 @@ export function createGraph(container, docs, options) {
   const nodeList = Array.from(model.nodes.values());
   const layout = layoutGraph(nodeList, model.edges);
 
+  // Position external-link nodes in a column to the right of the doc layout,
+  // then extend the layout bounds so fit()/minimap frame them too.
+  const extPos = new Map();
+  if (externalNodes.length) {
+    const EXT_W = 172, EXT_H = 46, STACK_GAP = 16, DROP = 44;
+    // Which source doc(s) link to each external node.
+    const srcOf = new Map();
+    for (const pl of pageLinks) {
+      if (String(pl.to).indexOf('ext:') === 0) {
+        if (!srcOf.has(pl.to)) srcOf.set(pl.to, []);
+        srcOf.get(pl.to).push(pl.from);
+      }
+    }
+    const stack = new Map(); // per-source stack counter so several externals don't overlap
+    for (const en of externalNodes) {
+      let src = null;
+      for (const s of (srcOf.get(en.id) || [])) { const p = layout.nodes.get(s); if (p) { src = p; break; } }
+      let x, y;
+      if (src) {
+        const key = src.x + ',' + src.y;
+        const n = stack.get(key) || 0; stack.set(key, n + 1);
+        x = src.x + src.w / 2 - EXT_W / 2;              // centred just below its source doc
+        y = src.y + src.h + DROP + n * (EXT_H + STACK_GAP);
+      } else {
+        x = 0; y = layout.height + 60;
+      }
+      extPos.set(en.id, { x: x, y: y, w: EXT_W, h: EXT_H });
+      layout.width = Math.max(layout.width, x + EXT_W);
+      layout.height = Math.max(layout.height, y + EXT_H);
+    }
+  }
+  function nodePos(id) { return layout.nodes.get(id) || extPos.get(id) || null; }
+
   // ---- SVG scaffold ----
   const svgEl = svg('svg', { class: 'graph-svg', xmlns: SVGNS });
   const defs = svg('defs');
   defs.appendChild(marker('graph-arrow-prereq', 'graph-arrow-prereq'));
   defs.appendChild(marker('graph-arrow-recnext', 'graph-arrow-recnext'));
   defs.appendChild(marker('graph-arrow-trace', 'graph-arrow-trace'));
+  defs.appendChild(marker('graph-arrow-pagelink', 'graph-arrow-pagelink'));
   svgEl.appendChild(defs);
 
   const viewport = svg('g', { class: 'graph-viewport' });
@@ -356,7 +392,7 @@ export function createGraph(container, docs, options) {
   function marker(id, cls) {
     const m = svg('marker', {
       id: id, class: cls, viewBox: '0 0 10 10', refX: '9', refY: '5',
-      markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse'
+      markerWidth: '9', markerHeight: '9', orient: 'auto-start-reverse'
     });
     m.appendChild(svg('path', { d: 'M0,0 L10,5 L0,10 z' }));
     return m;
@@ -417,6 +453,21 @@ export function createGraph(container, docs, options) {
     edgesG.appendChild(path);
   }
 
+  // ---- Page-link edges (overlay): in-body links, incl. to external nodes ----
+  for (const pl of pageLinks) {
+    const a = nodePos(pl.from), b = nodePos(pl.to);
+    if (!a || !b) continue;
+    const p0 = borderPoint(a, b.x + b.w / 2, b.y + b.h / 2);
+    const p1 = borderPoint(b, a.x + a.w / 2, a.y + a.h / 2);
+    const path = svg('path', {
+      class: 'graph-edge graph-edge-pagelink',
+      d: 'M ' + fmt(p0.x) + ' ' + fmt(p0.y) + ' L ' + fmt(p1.x) + ' ' + fmt(p1.y),
+      'data-from': pl.from, 'data-to': pl.to, 'data-type': 'pagelink'
+    });
+    path.setAttribute('marker-end', 'url(#graph-arrow-pagelink)');
+    edgesG.appendChild(path);
+  }
+
   // ---- Nodes ----
   const R = 10;
   for (const id of Array.from(model.nodes.keys()).sort()) {
@@ -458,6 +509,38 @@ export function createGraph(container, docs, options) {
     }
     fo.appendChild(body);
     g.appendChild(fo);
+    nodesG.appendChild(g);
+  }
+
+  // ---- External-link nodes: a URL box with a "?" bubble in the corner ----
+  for (const en of externalNodes) {
+    const pos = extPos.get(en.id);
+    if (!pos) continue;
+    const g = svg('g', {
+      class: 'graph-node graph-ext-node',
+      transform: 'translate(' + fmt(pos.x) + ' ' + fmt(pos.y) + ')',
+      'data-node-id': en.id, 'data-missing': 'true', 'data-external-url': en.url
+    });
+    g.setAttribute('aria-label', 'External link (opens in a new tab): ' + en.url);
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('role', 'link');
+    g.appendChild(svg('rect', { class: 'graph-ext-box', width: pos.w, height: pos.h, rx: R, ry: R }));
+    const fo = svg('foreignObject', { class: 'graph-node-fo', width: pos.w, height: pos.h });
+    const body = document.createElement('div');
+    body.className = 'graph-ext-body';
+    const u = document.createElement('div');
+    u.className = 'graph-ext-url';
+    u.textContent = en.url;
+    body.appendChild(u);
+    fo.appendChild(body);
+    g.appendChild(fo);
+    // "?" bubble, top-right corner - signifies an external destination.
+    const bubble = svg('g', { class: 'graph-ext-bubble', transform: 'translate(' + fmt(pos.w - 8) + ' 8)' });
+    bubble.appendChild(svg('circle', { r: '8.5' }));
+    const q = svg('text', { x: '0', y: '0.5', 'text-anchor': 'middle', 'dominant-baseline': 'central' });
+    q.textContent = '?';
+    bubble.appendChild(q);
+    g.appendChild(bubble);
     nodesG.appendChild(g);
   }
 
@@ -504,6 +587,7 @@ export function createGraph(container, docs, options) {
   legend.appendChild(legendToggle('prereq', 'Prerequisite', 'hide-prereq'));
   legend.appendChild(legendToggle('recnext', 'Recommended next', 'hide-recnext'));
   if (traceEdges.length) legend.appendChild(legendToggle('trace', 'Requirement trace', 'hide-trace'));
+  if (pageLinks.length) legend.appendChild(legendToggle('pagelink', 'Page link', 'hide-pagelink'));
   legend.appendChild(legendToggle('missing', 'Missing', 'hide-missing'));
   container.appendChild(legend);
 
@@ -664,13 +748,14 @@ export function createGraph(container, docs, options) {
   function on(target, type, fn, opt) { target.addEventListener(type, fn, opt); listeners.push({ target: target, type: type, fn: fn, opt: opt }); }
 
   let dragging = false, moved = false, sx = 0, sy = 0, sTx = 0, sTy = 0;
-  let lastClickId = null, lastClickTime = 0, downNodeId = null;
+  let lastClickId = null, lastClickTime = 0, downNodeId = null, downExtUrl = null;
   on(svgEl, 'pointerdown', function (e) {
     if (e.button !== 0) return;
     // Record the pressed node NOW: setPointerCapture (below) retargets the later
     // pointerup to the SVG root, so we can't read the node from pointerup.target.
     const dg = e.target && e.target.closest ? e.target.closest('.graph-node') : null;
     downNodeId = (dg && dg.getAttribute('data-missing') !== 'true') ? dg.getAttribute('data-node-id') : null;
+    downExtUrl = dg ? dg.getAttribute('data-external-url') : null;
     dragging = true; moved = false;
     sx = e.clientX; sy = e.clientY; sTx = tx; sTy = ty;
     svgEl.classList.add('is-panning');
@@ -687,7 +772,9 @@ export function createGraph(container, docs, options) {
     dragging = false;
     svgEl.classList.remove('is-panning');
     try { svgEl.releasePointerCapture(e.pointerId); } catch (err) {}
-    if (!moved && downNodeId) {
+    if (!moved && downExtUrl) {
+      window.open(downExtUrl, '_blank', 'noopener'); // external link box -> new tab
+    } else if (!moved && downNodeId) {
       const id = downNodeId;
       const now = Date.now();
       if (lastClickId === id && (now - lastClickTime) < 350) {
@@ -699,7 +786,7 @@ export function createGraph(container, docs, options) {
         onSelect(id);             // single click -> select it, stay on the map
       }
     }
-    downNodeId = null;
+    downNodeId = null; downExtUrl = null;
   });
   on(svgEl, 'pointercancel', function () { dragging = false; svgEl.classList.remove('is-panning'); });
 
@@ -715,7 +802,10 @@ export function createGraph(container, docs, options) {
   on(nodesG, 'keydown', function (e) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const g = e.target && e.target.closest ? e.target.closest('.graph-node') : null;
-    if (g && g.getAttribute('data-missing') !== 'true') {
+    if (!g) return;
+    const extUrl = g.getAttribute('data-external-url');
+    if (extUrl) { e.preventDefault(); window.open(extUrl, '_blank', 'noopener'); return; }
+    if (g.getAttribute('data-missing') !== 'true') {
       e.preventDefault();
       const id = g.getAttribute('data-node-id');
       if (id) { setCurrent(id); onSelect(id); }

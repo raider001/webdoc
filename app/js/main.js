@@ -7,6 +7,7 @@ import { numberHeadings, buildTOC } from './numbering.js';
 import { renderTree, markActive } from './tree.js';
 import { buildSearchIndex, searchDocs } from './search.js';
 import { createGraph } from './graph.js';
+import { documentLinks } from './doclinks.js';
 import { highlightWithin } from './highlighter.js';
 import { buildRequirementIndex, preprocessRequirements, renderRequirements, revealRequirement, reqFromQuery, requirementTraceEdges } from './requirements.js';
 
@@ -273,9 +274,13 @@ function setupGraphButton() {
     overlay.hidden = false;
     btn.setAttribute('aria-pressed', 'true');
     if (graphApi) graphApi.destroy();
+    const traces = requirementTraceEdges();
+    const links = documentLinks(state.docs, traces);
     graphApi = createGraph(stage, state.docs, {
       currentId: state.current && state.current.id,
-      traceEdges: requirementTraceEdges(),
+      traceEdges: traces,
+      pageLinks: links.pageLinks,
+      externalNodes: links.externalNodes,
       onSelect: (id) => { navigate(id); },            // click: select it, stay on the map
       onActivate: (id) => { close(); navigate(id); }  // double-click: open the doc and leave
     });

@@ -41,3 +41,11 @@ based on each page's metadata. More on that in the next document.
 
 When you finish a page, the footer offers a suggested next document. Head to
 the graph model to see how those suggestions are wired up.
+
+## See also
+
+Not every link is a prerequisite or a suggested next step. For how raw HTML is
+handled, see the [security &amp; embedded HTML notes](Guides/security-and-html) —
+a plain in-body link. The renderer follows the
+[CommonMark specification](https://spec.commonmark.org/0.31.2/), an external
+resource outside this document set.

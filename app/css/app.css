@@ -12,7 +12,7 @@
   --focus-ring:#2563eb; --selection:rgba(37,99,235,.20);
   --shadow:0 6px 24px rgba(16,24,40,.14); --scrim:rgba(16,24,40,.45);
   --warn-bg:#fff7ed; --warn-border:#f59e0b; --warn-text:#7c4a03;
-  --header-h:56px; --toc-w:260px; --tree-w:320px; --content-max:760px;
+  --header-h:56px; --toc-w:260px; --tree-w:320px; --content-max:1064px;
   --radius:8px; --dur:160ms;
 }
 :root[data-theme="dark"] {
