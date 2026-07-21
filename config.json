@@ -1,8 +1,8 @@
 {
-  "siteTitle": "Web Document Tool",
+  "siteTitle": "WebDocs",
   "sources": [
-    { "name": "Guides", "path": "docs", "component": "GUIDE" }
+    { "name": "Docs", "path": "docs", "component": "WD" }
   ],
-  "defaultDoc": "Guides/getting-started",
+  "defaultDoc": "Docs/overview",
   "theme": "auto"
 }
