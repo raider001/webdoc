@@ -1,0 +1,168 @@
+<!-- highlight-demo.html - manual verification harness for highlighter.js.
+     Served at /dev/highlight-demo.html. Loads the real app stylesheet first,
+     then the highlight palette, renders one realistic sample per language,
+     and calls highlightWithin(document.body). Toggle button flips data-theme
+     so both palettes can be checked. No build step, no dependencies. -->
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/highlight.css">
+<style>
+  /* Harness-only chrome; the code colours come from the linked stylesheets. */
+  body { margin: 0; padding: 32px; max-width: 900px; }
+  h1 { margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  h2 { margin: 28px 0 8px; font-size: 15px; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .06em; }
+  pre { background: var(--code-bg); color: var(--code-text);
+        border: 1px solid var(--code-border); border-radius: var(--radius);
+        padding: 14px 16px; overflow: auto; margin: 0; }
+  pre code { font: 13.5px/1.6 ui-monospace, "SFMono-Regular", "Consolas",
+             "Liberation Mono", monospace; white-space: pre; }
+  .bar { position: sticky; top: 0; padding: 8px 0 16px; background: var(--bg);
+         display: flex; gap: 12px; align-items: center; z-index: 1; }
+  button { height: 36px; padding: 0 14px; border: 1px solid var(--border);
+           border-radius: 8px; background: var(--surface); color: var(--text);
+           cursor: pointer; font-size: 13.5px; }
+  button:hover { background: var(--surface-2); }
+</style>
+
+<div class="bar">
+  <button id="toggle" type="button">Toggle light / dark</button>
+  <span id="which" class="sub" style="margin:0;"></span>
+</div>
+
+<h1>Syntax highlighter demo</h1>
+<p class="sub">One sample per supported language, plus a generic fallback.</p>
+
+<h2>Python</h2>
+<pre><code class="language-python">import math
+from typing import List
+
+
+@dataclass
+class Circle:
+    """A circle with a radius and a couple of helpers."""
+
+    radius: float = 1.0
+
+    def area(self) -&gt; float:
+        # area = pi * r^2
+        return math.pi * self.radius ** 2
+
+
+def radii(values: List[int]) -&gt; list:
+    label = f"count={len(values)}"
+    raw = r"C:\temp\notes"
+    total = sum(v for v in values if v &gt; 0)
+    return [Circle(x) for x in range(0x10, total, 2)]
+</code></pre>
+
+<h2>Robot Framework</h2>
+<pre><code class="language-robotframework">*** Settings ***
+Library           SeleniumLibrary
+Suite Setup       Open Application    ${URL}
+
+*** Variables ***
+${URL}            https://example.test
+@{USERS}          alice    bob    carol
+&amp;{PROFILE}        name=alice    role=admin
+
+*** Test Cases ***
+Valid Login
+    [Tags]    smoke    login
+    [Setup]    Go To    ${URL}
+    Input Text    id:user    ${USERS}[0]
+    Click Button    Submit    # trigger the form
+    Page Should Contain    Welcome
+
+*** Keywords ***
+Open Application
+    [Arguments]    ${base}
+    Log    Opening ${base}
+</code></pre>
+
+<h2>Makefile</h2>
+<pre><code class="language-makefile"># Build the project
+CC := gcc
+CFLAGS ?= -O2 -Wall
+SRessources = $(wildcard src/*.c)
+OBJ = $(SRessources:.c=.o)
+
+.PHONY: all clean
+
+all: app
+
+app: $(OBJ)
+	$(CC) $(CFLAGS) -o $@ $^
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $&lt; -o $@
+
+clean:
+	rm -f $(OBJ) app
+</code></pre>
+
+<h2>Shell</h2>
+<pre><code class="language-bash">#!/usr/bin/env bash
+set -euo pipefail
+
+# Greet every name passed in
+greet() {
+    local name="$1"
+    echo "Hello, ${name}!" &gt; /dev/null
+}
+
+count=0
+for user in "$@"; do
+    if [ -n "$user" ]; then
+        greet "$user"
+        count=$((count + 1))
+    fi
+done
+
+printf 'processed %d users\n' "$count"
+files=$(ls -1 | grep '\.txt$')
+</code></pre>
+
+<h2>Java</h2>
+<pre><code class="language-java">package demo;
+
+import java.util.List;
+
+/* A tiny value type. */
+public final class Greeter {
+    private static final int LIMIT = 100_000;
+
+    @Override
+    public String greet(String name) {
+        // guard against null
+        if (name == null || name.isEmpty()) {
+            return "Hello, world!";
+        }
+        double ratio = 3.5f * 2L;
+        char first = name.charAt(0);
+        return String.format("Hi %s (%c)", name, first);
+    }
+}
+</code></pre>
+
+<h2>Generic fallback (language-toml, unrecognised)</h2>
+<pre><code class="language-toml"># configuration
+title = "example"
+retries = 3      // inline note
+path = '/var/log'
+</code></pre>
+
+<script type="module">
+  import { highlightWithin } from '/js/highlighter.js';
+  highlightWithin(document.body);
+
+  const root = document.documentElement;
+  const which = document.getElementById('which');
+  const show = () => { which.textContent = 'data-theme = ' + root.getAttribute('data-theme'); };
+  document.getElementById('toggle').addEventListener('click', () => {
+    root.setAttribute('data-theme',
+      root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    show();
+  });
+  show();
+</script>

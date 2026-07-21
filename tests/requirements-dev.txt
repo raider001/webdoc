@@ -1,0 +1,6 @@
+# Dev-only test dependencies for the Web Document Tool.
+# This is the project's ONLY third-party dependency, and it is dev-time only,
+# isolated in tests/. NO Node.js, NO npm, NO package.json anywhere: Playwright
+# is used purely through its Python binding.
+pytest
+pytest-playwright

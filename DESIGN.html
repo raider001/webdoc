@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Web Document Tool — Design Overview</title>
+<!-- No-flash theme resolution: runs before any painting -->
+<script>
+  (function () {
+    try {
+      var stored = localStorage.getItem('wd-design-theme');
+      var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+<style>
+  /* ---- Design tokens (the actual proposed palette; this doc dogfoods them) ---- */
+  :root, :root[data-theme="light"] {
+    --bg:#ffffff; --surface:#f6f7f9; --surface-2:#eceef1; --surface-sunk:#e6e8eb;
+    --text:#1b1e22; --muted:#5b636c; --faint:#8b939c;
+    --border:#d8dce1; --border-strong:#c2c8cf;
+    --accent:#2563eb; --accent-hover:#1d4ed8; --accent-contrast:#ffffff; --accent-soft:#e8f0fe;
+    --prereq:#2563eb; --recnext:#c2410c;
+    --code-bg:#f0f2f5; --code-text:#1b1e22; --code-border:#e0e3e8;
+    --focus-ring:#2563eb; --shadow:0 4px 16px rgba(16,24,40,.12); --scrim:rgba(16,24,40,.45);
+    --toc-w:250px; --content-max:760px; --radius:8px; --dur:160ms;
+  }
+  :root[data-theme="dark"] {
+    --bg:#0d1117; --surface:#161b22; --surface-2:#1c222b; --surface-sunk:#21262d;
+    --text:#e6edf3; --muted:#9aa4af; --faint:#6e7681;
+    --border:#2a313a; --border-strong:#3a424c;
+    --accent:#58a6ff; --accent-hover:#79b8ff; --accent-contrast:#0b1220; --accent-soft:#12263f;
+    --prereq:#58a6ff; --recnext:#f0883e;
+    --code-bg:#161b22; --code-text:#e6edf3; --code-border:#2a313a;
+    --focus-ring:#58a6ff; --shadow:0 6px 24px rgba(0,0,0,.5); --scrim:rgba(1,4,9,.6);
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  code, pre { font-family:ui-monospace, "Cascadia Code", "Consolas", monospace; }
+  code { background:var(--code-bg); border:1px solid var(--code-border); border-radius:4px; padding:.08em .38em; font-size:.88em; }
+  pre { background:var(--code-bg); border:1px solid var(--code-border); border-radius:var(--radius); padding:14px 16px; overflow-x:auto; font-size:13.5px; line-height:1.55; }
+  pre code { background:none; border:none; padding:0; }
+
+  /* ---- App shell ---- */
+  header.top {
+    position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:14px;
+    height:56px; padding:0 20px; background:var(--surface); border-bottom:1px solid var(--border);
+  }
+  header.top .brand { font-weight:700; font-size:16px; letter-spacing:.2px; }
+  header.top .tag { color:var(--muted); font-size:13px; }
+  header.top .spacer { flex:1; }
+  .tbtn {
+    display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 12px;
+    background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px;
+    font-size:13px; cursor:pointer;
+  }
+  .tbtn:hover { background:var(--surface-2); }
+
+  .layout { display:grid; grid-template-columns:var(--toc-w) 1fr; align-items:start; }
+  nav.toc {
+    position:sticky; top:56px; align-self:start; height:calc(100dvh - 56px); overflow:auto;
+    padding:22px 14px 40px 20px; border-right:1px solid var(--border); background:var(--surface);
+  }
+  nav.toc .cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+  nav.toc ol { list-style:none; margin:0; padding:0; }
+  nav.toc li { margin:1px 0; }
+  nav.toc a {
+    display:block; padding:5px 10px; border-radius:6px; color:var(--muted);
+    font-size:13.5px; border-left:2px solid transparent; line-height:1.35;
+  }
+  nav.toc a:hover { background:var(--surface-2); color:var(--text); text-decoration:none; }
+  nav.toc a.active { color:var(--text); background:var(--accent-soft); border-left-color:var(--accent); font-weight:600; }
+  nav.toc a .n { color:var(--faint); font-variant-numeric:tabular-nums; margin-right:6px; }
+  nav.toc a.active .n { color:var(--accent); }
+
+  main { min-width:0; padding:8px 0 90px; }
+  .wrap { max-width:var(--content-max); margin:0 auto; padding:0 28px; }
+  h1.doc-title { font-size:30px; line-height:1.2; margin:26px 0 6px; letter-spacing:-.01em; }
+  .lede { color:var(--muted); font-size:16.5px; margin:0 0 8px; }
+  section > h2 { font-size:22px; margin:44px 0 6px; padding-top:8px; letter-spacing:-.01em; }
+  section > h3 { font-size:17px; margin:26px 0 4px; }
+  .secn { color:var(--faint); font-variant-numeric:tabular-nums; margin-right:.5em; font-weight:600; }
+  h2 .secn { color:var(--accent); }
+  p { margin:10px 0; }
+  ul, ol { padding-left:22px; }
+  li { margin:4px 0; }
+  hr { border:none; border-top:1px solid var(--border); margin:38px 0; }
+
+  .callout { border:1px solid var(--border); border-left:3px solid var(--accent); background:var(--surface); border-radius:8px; padding:12px 16px; margin:16px 0; }
+  .callout.warn { border-left-color:var(--recnext); }
+  .callout .h { font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:4px; }
+  .callout.warn .h { color:var(--recnext); }
+
+  table.tbl { width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; }
+  table.tbl th, table.tbl td { border:1px solid var(--border); padding:8px 11px; text-align:left; vertical-align:top; }
+  table.tbl th { background:var(--surface-2); font-size:12.5px; }
+  table.tbl td code { font-size:12.5px; }
+
+  .figure { margin:20px 0 8px; }
+  .figure figcaption { color:var(--muted); font-size:13px; margin-top:8px; text-align:center; }
+  svg.wf { width:100%; height:auto; display:block; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg); }
+
+  /* ---- SVG wireframe theming ---- */
+  .wf .r-surface { fill:var(--surface); }
+  .wf .r-surface2 { fill:var(--surface-2); }
+  .wf .r-bg { fill:var(--bg); }
+  .wf .r-sunk { fill:var(--surface-sunk); }
+  .wf .ln { stroke:var(--border); fill:none; stroke-width:1; }
+  .wf .ln2 { stroke:var(--border-strong); fill:none; stroke-width:1.4; }
+  .wf .t { fill:var(--text); font:13px ui-sans-serif, system-ui, sans-serif; }
+  .wf .tb { fill:var(--text); font:600 13px ui-sans-serif, system-ui, sans-serif; }
+  .wf .tm { fill:var(--muted); font:11.5px ui-sans-serif, system-ui, sans-serif; }
+  .wf .tc { fill:var(--faint); font:600 11px ui-monospace, monospace; }
+  .wf .a-fill { fill:var(--accent); }
+  .wf .a-soft { fill:var(--accent-soft); }
+  .wf .a-stroke { stroke:var(--accent); fill:none; stroke-width:1.5; }
+  .wf .ico { fill:none; stroke:var(--text); stroke-width:1.5; }
+  .wf .edge-p { stroke:var(--prereq); fill:none; stroke-width:1.8; }
+  .wf .edge-n { stroke:var(--recnext); fill:none; stroke-width:1.8; stroke-dasharray:6 4; }
+  .wf .scrim { fill:var(--scrim); }
+  .wf .a-txt { fill:var(--accent); font:600 12px ui-sans-serif, system-ui, sans-serif; }
+
+  .decisions li { margin:10px 0; }
+  .pill { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); vertical-align:middle; }
+  .pill.rec { background:var(--accent-soft); color:var(--accent); }
+  .swatch { display:inline-block; width:13px; height:13px; border-radius:3px; border:1px solid var(--border-strong); vertical-align:-2px; margin-right:5px; }
+  footer.foot { border-top:1px solid var(--border); background:var(--surface); color:var(--muted); font-size:13px; padding:18px 28px; }
+
+  @media (max-width:860px) {
+    .layout { grid-template-columns:1fr; }
+    nav.toc { position:static; height:auto; border-right:none; border-bottom:1px solid var(--border); }
+  }
+  @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Web Document Tool</span>
+  <span class="tag">Design overview &amp; wireframes — for review</span>
+  <span class="spacer"></span>
+  <button class="tbtn" id="themeBtn" aria-pressed="false" title="Toggle day / night">
+    <span id="themeIcon">☾</span><span id="themeTxt">Night</span>
+  </button>
+</header>
+
+<div class="layout">
+  <!-- LEFT PANE: table of contents (dogfoods the concept, incl. injected numbers) -->
+  <nav class="toc" aria-label="On this page">
+    <p class="cap">On this page</p>
+    <ol id="tocList">
+      <li><a href="#overview"><span class="n">1</span>Overview &amp; goals</a></li>
+      <li><a href="#principles"><span class="n">2</span>Principles &amp; hard constraints</a></li>
+      <li><a href="#arch"><span class="n">3</span>System architecture</a></li>
+      <li><a href="#structure"><span class="n">4</span>Project structure</a></li>
+      <li><a href="#authoring"><span class="n">5</span>Authoring model &amp; metadata</a></li>
+      <li><a href="#markdown"><span class="n">6</span>Markdown engine (full CommonMark)</a></li>
+      <li><a href="#sanitize"><span class="n">7</span>HTML sanitization</a></li>
+      <li><a href="#numbering"><span class="n">8</span>Heading auto-numbering</a></li>
+      <li><a href="#shell"><span class="n">9</span>App shell &amp; navigation</a></li>
+      <li><a href="#wireframes"><span class="n">10</span>Wireframes</a></li>
+      <li><a href="#graph"><span class="n">11</span>The relationship graph</a></li>
+      <li><a href="#theme"><span class="n">12</span>Day / night theming</a></li>
+      <li><a href="#a11y"><span class="n">13</span>Responsive &amp; accessibility</a></li>
+      <li><a href="#testing"><span class="n">14</span>Testing (Playwright)</a></li>
+      <li><a href="#run"><span class="n">15</span>Build &amp; run</a></li>
+      <li><a href="#roadmap"><span class="n">16</span>Roadmap</a></li>
+      <li><a href="#decisions"><span class="n">17</span>Decisions — settled</a></li>
+      <li><a href="#requirements"><span class="n">18</span>Requirements traceability</a></li>
+    </ol>
+  </nav>
+
+  <!-- RIGHT PANE: the document -->
+  <main>
+    <div class="wrap">
+      <h1 class="doc-title">Web Document Tool</h1>
+      <p class="lede">A zero-dependency, static, richly-navigable documentation reader that turns a folder of Markdown files into a browsable site — with a hierarchical navigator, per-page contents, automatic section numbering, and a pannable/zoomable map of how the documents relate.</p>
+      <p class="lede" style="font-size:14px">This document describes the proposed design for your review. Nothing is built yet. Section&nbsp;17 lists the specific decisions I need from you before I start.</p>
+
+      <hr>
+
+      <section id="overview">
+        <h2><span class="secn">1</span>Overview &amp; goals</h2>
+        <p>You drop Markdown files into a folder. The tool presents them as a documentation website: a pop-out hamburger tree of the whole library, a two-pane reading view (contents on the left, rendered document on the right), automatic hierarchical section numbers, a day/night theme, and a separate visual "map" that draws each document as a box and connects them by the relationships declared in each document's metadata.</p>
+        <p>Core experiences:</p>
+        <ul>
+          <li><strong>Read</strong> — pick a document from the tree; read it rendered, with a live table of contents.</li>
+          <li><strong>Navigate the library</strong> — the hamburger drawer shows the whole document hierarchy.</li>
+          <li><strong>Understand the shape of the knowledge</strong> — the graph view shows prerequisites ("assumed knowledge") and suggested reading order ("recommended next") as a navigable diagram you can pan, zoom, and click through.</li>
+        </ul>
+      </section>
+
+      <section id="principles">
+        <h2><span class="secn">2</span>Principles &amp; hard constraints</h2>
+        <table class="tbl">
+          <tr><th>Constraint</th><th>Consequence for the design</th></tr>
+          <tr><td><strong>Zero third-party runtime dependencies</strong></td><td>Everything shipped to the browser is hand-written HTML, CSS, and vanilla JS. No frameworks, no CDN links, no Markdown/graph libraries. The Markdown parser, sanitizer, and graph layout are all ours.</td></tr>
+          <tr><td><strong>Effectively static pages</strong></td><td>The site is served by Python's built-in HTTP server (stdlib only). There is <strong>no build step</strong> — documents are fetched and rendered live in the browser. One <code>config.json</code> can point the server at <strong>several source folders at once</strong>, aggregating them into a single site.</td></tr>
+          <tr><td><strong>Full Markdown compliance</strong></td><td>The parser targets the <strong>CommonMark specification</strong> (not a subset) plus a defined set of GFM extensions, and is continuously verified against CommonMark's ~650-example conformance suite.</td></tr>
+          <tr><td><strong>Embedded HTML allowed, styling rejected</strong></td><td>Documents may contain raw HTML, but a sanitization layer strips all styling (inline <code>style</code>, <code>&lt;style&gt;</code>, <code>class</code>, presentational attributes) and all scripting.</td></tr>
+          <tr><td><strong>Playwright is the only third-party dep, dev-time only</strong></td><td>Used through its <strong>Python binding</strong> (<code>pytest-playwright</code>) — <strong>no Node, no npm, no <code>node_modules</code> anywhere</strong>. Tests live in an isolated <code>tests/</code> folder; the shipped <code>app/</code> gains no dependency of any kind. That boundary <em>is</em> the "zero-dependency" guarantee, and it's checkable.</td></tr>
+        </table>
+      </section>
+
+      <section id="arch">
+        <h2><span class="secn">3</span>System architecture</h2>
+        <p>The whole system is a pure pipeline from authored Markdown to rendered page. The single most important architectural rule is that <strong>the Markdown parser is a pure <code>string → HTML</code> function</strong> — metadata extraction, sanitization, and section numbering are all <em>layers around it</em>, never inside it. That boundary is what lets us claim (and measure) 100% CommonMark compliance while still stripping styling, injecting section numbers, and reading custom metadata.</p>
+        <pre><code>author writes:  one or more source folders (listed in config.json)
+        │        each file =  &lt;!--meta {JSON} --&gt;  +  CommonMark body
+        ▼
+Python built-in HTTP server  (serve.py, stdlib only — NO build step)
+        │        serves app/ + each source folder; JSON directory listings
+        ▼
+  ┌─────────────────────────── in the browser ───────────────────────────┐
+  │  fetch site config → discover .md per folder → fetch each document    │
+  │  strip JSON meta ──▶ tree, graph, all-docs search, "assumed / next"   │
+  │        │                                                              │
+  │        ▼  parse(body)      ← the CommonMark-compliant core (tested)   │
+  │   HTML string                                                         │
+  │        ▼  sanitize(dom)    ← allowlist: strip styling + scripting     │
+  │        ▼  numberHeadings + buildTOC   ← post-parse decoration         │
+  │        ▼  inject into the reading pane                                │
+  └───────────────────────────────────────────────────────────────────────┘</code></pre>
+        <h3>Discovery &amp; loading — no build step, served model</h3>
+        <p>The site runs behind Python's built-in HTTP server (<code>serve.py</code>, stdlib only — still zero third-party). There is <strong>no build step</strong>: the server serves files and answers directory listings; the browser discovers documents, fetches each one, strips its JSON metadata, and renders it. A single <code>config.json</code> can list <strong>several source folders</strong>, which the server mounts side by side and the app aggregates into one library.</p>
+        <table class="tbl">
+          <tr><th>Responsibility</th><th>Where it runs</th></tr>
+          <tr><td>Serve <code>app/</code> + each configured source folder as static files; return directory listings as JSON</td><td><code>serve.py</code> — does <strong>no</strong> Markdown/metadata parsing</td></tr>
+          <tr><td>Discover <code>.md</code> files, read JSON metadata, render Markdown, build tree / graph / search</td><td>The browser, client-side (per D1 &amp; D4)</td></tr>
+        </table>
+        <div class="callout">
+          <div class="h">Consequence of "no build step, served"</div>
+          <p>Because everything is fetched over HTTP, the app uses ES modules and normal <code>fetch()</code> — the <code>file://</code> restrictions that would have forced a build step and classic scripts simply don't apply. The trade-off: the browser fetches each document once on load to populate the tree, graph, and all-documents search (comfortable for tens–hundreds of docs). The server stays a dumb, config-driven file server.</p>
+        </div>
+      </section>
+
+      <section id="structure">
+        <h2><span class="secn">4</span>Project structure</h2>
+        <pre><code>Web_Doc/
+├─ config.json               # site config: title, SOURCE FOLDERS, default doc, theme
+├─ docs/                     # a default source folder (add more via config.json)
+│  ├─ getting-started.md     #   each file: &lt;!--meta {JSON}--&gt; + CommonMark body
+│  └─ concepts/
+│     ├─ graph-model.md
+│     └─ metadata-tags.md
+│
+├─ app/                      # SHIPPED static site (ES modules — served over HTTP)
+│  ├─ index.html
+│  ├─ css/app.css
+│  └─ js/
+│     ├─ main.js             # boot: read config, discover, route, render
+│     ├─ markdown.js         # hand-written CommonMark parser + GFM
+│     ├─ sanitize.js         # allowlist sanitizer (styling rejected)
+│     ├─ numbering.js        # heading numbers + TOC
+│     ├─ tree.js             # hamburger hierarchy (folders) + all-docs search
+│     ├─ graph.js            # relationship map: layout, pan/zoom, node search
+│     ├─ search.js           # in-document + all-documents indexes
+│     └─ router.js           # #/doc-id deep links + history
+│
+├─ serve.py                  # stdlib HTTP server: mounts app/ + each source folder,
+│                            #   static files + JSON directory listings. No build step.
+│
+├─ tests/                    # DEV-ONLY, never shipped (Python Playwright - no Node)
+│  ├─ requirements-dev.txt   # pytest + pytest-playwright  (pip, the only dep)
+│  ├─ conftest.py            # starts serve.py as a fixture
+│  └─ e2e/*.py               # Playwright tests via its Python binding
+│
+└─ README.md</code></pre>
+        <p>The dependency boundary is a <em>directory</em> boundary: <code>app/</code> has no <code>package.json</code> and no <code>node_modules</code>, so a reviewer can confirm "zero runtime deps" at a glance, and you can ship <code>app/</code> alone.</p>
+      </section>
+
+      <section id="authoring">
+        <h2><span class="secn">5</span>Authoring model &amp; metadata</h2>
+        <p>Each document is one <code>.md</code> file: a <strong>JSON</strong> metadata block at the very top, then a normal CommonMark body. The app <strong>strips the metadata block before a single byte reaches the parser</strong>, so it can never affect CommonMark compliance. It's wrapped in an HTML comment so that, even if a strip were ever missed, it stays invisible (a comment) rather than showing as text.</p>
+        <p>It captures exactly the fields you specified — title, a brief description, assumed knowledge (0..n), and recommended next pages (0..n). <code>assumes</code> and <code>next</code> reference <em>other documents by their id/slug</em>, which is what feeds the graph.</p>
+        <pre><code>&lt;!--meta
+{
+  "title": "Configuring the Widget Cache",
+  "description": "How to size, warm, and invalidate the on-disk widget cache.",
+  "assumes": ["installing-the-cli", "concepts/caching-model"],
+  "next": ["widget-cache-tuning", "troubleshooting/cold-starts"]
+}
+--&gt;
+
+# Overview
+
+The widget cache stores rendered widgets on disk so that repeated
+requests avoid recomputation. You can embed raw HTML here...
+
+&lt;div&gt;Raw HTML works.&lt;/div&gt;
+&lt;div style="color:red" class="flashy"&gt;Styling here is stripped.&lt;/div&gt;</code></pre>
+        <ul>
+          <li>Parsed with <code>JSON.parse</code> after stripping the <code>&lt;!--meta … --&gt;</code> wrapper — strict, zero-dependency, and no custom mini-parser to maintain.</li>
+          <li>A reference to a document that doesn't exist becomes a clearly-marked placeholder in the graph plus an entry in a diagnostics list — never a silent drop or a crash.</li>
+          <li>The document's <strong>id/slug</strong> is derived from its source folder + path (e.g. <code>concepts/caching-model.md</code> → <code>concepts/caching-model</code>), giving stable deep links like <code>#/concepts/caching-model</code>. Ids are namespaced per source folder so multiple mounted folders can't collide.</li>
+        </ul>
+      </section>
+
+      <section id="markdown">
+        <h2><span class="secn">6</span>Markdown engine (full CommonMark)</h2>
+        <p>"Fully compliant" is defined as a <em>measurable number</em>: for every example in CommonMark's machine-readable <code>spec.json</code> (~650 cases), <code>normalize(parse(md)) === normalize(expected)</code>. Target: 100%. The suite runs headlessly and gates every change, so compliance can't silently regress.</p>
+        <p>Full compliance forces the spec's own <strong>two-phase architecture</strong> — a single-regex-per-line translator provably fails hundreds of cases (nested emphasis like <code>**a *b** c*</code>, code-span vs emphasis precedence, reference links, tight/loose lists, the 7 HTML-block types):</p>
+        <ol>
+          <li><strong>Block phase</strong> — a line-driven state machine builds the block tree (paragraphs, ATX + setext headings, fenced &amp; indented code, block quotes, lists with lazy continuation, HTML blocks, thematic breaks, link reference definitions). Link-reference definitions are fully collected here <em>before</em> inline parsing, because a reference can point forward.</li>
+          <li><strong>Inline phase</strong> — over each leaf block's text: code spans, autolinks and raw inline HTML (consumed as opaque, giving correct precedence), then emphasis/strong/links resolved with the spec's <strong>delimiter-stack</strong> algorithm.</li>
+        </ol>
+        <h3>GFM extensions</h3>
+        <table class="tbl">
+          <tr><th>Include</th><th>Defer</th></tr>
+          <tr><td>Tables (a product requirement), strikethrough <code>~~…~~</code>, task-list items <code>- [ ]</code>, extended autolinks (bare URLs), GFM's disallowed-raw-HTML filter.</td><td>Footnotes, <code>&lt;details&gt;</code> sugar, emoji shortcodes, @-mentions — disproportionate cost for a docs tool; can be added later.</td></tr>
+        </table>
+        <p>Strikethrough is nearly free once the delimiter stack exists (<code>~</code> is just another delimiter). GFM cases are tracked in a <em>separate</em> corpus so a table bug can't mask a CommonMark regression; we report two numbers.</p>
+        <div class="callout warn">
+          <div class="h">Honest cost</div>
+          <p>A from-scratch compliant parser is real engineering — on the order of a few thousand lines with a long tail of edge cases. It's justified because the zero-dependency rule takes every existing library off the table, the complexity is bounded and well-documented, and the conformance suite means we always know exactly where we stand and never guess whether we're "done." We can ship useful at a high-90s pass rate and ratchet toward 100%.</p>
+        </div>
+
+        <h3>Syntax highlighting</h3>
+        <p>Fenced code blocks are highlighted with <strong>hand-written, zero-dependency tokenizers</strong> — no Prism, no highlight.js. A fenced block's info string (e.g. <code>```python</code>) becomes <code>class="language-python"</code> on the <code>&lt;code&gt;</code> element, exactly as CommonMark/GFM prescribe (so the compliance suite still passes on raw output). Highlighting then runs as a <strong>post-sanitize, post-numbering DOM decoration</strong>: it reads the language, tokenizes the code's text, and wraps tokens in trusted <code>&lt;span class="tok-…"&gt;</code> elements — the same layering pattern as heading numbers.</p>
+        <p><strong>Languages at launch:</strong> Python, Robot Framework, Makefile, shell, and Java, plus a generic fallback (strings / comments / numbers) for anything else and untagged blocks. Each is a small state-machine tokenizer; token colours are theme tokens, so highlighting adapts to day and night. Because highlighting operates only on already-sanitized text and emits only span wrappers, it adds no attack surface.</p>
+      </section>
+
+      <section id="sanitize">
+        <h2><span class="secn">7</span>HTML sanitization — styling rejected</h2>
+        <p>CommonMark deliberately passes raw HTML through. Your requirement — HTML allowed, <em>all styling rejected</em> — is satisfied by a <strong>separate DOM-based sanitizer</strong> that runs after parsing and before injection. Because it's an app policy layer, the conformance suite runs against the <em>unsanitized</em> parser output, so the sanitizer can never lower the compliance score.</p>
+        <p>It parses the HTML into an inert document (no scripts run, no resources load), then walks it with a closed <strong>allowlist</strong> (deny by default):</p>
+        <table class="tbl">
+          <tr><th>Rule</th><th>Effect</th></tr>
+          <tr><td>Drop <code>style</code> attributes; remove <code>&lt;style&gt;</code> subtrees</td><td>Kills all inline &amp; embedded styling (the core requirement)</td></tr>
+          <tr><td>Drop <code>class</code> attributes</td><td>No author-controlled styling hooks (our own numbering classes are added <em>after</em> sanitizing, so they're trusted)</td></tr>
+          <tr><td>Drop every <code>on*</code> handler; remove <code>&lt;script&gt;</code></td><td>Event-handler &amp; script XSS</td></tr>
+          <tr><td>Drop presentational attrs (<code>align, bgcolor, color, width, height, border…</code>)</td><td>Legacy styling</td></tr>
+          <tr><td>URL scheme allowlist on <code>href</code>/<code>src</code>: <code>http(s)</code>, <code>mailto</code>, relative/anchor only</td><td>Blocks <code>javascript:</code>, <code>vbscript:</code>, <code>data:</code>, obfuscated variants</td></tr>
+          <tr><td>Allowed tags only (headings, <code>p, ul/ol/li, a, img, code, pre, blockquote, table…</code>, task-list <code>input[type=checkbox][disabled]</code>); dangerous elements (<code>iframe, object, embed, form, base, meta, svg</code>) removed as subtrees</td><td>Structure preserved, attack surface removed</td></tr>
+        </table>
+        <p>DOM-based (not regex) because a regex sanitizer over raw HTML is notoriously bypassable. This is security-critical code, so it gets its own XSS payload test corpus asserting nothing dangerous survives — and because it's app-layer, we can harden it without ever touching the compliance number.</p>
+        <p><strong>One narrow, validated exception:</strong> the sanitizer preserves a <code>class="language-…"</code> value on <code>&lt;code&gt;</code>/<code>&lt;pre&gt;</code> elements (and strips every other class, everywhere). This is a semantic language hint, not a styling hook — authors still cannot supply CSS (<code>&lt;style&gt;</code> and inline <code>style</code> are gone), so nothing about "styling is rejected" changes; it simply lets the syntax highlighter (§6) pick the right grammar.</p>
+      </section>
+
+      <section id="numbering">
+        <h2><span class="secn">8</span>Heading auto-numbering</h2>
+        <p>Your Markdown contains no numbers. The renderer injects hierarchical numbers (<code>1</code>, <code>1.1</code>, <code>1.2.1</code>, <code>2</code>…) for every heading <code>h1</code>–<code>h6</code>, in both the rendered content and the left-pane contents — as a <strong>post-parse decoration</strong> on the sanitized DOM, so the Markdown is never mutated and compliance is untouched. (This very page is numbered by exactly this scheme.)</p>
+        <pre><code>counters = [0,0,0,0,0,0]                 // one slot per h1..h6
+for each heading of level L in document order:
+    counters[L-1] += 1                   // bump this level
+    for d in L..5: counters[d] = 0       // reset deeper levels
+    for k in 0..L-1:                      // graceful skip (h1 → h3):
+        if counters[k] == 0: counters[k] = 1   //   fill implied ancestors
+    label = counters[0..L-1].join('.')   // e.g. "1.2.1"
+    prepend label to heading; give heading a stable slug id
+    toc.push({ level:L, number:label, text, id })</code></pre>
+        <p>Content numbering and TOC numbering come from a <em>single pass over the same DOM</em> using the same ids, so they can never drift out of sync, and every TOC entry links to its identically-numbered heading.</p>
+      </section>
+
+      <section id="shell">
+        <h2><span class="secn">9</span>App shell &amp; navigation</h2>
+        <p>A deliberately simple shell: a header, a footer, and a contents section that is a horizontal two-pane split. There are <strong>three distinct navigation surfaces</strong>, and keeping them distinct is important:</p>
+        <table class="tbl">
+          <tr><th>Surface</th><th>Scope</th><th>Navigates</th><th>Built from</th></tr>
+          <tr><td><strong>Hamburger tree</strong> (pop-out drawer)</td><td>Whole library</td><td>Between documents</td><td>The <code>docs/</code> folder hierarchy</td></tr>
+          <tr><td><strong>Left-pane contents</strong> (TOC)</td><td>Current document</td><td>Within the page (scrolls to a heading)</td><td>The current doc's headings + injected numbers</td></tr>
+          <tr><td><strong>Graph view</strong> (overlay)</td><td>Whole library</td><td>Between documents, spatially</td><td>Metadata edges: <code>assumes</code> + <code>next</code></td></tr>
+        </table>
+        <p>Plain-language labels bake the distinction into the UI: hamburger = <em>"All documents"</em>, left pane = <em>"On this page"</em>, graph = <em>"Map"</em>. The header carries the site title, the hamburger button (left), and a right-hand cluster with the graph toggle and the theme toggle. The footer carries, straight from the current document's metadata, its <em>assumed-knowledge</em> links (read first) and its <em>recommended-next</em> links — each of which may be several.</p>
+        <p><strong>Search (D6) lives in three places, each scoped to its surface:</strong> an <em>in-document</em> search in the reading pane (find &amp; jump within the current doc), an <em>all-documents</em> search in the hamburger drawer (filters the whole library by title + content), and a <em>node</em> search in the graph / mini-map (locates a document box and centers it).</p>
+      </section>
+
+      <section id="wireframes">
+        <h2><span class="secn">10</span>Wireframes</h2>
+
+        <figure class="figure">
+          <svg class="wf" viewBox="0 0 1000 600" role="img" aria-label="Main reading view wireframe">
+            <!-- header -->
+            <rect class="r-surface" x="0" y="0" width="1000" height="50"/>
+            <line class="ln" x1="0" y1="50" x2="1000" y2="50"/>
+            <rect class="ln" x="16" y="13" width="24" height="24" rx="5"/>
+            <line class="ico" x1="22" y1="21" x2="34" y2="21"/><line class="ico" x1="22" y1="25" x2="34" y2="25"/><line class="ico" x1="22" y1="29" x2="34" y2="29"/>
+            <text class="tb" x="52" y="30">Doc-Set Title</text>
+            <text class="tm" x="165" y="30">Guides › Setup › Windows</text>
+            <rect class="ln" x="720" y="13" width="150" height="24" rx="6"/><text class="tm" x="730" y="30">search…</text>
+            <rect class="ln" x="884" y="13" width="40" height="24" rx="6"/><text class="t" x="898" y="30">◱</text>
+            <rect class="ln" x="936" y="13" width="48" height="24" rx="6"/><text class="t" x="950" y="30">◐</text>
+            <!-- left toc -->
+            <rect class="r-surface" x="0" y="50" width="250" height="500"/>
+            <line class="ln" x1="250" y1="50" x2="250" y2="550"/>
+            <text class="tm" x="20" y="82">ON THIS PAGE</text>
+            <rect class="a-soft" x="12" y="96" width="226" height="26" rx="5"/><rect class="a-fill" x="12" y="96" width="3" height="26"/>
+            <text class="tb" x="24" y="113"><tspan class="a-txt">1</tspan>  Overview</text>
+            <text class="t" x="24" y="141"><tspan class="tc">2</tspan>  Requirements</text>
+            <text class="t" x="24" y="169"><tspan class="tc">3</tspan>  Installation</text>
+            <text class="tm" x="44" y="196"><tspan class="tc">3.1</tspan>  Windows</text>
+            <text class="t" x="24" y="224"><tspan class="tc">4</tspan>  Verifying</text>
+            <text class="t" x="24" y="252"><tspan class="tc">5</tspan>  Troubleshooting</text>
+            <text class="tm" x="20" y="520">Contents scrolls independently ↕</text>
+            <!-- right content -->
+            <rect class="r-bg" x="250" y="50" width="750" height="500"/>
+            <rect class="r-surface" x="410" y="74" width="430" height="452" rx="6" opacity="0.35"/>
+            <text class="tb" x="430" y="112" style="font-size:20px"><tspan class="a-txt">1</tspan>  Document Title</text>
+            <line class="ln2" x1="430" y1="146" x2="820" y2="146"/><line class="ln2" x1="430" y1="164" x2="820" y2="164"/><line class="ln2" x1="430" y1="182" x2="740" y2="182"/>
+            <text class="tb" x="430" y="228"><tspan class="a-txt">1.1</tspan>  A section heading</text>
+            <line class="ln2" x1="430" y1="252" x2="820" y2="252"/><line class="ln2" x1="430" y1="270" x2="780" y2="270"/>
+            <rect class="r-surface2" x="430" y="292" width="390" height="86" rx="6"/><text class="tc" x="444" y="320">```  fenced code block  ```</text>
+            <text class="tm" x="430" y="512">Only this pane scrolls · content max-width ~760px, centered</text>
+            <!-- footer -->
+            <rect class="r-surface" x="0" y="550" width="1000" height="50"/>
+            <line class="ln" x1="0" y1="550" x2="1000" y2="550"/>
+            <text class="tm" x="16" y="568">‹ ASSUMED KNOWLEDGE</text>
+            <text class="a-txt" x="16" y="586">Setup · CLI Basics</text>
+            <text class="tm" x="700" y="568">RECOMMENDED NEXT ›</text>
+            <text class="a-txt" x="700" y="586">Tuning · Cold-starts</text>
+          </svg>
+          <figcaption>(A) Main reading view — header, two-pane (contents + rendered doc), footer. Numbers are injected, not authored.</figcaption>
+        </figure>
+
+        <figure class="figure">
+          <svg class="wf" viewBox="0 0 1000 600" role="img" aria-label="Hamburger document tree drawer wireframe">
+            <rect class="r-surface" x="0" y="0" width="1000" height="50"/><line class="ln" x1="0" y1="50" x2="1000" y2="50"/>
+            <rect class="ln" x="16" y="13" width="24" height="24" rx="5"/><line class="ico" x1="23" y1="20" x2="33" y2="30"/><line class="ico" x1="33" y1="20" x2="23" y2="30"/>
+            <text class="tb" x="52" y="30">Doc-Set Title</text>
+            <rect class="ln" x="936" y="13" width="48" height="24" rx="6"/><text class="t" x="950" y="30">◐</text>
+            <!-- scrim over rest -->
+            <rect class="scrim" x="320" y="50" width="680" height="500"/>
+            <text class="tm" x="560" y="300">scrim — click to close · Esc · focus trapped in drawer</text>
+            <!-- drawer -->
+            <rect class="r-surface" x="0" y="50" width="320" height="500"/><line class="ln2" x1="320" y1="50" x2="320" y2="550"/>
+            <text class="tm" x="20" y="84">ALL DOCUMENTS</text>
+            <text class="t" x="292" y="84">✕</text>
+            <rect class="ln" x="20" y="98" width="280" height="26" rx="6"/><text class="tm" x="30" y="115">filter docs…</text>
+            <text class="t" x="24" y="152">▾ 📁 Getting Started</text>
+            <text class="tm" x="52" y="178">• Introduction</text>
+            <text class="tm" x="52" y="202">• Install</text>
+            <text class="t" x="24" y="228">▾ 📁 Guides</text>
+            <text class="t" x="52" y="254">▾ 📁 Setup</text>
+            <text class="tm" x="80" y="280">• macOS</text>
+            <rect class="a-soft" x="20" y="290" width="280" height="24" rx="5"/><rect class="a-fill" x="20" y="290" width="3" height="24"/>
+            <text class="tb" x="80" y="307"><tspan class="a-txt">‣ Windows</tspan></text>
+            <text class="tm" x="80" y="332">• Linux</text>
+            <text class="t" x="24" y="360">▸ 📁 Reference</text>
+            <text class="t" x="24" y="386">▸ 📁 API</text>
+            <line class="ln" x1="20" y1="404" x2="300" y2="404"/>
+            <rect class="ln" x="20" y="416" width="170" height="28" rx="6"/><text class="a-txt" x="34" y="435">◱ Open graph view</text>
+            <text class="tm" x="20" y="520">tree = docs/ folder hierarchy</text>
+            <rect class="r-surface" x="0" y="550" width="1000" height="50"/><line class="ln" x1="0" y1="550" x2="1000" y2="550"/>
+          </svg>
+          <figcaption>(B) Hamburger drawer — the whole-library tree slides over the reading view. On wide screens it can optionally be "pinned" as a third column instead of overlaying.</figcaption>
+        </figure>
+
+        <figure class="figure">
+          <svg class="wf" viewBox="0 0 1000 600" role="img" aria-label="Document relationship graph view wireframe">
+            <defs>
+              <marker id="ah-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--prereq)"/></marker>
+              <marker id="ah-n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--recnext)"/></marker>
+            </defs>
+            <rect class="r-surface" x="0" y="0" width="1000" height="50"/><line class="ln" x1="0" y1="50" x2="1000" y2="50"/>
+            <rect class="ln" x="16" y="13" width="24" height="24" rx="5"/>
+            <line class="ico" x1="22" y1="21" x2="34" y2="21"/><line class="ico" x1="22" y1="25" x2="34" y2="25"/><line class="ico" x1="22" y1="29" x2="34" y2="29"/>
+            <text class="tb" x="52" y="30">Doc-Set Title</text>
+            <rect class="a-soft" x="884" y="13" width="40" height="24" rx="6"/><rect class="a-stroke" x="884" y="13" width="40" height="24" rx="6"/><text class="a-txt" x="896" y="30">◱</text>
+            <rect class="ln" x="936" y="13" width="48" height="24" rx="6"/><text class="t" x="950" y="30">◐</text>
+            <!-- canvas -->
+            <rect class="r-bg" x="0" y="50" width="1000" height="550"/>
+            <!-- edges -->
+            <path class="edge-p" d="M300,140 C300,175 300,175 300,205" marker-end="url(#ah-p)"/>
+            <path class="edge-p" d="M360,120 C480,140 520,150 585,190" marker-end="url(#ah-p)"/>
+            <path class="edge-p" d="M300,265 C300,300 300,300 300,335" marker-end="url(#ah-p)"/>
+            <path class="edge-n" d="M420,235 C520,240 560,245 585,235" marker-end="url(#ah-n)"/>
+            <path class="edge-n" d="M660,270 C680,320 660,340 545,375" marker-end="url(#ah-n)"/>
+            <!-- nodes -->
+            <g>
+              <rect class="r-surface ln2" x="220" y="90" width="160" height="50" rx="8" stroke="var(--border-strong)"/>
+              <text class="tb" x="236" y="112">Getting Started</text><text class="tm" x="236" y="130">Open your first doc</text>
+            </g>
+            <g>
+              <rect class="r-surface ln2" x="220" y="205" width="160" height="50" rx="8" stroke="var(--border-strong)"/>
+              <text class="tb" x="236" y="227">Core Concepts</text><text class="tm" x="236" y="245">The mental model</text>
+            </g>
+            <g>
+              <rect class="a-soft" x="220" y="335" width="160" height="50" rx="8"/><rect class="a-stroke" x="220" y="335" width="160" height="50" rx="8"/>
+              <text class="tb" x="236" y="357">Setup — Windows</text><text class="tm" x="236" y="375">you are here</text>
+            </g>
+            <g>
+              <rect class="r-surface ln2" x="585" y="190" width="160" height="50" rx="8" stroke="var(--border-strong)"/>
+              <text class="tb" x="601" y="212">Guides</text><text class="tm" x="601" y="230">Task walk-throughs</text>
+            </g>
+            <g>
+              <rect class="ln" x="585" y="360" width="160" height="50" rx="8" stroke-dasharray="5 4"/>
+              <text class="tm" x="601" y="382">⚠ missing: tuning</text><text class="tc" x="601" y="399">referenced, not found</text>
+            </g>
+            <!-- legend -->
+            <rect class="r-surface" x="16" y="470" width="250" height="70" rx="8" stroke="var(--border)"/>
+            <line class="edge-p" x1="30" y1="492" x2="66" y2="492" marker-end="url(#ah-p)"/><text class="tm" x="76" y="496">prerequisite (assumes)</text>
+            <line class="edge-n" x1="30" y1="516" x2="66" y2="516" marker-end="url(#ah-n)"/><text class="tm" x="76" y="520">recommended next</text>
+            <!-- zoom controls -->
+            <rect class="r-surface" x="16" y="556" width="140" height="34" rx="8" stroke="var(--border)"/>
+            <text class="t" x="30" y="578">＋</text><text class="t" x="66" y="578">－</text><text class="t" x="100" y="578">⤢ fit</text>
+            <!-- mini map -->
+            <rect class="r-surface" x="820" y="470" width="164" height="110" rx="8" stroke="var(--border)"/><text class="tm" x="834" y="490">mini-map</text>
+            <rect class="a-stroke" x="856" y="500" width="60" height="40"/>
+          </svg>
+          <figcaption>(C) Graph view — each document is a box; solid arrows are prerequisites (<code>assumes</code>), dashed arrows are recommended-next. Pan by dragging, zoom at the cursor, click a box to open it. Colour + dash distinguish edge kinds (colour-blind safe); a dangling reference shows as a marked placeholder.</figcaption>
+        </figure>
+
+        <figure class="figure">
+          <svg class="wf" viewBox="0 0 380 680" role="img" aria-label="Mobile layout wireframe" style="max-width:360px;margin:0 auto">
+            <rect class="r-surface" x="0" y="0" width="380" height="48"/><line class="ln" x1="0" y1="48" x2="380" y2="48"/>
+            <rect class="ln" x="12" y="12" width="24" height="24" rx="5"/><line class="ico" x1="18" y1="20" x2="30" y2="20"/><line class="ico" x1="18" y1="24" x2="30" y2="24"/><line class="ico" x1="18" y1="28" x2="30" y2="28"/>
+            <text class="tb" x="46" y="30">Doc Title</text>
+            <rect class="ln" x="250" y="12" width="24" height="24" rx="5"/><text class="t" x="257" y="29">⌕</text>
+            <rect class="a-soft" x="282" y="12" width="24" height="24" rx="5"/><text class="a-txt" x="288" y="29">◱</text>
+            <rect class="ln" x="314" y="12" width="24" height="24" rx="5"/><text class="t" x="320" y="29">◐</text>
+            <!-- on this page disclosure -->
+            <rect class="r-surface2" x="0" y="48" width="380" height="38"/><line class="ln" x1="0" y1="86" x2="380" y2="86"/>
+            <text class="t" x="16" y="72">▸ On this page</text><text class="tm" x="300" y="72">tap ▾</text>
+            <!-- content -->
+            <text class="tb" x="16" y="126" style="font-size:18px"><tspan class="a-txt">1</tspan>  Document Title</text>
+            <line class="ln2" x1="16" y1="150" x2="364" y2="150"/><line class="ln2" x1="16" y1="170" x2="364" y2="170"/><line class="ln2" x1="16" y1="190" x2="300" y2="190"/>
+            <text class="tb" x="16" y="232"><tspan class="a-txt">1.1</tspan>  Section heading</text>
+            <line class="ln2" x1="16" y1="256" x2="364" y2="256"/><line class="ln2" x1="16" y1="276" x2="340" y2="276"/>
+            <rect class="r-surface2" x="16" y="298" width="348" height="70" rx="6"/><text class="tc" x="30" y="322">``` code — scrolls → ```</text>
+            <line class="ln2" x1="16" y1="404" x2="364" y2="404"/><line class="ln2" x1="16" y1="424" x2="364" y2="424"/><line class="ln2" x1="16" y1="444" x2="280" y2="444"/>
+            <!-- footer -->
+            <line class="ln" x1="0" y1="600" x2="380" y2="600"/><rect class="r-surface" x="0" y="600" width="380" height="80"/>
+            <text class="a-txt" x="16" y="632">‹ Prev: Installation</text>
+            <text class="a-txt" x="16" y="662">Next: Verify ›</text>
+          </svg>
+          <figcaption>(D) Mobile — single column; the contents collapse into an "On this page" disclosure; the tree and graph become full-screen overlays with touch pan/pinch.</figcaption>
+        </figure>
+      </section>
+
+      <section id="graph">
+        <h2><span class="secn">11</span>The relationship graph</h2>
+        <p>This is the most algorithmically interesting part, and it's built entirely by hand. It draws the documents as boxes and the metadata relationships as directed edges, then lets you pan, zoom, and click through.</p>
+        <ul>
+          <li><strong>Substrate: SVG.</strong> At our scale (tens to low-hundreds of docs) SVG gives free hit-testing (every box is a real element with a click handler), crisp text at any zoom, and declarative edges/arrowheads — exactly the things Canvas would make us reimplement.</li>
+          <li><strong>Layout: a hand-rolled layered (Sugiyama-lite) algorithm.</strong> Edges flow in the learning direction (prerequisite → dependent). Stages: break any accidental cycles from bad metadata (drawn, but flagged, never hidden) → assign layers by longest-path → order within layers by the barycenter heuristic to reduce crossings → assign coordinates → route edges. Disconnected clusters are laid out separately and packed. Deterministic, so the same docs always produce the same map (important for you <em>and</em> for tests).</li>
+          <li><strong>Pan/zoom: one transform on the SVG viewport group.</strong> Wheel-zoom is anchored at the cursor (the point under the pointer stays put), drag-to-pan uses pointer capture, zoom is clamped, and a "fit to view" button frames everything. Arriving from a document centers that document's box.</li>
+          <li><strong>Edges:</strong> smooth bezier curves with arrowheads; prerequisites solid/cool, recommended-next dashed/warm — distinguished by <em>both</em> colour and dash so they read in grayscale and for colour-blind users.</li>
+          <li><strong>"Smarts":</strong> reciprocal edges are de-duplicated; hovering a box highlights its neighbourhood and dims the rest; optionally it can highlight the full set of transitive prerequisites ("everything to read first"); a reference to a missing document becomes a clearly-marked placeholder plus an entry in a diagnostics list — the graph doubles as a link-checker.</li>
+        </ul>
+      </section>
+
+      <section id="theme">
+        <h2><span class="secn">12</span>Day / night theming</h2>
+        <p>All colour is expressed as CSS custom properties. <code>&lt;html data-theme="light|dark"&gt;</code> selects the palette; an inline head script resolves the theme <em>before first paint</em> (no flash), preferring a saved choice, then the OS <code>prefers-color-scheme</code>. The header toggle flips it and persists to <code>localStorage</code>. Every token pair meets WCAG AA contrast. <strong>This document uses the real proposed tokens</strong> — the toggle in the header (top-right) switches them live. Sample:</p>
+        <table class="tbl">
+          <tr><th>Token</th><th>Light</th><th>Dark</th><th>Role</th></tr>
+          <tr><td><code>--bg</code></td><td><span class="swatch" style="background:#ffffff"></span>#ffffff</td><td><span class="swatch" style="background:#0d1117"></span>#0d1117</td><td>App background</td></tr>
+          <tr><td><code>--surface</code></td><td><span class="swatch" style="background:#f6f7f9"></span>#f6f7f9</td><td><span class="swatch" style="background:#161b22"></span>#161b22</td><td>Panes, header, footer</td></tr>
+          <tr><td><code>--text</code></td><td><span class="swatch" style="background:#1b1e22"></span>#1b1e22</td><td><span class="swatch" style="background:#e6edf3"></span>#e6edf3</td><td>Body text</td></tr>
+          <tr><td><code>--accent</code></td><td><span class="swatch" style="background:#2563eb"></span>#2563eb</td><td><span class="swatch" style="background:#58a6ff"></span>#58a6ff</td><td>Links, active items, focus</td></tr>
+          <tr><td><code>--prereq</code> / <code>--recnext</code></td><td><span class="swatch" style="background:#2563eb"></span>/<span class="swatch" style="background:#c2410c"></span></td><td><span class="swatch" style="background:#58a6ff"></span>/<span class="swatch" style="background:#f0883e"></span></td><td>Graph edge kinds</td></tr>
+        </table>
+        <p>The full set adds surfaces, borders, muted/faint text, code colours, focus ring, shadow, and scrim — plus non-colour tokens (pane widths, radius, durations). New colour only ever enters by adding a token; no raw hex in component CSS.</p>
+      </section>
+
+      <section id="a11y">
+        <h2><span class="secn">13</span>Responsive &amp; accessibility</h2>
+        <ul>
+          <li><strong>Responsive:</strong> ≥1024px two-pane; 640–1023px the contents narrow or collapse to a disclosure; &lt;640px a single column with the contents as an "On this page" disclosure and full-screen overlays for the tree and graph.</li>
+          <li><strong>The tree is a real ARIA tree</strong> (<code>role="tree"</code>/<code>treeitem</code>, roving tabindex, arrow-key navigation, <code>aria-expanded</code>, <code>aria-current="page"</code>).</li>
+          <li><strong>Focus management:</strong> opening the drawer or graph traps focus and returns it to the trigger on close; switching documents moves focus to the new <code>h1</code> and announces via a polite live region.</li>
+          <li><strong>Motion &amp; contrast:</strong> all transitions respect <code>prefers-reduced-motion</code>; a visible focus ring on every control in both themes; a skip-to-content link.</li>
+        </ul>
+      </section>
+
+      <section id="testing">
+        <h2><span class="secn">14</span>Testing (Playwright)</h2>
+        <p>Tests use <strong>Playwright through its Python binding</strong> (<code>pytest-playwright</code>) — <strong>no Node, no npm</strong>, keeping the whole toolchain to Python + a browser. They live only in <code>tests/</code>; Chromium installs outside the repo via <code>playwright install</code>. Tests run over HTTP against <code>serve.py</code> (started as a fixture, bound to <code>127.0.0.1</code> for a stable origin). Two test streams:</p>
+        <ul>
+          <li><strong>Compliance harness:</strong> a vanilla-JS page loads the parser and runs every vendored CommonMark <code>spec.json</code> case (and a separate GFM corpus) <em>in the browser</em>, diffs normalized HTML, and writes the pass-rate to the DOM; a Playwright test opens it and asserts the rate (ratchet: it can only go up). The parser executes in a real browser engine — never Node.</li>
+          <li><strong>End-to-end suite:</strong> tree builds correctly; a doc renders; every Markdown feature renders; the sanitizer <em>positively neutralizes</em> styling/scripts (assert <code>window.__pwned</code> stays undefined and no dialog fires, not merely that a tag is absent); metadata parses; heading numbers match between content and TOC; TOC links scroll; theme toggle persists across reload; tree navigation updates the URL and deep-links work; the graph renders nodes+edges, pans, zooms, and node-clicks open the right doc; missing references degrade gracefully.</li>
+        </ul>
+        <p>The graph is made deterministic and non-flaky by design: a <code>?test=1</code> mode disables animation and uses fixed layout, and the transform state is exposed as <code>data-scale</code>/<code>data-tx</code>/<code>data-ty</code> with stable <code>data-node-id</code>s, so tests assert exact numbers instead of pixel-diffing. A <code>data-app-ready</code> flag gates every assertion so nothing races startup. The demo corpus <em>is</em> the test fixture set (a normal doc, a Markdown kitchen-sink, an XSS-payload doc, a deep-nesting doc, and a broken-links doc), so the tool ships with meaningful sample content.</p>
+      </section>
+
+      <section id="run">
+        <h2><span class="secn">15</span>Build &amp; run</h2>
+        <pre><code># Configure sources once in config.json (one OR MANY folders):
+#   { "siteTitle": "My Docs",
+#     "sources": [ { "name": "Guides", "path": "docs" },
+#                  { "name": "API",    "path": "../service/api-docs" } ],
+#     "defaultDoc": "Guides/getting-started" }
+
+# Run it — there is NO build step:
+python serve.py                  # serves app/ + every configured source
+#   → open http://127.0.0.1:8000
+
+# Edit any .md and just refresh — nothing to rebuild.
+
+# Test (dev-only; Python Playwright, NO Node/npm):
+cd tests
+pip install -r requirements-dev.txt   # pytest + pytest-playwright
+playwright install chromium            # browser binary (installed outside the repo)
+pytest</code></pre>
+      </section>
+
+      <section id="roadmap">
+        <h2><span class="secn">16</span>Suggested build order</h2>
+        <ol>
+          <li><strong>Skeleton + shell + theming</strong> — header/footer/two-pane, tokens, day/night toggle, no-flash script. <span class="pill rec">✓ done</span></li>
+          <li><strong>Sanitizer + numbering + TOC + discovery + tree + router + multi-link footer</strong> — the app layers around the parser, client-side discovery, and navigation. <span class="pill rec">✓ done</span></li>
+          <li><strong>Full CommonMark engine</strong> — block phase, inline phase (delimiter stack), GFM; ratchet the pass-rate to 100% against <code>spec.json</code>. The largest single piece; it also tags fenced code with its language for highlighting. <span class="pill">in progress</span></li>
+          <li><strong>Syntax highlighting</strong> — hand-written, zero-dependency tokenizers for Python, Robot Framework, Makefile, shell, and Java (plus a plain fallback), applied as a post-sanitize decoration on fenced code blocks. See §6. <span class="pill">in progress</span></li>
+          <li><strong>Graph view</strong> — layered layout, pan/zoom, edge styling, node search, smarts. <span class="pill">in progress</span></li>
+          <li><strong>All-documents search</strong> — the drawer's library-wide search index.</li>
+          <li><strong>Playwright suite + demo corpus</strong> — wired throughout (incl. the <code>spec.json</code> conformance run), then hardened.</li>
+          <li><strong>Requirements traceability</strong> — requirement blocks, the global trace index, requirement cards, and the traceability views (graph mode, matrix, coverage dashboard). See §18.</li>
+        </ol>
+        <p>Steps 3–5 are being built in parallel; each step is independently demonstrable, so you can review as we go rather than all at the end.</p>
+      </section>
+
+      <section id="decisions" class="decisions">
+        <h2><span class="secn">17</span>Decisions — settled</h2>
+        <p>All six decisions are resolved (your answers in brackets); this section records the agreed direction that the rest of the document now reflects.</p>
+        <ol>
+          <li><strong>D1 — No build step; served by the built-in Python server.</strong> <span class="pill rec">✓ served, no build</span> The app is fetched and rendered live; <code>serve.py</code> is a stdlib, config-driven static file server. <strong>Added at your request:</strong> it serves <em>multiple source folders</em> declared in <code>config.json</code>, aggregated into one library.</li>
+          <li><strong>D2 — JSON metadata.</strong> <span class="pill rec">✓ JSON</span> A <code>&lt;!--meta { … } --&gt;</code> JSON block at the top of each file (see §5).</li>
+          <li><strong>D3 — Tree = folder hierarchy.</strong> <span class="pill rec">✓ folders</span> Generalized to the configured source folders → their subfolders → documents.</li>
+          <li><strong>D4 — Client-side rendering.</strong> <span class="pill rec">✓ client</span></li>
+          <li><strong>D5 — 100% CommonMark.</strong> <span class="pill rec">✓ 100%</span> Not called "done" until the full <code>spec.json</code> conformance suite is green.</li>
+          <li><strong>D6 — Three search surfaces.</strong> <span class="pill rec">✓ all three</span> In-document search (reading pane), all-documents search (hamburger drawer), and a node search in the graph / mini-map. The mini-map is in.</li>
+        </ol>
+      </section>
+
+      <section id="requirements">
+        <h2><span class="secn">18</span>Requirements traceability</h2>
+        <p>You can build a <strong>requirement hierarchy</strong> on top of this exact system — <code>Requirements.md</code> pages whose requirements are tracked and traced across every document — by reusing what the design already provides: fenced-block transforms (like syntax highlighting), the metadata index, the relationship graph, search, deep-links, and theming. Almost nothing here is new machinery; it is the same capabilities pointed at requirements.</p>
+
+        <h3>Authoring a requirement</h3>
+        <p>A requirement is a <strong>fenced code block with the info string <code>requirement</code></strong> — valid CommonMark (so compliance is untouched), which the app turns into a requirement card using the very same post-sanitize hook the syntax highlighter uses. A page holds as many as you like, under normal headings.</p>
+        <pre><code>```requirement
+{
+  "id": "FR-012",
+  "title": "Users can reset their password via email",
+  "type": "functional",
+  "status": "approved",
+  "parents": ["SR-004"],
+  "satisfiedBy": ["design/auth-flow", "FR-013"],
+  "verifiedBy": ["TC-101", "TC-102"],
+  "tags": ["auth", "security"]
+}
+```</code></pre>
+        <p>A <code>Requirements.md</code> page is just a normal document (with the usual <code>&lt;!--meta--&gt;</code> header) that contains these blocks. Requirement <code>id</code>s are author-assigned and <strong>globally unique</strong>; a collision is a flagged warning.</p>
+
+        <h3>The trace model</h3>
+        <table class="tbl">
+          <tr><th>Field</th><th>Meaning &amp; direction</th></tr>
+          <tr><td><code>id</code>, <code>title</code>, <code>type</code>, <code>status</code>, <code>tags</code></td><td>Identity + classification — drives colour, filtering, and the coverage dashboard.</td></tr>
+          <tr><td><code>parents</code></td><td>Higher-level requirements this <em>derives from</em> — the hierarchy backbone (upward). Children are computed as the inverse.</td></tr>
+          <tr><td><code>satisfiedBy</code></td><td>What <em>fulfils</em> it — may reference other requirement ids <strong>or document ids</strong>, so requirements trace directly into the documentation.</td></tr>
+          <tr><td><code>verifiedBy</code></td><td>What <em>verifies</em> it — test / verification items, modelled as requirement blocks of <code>type:"test"</code> so verification lives in the same graph.</td></tr>
+        </table>
+        <p>On load — in the same pass that already fetches every document for the tree and graph — the app scans each page for <code>requirement</code> blocks, parses them, and builds one <strong>global trace index</strong> (<code>id → {page, anchor, fields, computed inverse-links}</code>). Every trace target resolves against the requirement index first, then the document index; anything unresolved is flagged as a <em>dangling reference</em> — the same treatment as a broken document link. Each requirement is deep-linkable: <code>#/&lt;page&gt;?req=FR-012</code>.</p>
+
+        <h3>What you get — the traceability views</h3>
+        <p>Each is built by <em>reusing</em> a capability already in the plan:</p>
+        <ul>
+          <li><strong>Requirement cards</strong> — every block renders in place as a card: id badge, title, type + status pills, and clickable trace chips (Parents ↑, Children ↓, Verified by, Satisfied by) that jump — across documents — to the target requirement. <em>Reuses the fenced-block transform + sanitizer + deep-links.</em></li>
+          <li><strong>Requirement map</strong> — the §11 graph gains a "Requirements" mode: nodes = requirements, edges = parent→child (solid) and verify / satisfy (styled distinctly). Pan, zoom, node-search and neighbourhood highlighting all come for free. <em>Reuses the graph engine.</em></li>
+          <li><strong>Traceability matrix</strong> — a filterable table (requirements × parent / verification / satisfaction) with coverage cells and gaps highlighted. <em>New view; a plain DOM table.</em></li>
+          <li><strong>Coverage dashboard</strong> — totals, % verified, % satisfied, orphans (no parent), leaves with no verification, dangling references, status breakdown. <em>New; a small summary panel.</em></li>
+          <li><strong>Impact / trace</strong> — from any requirement, list and highlight the full upstream (all ancestors) and downstream (children + verifications). <em>Reuses the graph's neighbourhood highlight.</em></li>
+          <li><strong>Hierarchy outline &amp; filter</strong> — the requirements as a collapsible tree by parent/child, filterable by type / status / tag. <em>Reuses the tree + search patterns.</em></li>
+        </ul>
+
+        <figure class="figure">
+          <svg class="wf" viewBox="0 0 1000 300" role="img" aria-label="Requirement card and traceability matrix wireframe">
+            <rect class="r-surface" x="24" y="20" width="440" height="260" rx="10" stroke="var(--border-strong)"/>
+            <rect class="a-soft" x="44" y="40" width="84" height="26" rx="6"/><text class="a-txt" x="54" y="58">FR-012</text>
+            <rect class="r-surface2" x="138" y="40" width="98" height="26" rx="13" stroke="var(--border)"/><text class="tm" x="150" y="58">APPROVED</text>
+            <text class="tm" x="370" y="58">functional</text>
+            <text class="tb" x="44" y="98" style="font-size:15px">Users can reset their password</text>
+            <line class="ln" x1="44" y1="116" x2="444" y2="116"/>
+            <text class="tm" x="44" y="146">↑ PARENTS</text>
+            <rect class="r-surface2" x="150" y="132" width="70" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="160" y="147">SR-004</text>
+            <text class="tm" x="44" y="184">✓ VERIFIED BY</text>
+            <rect class="r-surface2" x="168" y="170" width="66" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="178" y="185">TC-101</text>
+            <rect class="r-surface2" x="242" y="170" width="66" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="252" y="185">TC-102</text>
+            <text class="tm" x="44" y="222">▣ SATISFIED BY</text>
+            <rect class="r-surface2" x="180" y="208" width="140" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="190" y="223">design/auth-flow</text>
+            <text class="tm" x="44" y="262">chips link across documents →</text>
+
+            <text class="tm" x="524" y="36">TRACEABILITY MATRIX</text>
+            <rect class="r-surface2" x="524" y="46" width="452" height="30"/>
+            <text class="tb" x="536" y="66">Requirement</text><text class="tb" x="712" y="66">Parent</text><text class="tb" x="800" y="66">Verify</text><text class="tb" x="892" y="66">Satisfy</text>
+            <line class="ln" x1="524" y1="76" x2="976" y2="76"/>
+            <text class="t" x="536" y="102">FR-012 Reset password</text>
+            <text class="a-txt" x="722" y="102">✓</text><text class="a-txt" x="814" y="102">✓</text><text class="a-txt" x="908" y="102">✓</text>
+            <line class="ln" x1="524" y1="114" x2="976" y2="114"/>
+            <text class="t" x="536" y="140">FR-013 Email token</text>
+            <text class="a-txt" x="722" y="140">✓</text>
+            <rect x="798" y="124" width="44" height="24" fill="var(--recnext)" opacity="0.20"/><text class="tm" x="805" y="140">gap</text>
+            <text class="a-txt" x="908" y="140">✓</text>
+            <line class="ln" x1="524" y1="152" x2="976" y2="152"/>
+            <text class="t" x="536" y="178">SR-004 Account security</text>
+            <text class="tm" x="724" y="178">—</text><text class="a-txt" x="814" y="178">✓</text><text class="a-txt" x="908" y="178">✓</text>
+            <line class="ln" x1="524" y1="190" x2="976" y2="190"/>
+            <rect class="r-surface" x="524" y="208" width="452" height="66" rx="8" stroke="var(--border)"/>
+            <text class="tm" x="540" y="232">COVERAGE</text>
+            <text class="tb" x="540" y="258">18 reqs · 83% verified · 1 gap · 0 dangling</text>
+          </svg>
+          <figcaption>Requirement card (left) with cross-document trace chips, and the traceability matrix (right) with coverage and gap highlighting — both generated from the same fenced <code>requirement</code> blocks.</figcaption>
+        </figure>
+
+        <h3>Integration &amp; what is actually new</h3>
+        <p>Reuses: the Markdown engine (fenced blocks), the sanitizer, discovery/metadata, the graph engine, search, deep-links, and theming. New pieces are small: a <code>requirements.js</code> module (extract → index → render cards → matrix + dashboard + graph feed), a <code>requirements.css</code>, and a "Requirements" entry point in the header. The requirements features switch on automatically for any document set that contains <code>requirement</code> blocks (or via a <code>config.json</code> flag).</p>
+
+        <div class="callout">
+          <div class="h">Choices to confirm when we build it</div>
+          <ul>
+            <li><strong>Granularity</strong> — many requirement blocks per page (recommended) vs one requirement per document.</li>
+            <li><strong>Verification</strong> — model test cases as requirement blocks of <code>type:"test"</code> so the whole V-model is one traceable graph (recommended), vs treating <code>verifiedBy</code> as external references only.</li>
+            <li><strong>Trace types</strong> — the v1 set (<code>parents</code>, <code>satisfiedBy</code>, <code>verifiedBy</code>, plus an optional <code>relatedTo</code>); rename/extend to match your process (e.g. DOORS-style derives / refines / satisfies / verifies).</li>
+            <li><strong>ID scheme</strong> — free-form author ids (<code>FR-012</code>) with uniqueness enforced (recommended).</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+    <footer class="foot">Design overview for the Web Document Tool · phases 1–2 in progress · wireframes are indicative.</footer>
+  </main>
+</div>
+
+<script>
+  // Theme toggle
+  (function () {
+    var btn = document.getElementById('themeBtn'),
+        icon = document.getElementById('themeIcon'),
+        txt = document.getElementById('themeTxt'),
+        root = document.documentElement;
+    function sync() {
+      var dark = root.getAttribute('data-theme') === 'dark';
+      btn.setAttribute('aria-pressed', String(dark));
+      icon.textContent = dark ? '☀' : '☾';
+      txt.textContent = dark ? 'Day' : 'Night';
+    }
+    btn.addEventListener('click', function () {
+      var dark = root.getAttribute('data-theme') === 'dark';
+      var next = dark ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('wd-design-theme', next); } catch (e) {}
+      sync();
+    });
+    sync();
+  })();
+
+  // Scroll-spy for the contents (dogfoods the concept)
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+    var map = {};
+    links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          links.forEach(function (l) { l.classList.remove('active'); });
+          var a = map[e.target.id]; if (a) a.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-15% 0px -75% 0px', threshold: 0 });
+    document.querySelectorAll('main section[id]').forEach(function (s) { obs.observe(s); });
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Documentation</title>
+<!-- Resolve theme before first paint (no flash of the wrong theme). -->
+<script>
+  (function () {
+    try {
+      var stored = localStorage.getItem('wd-theme');
+      var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/graph.css">
+<link rel="stylesheet" href="/css/requirements.css">
+</head>
+<body data-app-ready="0">
+<a class="skip" href="#content">Skip to content</a>
+
+<header class="app-header">
+  <button id="hamburger" class="icon-btn" aria-label="Open document navigation"
+          aria-expanded="false" aria-controls="doc-tree">
+    <span class="ic-menu" aria-hidden="true"></span>
+  </button>
+  <a class="brand" id="brand" href="#/">Documentation</a>
+  <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+  <div class="spacer"></div>
+  <label class="doc-search">
+    <span class="visually-hidden">Search in current document</span>
+    <input id="docSearch" type="search" placeholder="Find in page…" autocomplete="off">
+  </label>
+  <button id="graphBtn" class="icon-btn" aria-pressed="false" aria-label="Toggle map view" title="Map">◱</button>
+  <button id="reqBtn" class="icon-btn" aria-pressed="false" aria-label="Toggle requirements view" title="Requirements" hidden>▦</button>
+  <button id="themeBtn" class="icon-btn" aria-pressed="false" aria-label="Switch theme" title="Day / night">◐</button>
+</header>
+
+<div class="app-body">
+  <aside id="toc" class="toc-pane" aria-label="On this page">
+    <p class="toc-cap">On this page</p>
+    <div id="tocList"></div>
+  </aside>
+  <main id="content" class="content-pane" tabindex="-1"></main>
+</div>
+
+<footer class="app-footer">
+  <nav class="foot-group prev" id="footPrev" aria-label="Assumed knowledge" hidden></nav>
+  <nav class="foot-group next" id="footNext" aria-label="Recommended next" hidden></nav>
+</footer>
+
+<!-- Document tree drawer -->
+<div id="scrim" class="scrim" hidden></div>
+<nav id="doc-tree" class="drawer" aria-label="All documents" hidden>
+  <div class="drawer-head">
+    <span class="drawer-title">All documents</span>
+    <button id="drawerClose" class="icon-btn" aria-label="Close navigation">✕</button>
+  </div>
+  <label class="drawer-search">
+    <span class="visually-hidden">Search all documents</span>
+    <input id="treeSearch" type="search" placeholder="Search all documents…" autocomplete="off">
+  </label>
+  <div id="treeList" class="tree" role="tree" aria-label="Documents"></div>
+</nav>
+
+<div id="live" class="visually-hidden" aria-live="polite"></div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

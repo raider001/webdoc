@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Web Document Tool - static server (stdlib only, zero third-party).
+
+Reads config.json, serves the app/ folder at the web root, and mounts every
+configured source folder under /docs/<name>/. Directories are returned as a
+JSON listing so the browser can discover documents. There is NO build step and
+the server performs NO Markdown or metadata parsing - discovery, JSON-metadata
+stripping and rendering all happen in the browser.
+
+Usage:
+    python serve.py                 # uses ./config.json on 127.0.0.1:8000
+    python serve.py --port 9000
+    python serve.py --config other.json
+"""
+import argparse
+import json
+import mimetypes
+import os
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = os.path.join(HERE, "app")
+
+# Force correct content types. Windows' registry sometimes maps .js -> text/plain,
+# which breaks ES module loading; be explicit.
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+
+def content_type(path):
+    ext = os.path.splitext(path)[1].lower()
+    return CONTENT_TYPES.get(ext) or mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
+def load_config(path):
+    with open(path, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    sources = []
+    for src in cfg.get("sources", []):
+        name = str(src["name"]).strip("/")
+        folder = os.path.abspath(os.path.join(HERE, src["path"]))
+        if not os.path.isdir(folder):
+            print(f"  ! source '{name}' path not found: {folder}")
+        sources.append({"name": name, "path": folder})
+    return {
+        "siteTitle": cfg.get("siteTitle", "Documentation"),
+        "defaultDoc": cfg.get("defaultDoc"),
+        "theme": cfg.get("theme", "auto"),
+        "sources": sources,
+    }
+
+
+def safe_join(root, rel):
+    """Join rel onto root, refusing to escape root (path-traversal guard)."""
+    rel = rel.replace("\\", "/")
+    parts = [p for p in rel.split("/") if p not in ("", ".", "..")]
+    full = os.path.abspath(os.path.join(root, *parts))
+    root_abs = os.path.abspath(root)
+    if full != root_abs and not full.startswith(root_abs + os.sep):
+        return None
+    return full
+
+
+class DocHandler(BaseHTTPRequestHandler):
+    server_version = "WebDocTool/0.1"
+    config = None  # attached to the class before serving
+
+    # -- response helpers ---------------------------------------------------
+    def _send(self, status, body, ctype="application/octet-stream"):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _json(self, status, obj):
+        self._send(status, json.dumps(obj), "application/json; charset=utf-8")
+
+    def _file(self, fspath):
+        try:
+            with open(fspath, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            return self._json(404, {"error": "not found"})
+        self._send(200, data, content_type(fspath))
+
+    def _source(self, name):
+        for s in self.config["sources"]:
+            if s["name"] == name:
+                return s
+        return None
+
+    def _listing(self, name, rel, fsdir):
+        try:
+            names = sorted(os.listdir(fsdir), key=str.lower)
+        except OSError:
+            return self._json(404, {"error": "not found"})
+        entries = []
+        for n in names:
+            if n.startswith("."):
+                continue
+            fp = os.path.join(fsdir, n)
+            is_dir = os.path.isdir(fp)
+            rel_child = (rel + "/" + n).strip("/")
+            url = "/docs/" + name + "/" + urllib.parse.quote(rel_child)
+            if is_dir:
+                url += "/"
+            entries.append({"name": n, "type": "dir" if is_dir else "file", "url": url})
+        self._json(200, {"type": "dir", "source": name, "path": rel, "entries": entries})
+
+    def _site_json(self):
+        cfg = self.config
+        self._json(200, {
+            "siteTitle": cfg["siteTitle"],
+            "defaultDoc": cfg["defaultDoc"],
+            "theme": cfg["theme"],
+            "sources": [
+                {"name": s["name"], "url": "/docs/" + s["name"] + "/"}
+                for s in cfg["sources"]
+            ],
+        })
+
+    # -- routing ------------------------------------------------------------
+    def do_GET(self):
+        self.route()
+
+    def do_HEAD(self):
+        self.route()
+
+    def route(self):
+        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
+        if path == "/site.json":
+            return self._site_json()
+        if path.startswith("/docs/"):
+            return self.route_docs(path[len("/docs/"):])
+        if path in ("", "/"):
+            path = "/index.html"
+        fspath = safe_join(APP_DIR, path.lstrip("/"))
+        if fspath and os.path.isfile(fspath):
+            return self._file(fspath)
+        return self._json(404, {"error": "not found", "path": path})
+
+    def route_docs(self, rest):
+        rest = rest.strip("/")
+        if not rest:
+            return self._json(404, {"error": "no source"})
+        name, _, rel = rest.partition("/")
+        src = self._source(name)
+        if not src:
+            return self._json(404, {"error": f"unknown source '{name}'"})
+        fspath = safe_join(src["path"], rel)
+        if not fspath or not os.path.exists(fspath):
+            return self._json(404, {"error": "not found"})
+        if os.path.isdir(fspath):
+            return self._listing(name, rel, fspath)
+        return self._file(fspath)
+
+    def log_message(self, fmt, *args):
+        print("  %s - %s" % (self.address_string(), fmt % args))
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Web Document Tool static server")
+    ap.add_argument("--config", default=os.path.join(HERE, "config.json"))
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8000)
+    args = ap.parse_args()
+
+    cfg = load_config(args.config)
+    DocHandler.config = cfg
+
+    httpd = ThreadingHTTPServer((args.host, args.port), DocHandler)
+    print(f"Web Document Tool  -  http://{args.host}:{args.port}")
+    print(f"  site: {cfg['siteTitle']}")
+    for s in cfg["sources"]:
+        print(f"  mount /docs/{s['name']}/  ->  {s['path']}")
+    print("  Ctrl+C to stop")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+
+
+if __name__ == "__main__":
+    main()

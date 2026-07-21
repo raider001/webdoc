@@ -1,0 +1,54 @@
+/* ============================================================================
+   Syntax highlighting palette.
+   Colour lives entirely in --tok-* tokens, defined for BOTH themes so the
+   highlighter's <span class="tok-..."> spans read well on --code-bg in light
+   and dark. Tuned for contrast against the existing code surface.
+   ========================================================================== */
+:root, :root[data-theme="light"] {
+  --tok-keyword:  #a626a4;   /* control words, declarations            */
+  --tok-string:   #1a7f37;   /* string / char literals                 */
+  --tok-comment:  #6b7480;   /* comments (also italic)                 */
+  --tok-number:   #b3541e;   /* numeric literals                       */
+  --tok-function: #3a5ccc;   /* def/class/method names, calls          */
+  --tok-builtin:  #0a7ea4;   /* built-ins, primitive/known types       */
+  --tok-operator: #635f6b;   /* operators                              */
+  --tok-variable: #b3541e;   /* $VAR / ${..} / ${name} expansions      */
+  --tok-section:  #a626a4;   /* Robot *** Section *** headers          */
+  --tok-attr:     #3a5ccc;   /* Robot [Settings] cells                 */
+  --tok-tag:      #1a7f37;   /* markup tags (reserved)                 */
+  --tok-meta:     #8a6d1a;   /* decorators / annotations / shebang     */
+  --tok-punct:    #6b7480;   /* brackets, separators                   */
+}
+:root[data-theme="dark"] {
+  --tok-keyword:  #d2a8ff;
+  --tok-string:   #7ee787;
+  --tok-comment:  #8b949e;
+  --tok-number:   #f0a878;
+  --tok-function: #79b8ff;
+  --tok-builtin:  #56d4dd;
+  --tok-operator: #b0b6c0;
+  --tok-variable: #f0a878;
+  --tok-section:  #d2a8ff;
+  --tok-attr:     #79b8ff;
+  --tok-tag:      #7ee787;
+  --tok-meta:     #e3b341;
+  --tok-punct:    #9aa4af;
+}
+
+.tok-keyword  { color: var(--tok-keyword); font-weight: 600; }
+.tok-string   { color: var(--tok-string); }
+.tok-comment  { color: var(--tok-comment); font-style: italic; }
+.tok-number   { color: var(--tok-number); }
+.tok-function { color: var(--tok-function); }
+.tok-builtin  { color: var(--tok-builtin); }
+.tok-operator { color: var(--tok-operator); }
+.tok-variable { color: var(--tok-variable); }
+.tok-section  { color: var(--tok-section); font-weight: 700; }
+.tok-attr     { color: var(--tok-attr); font-weight: 600; }
+.tok-tag      { color: var(--tok-tag); }
+.tok-meta     { color: var(--tok-meta); }
+.tok-punct    { color: var(--tok-punct); }
+
+/* Keep highlighting spans purely a colour layer: never change the code box
+   metrics the app stylesheet already establishes. */
+pre code [class^="tok-"] { background: none; }

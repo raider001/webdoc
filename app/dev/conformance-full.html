@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>CommonMark engine — FULL spec.json conformance</title>
+<!-- Resolve theme before first paint, same policy as the real app. -->
+<script>
+  (function () {
+    try {
+      var stored = localStorage.getItem('wd-theme');
+      var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+<!-- Base tokens/theme FIRST so our harness tokens can build on them. -->
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  /* New tokens for this harness, defined for BOTH themes. */
+  :root, :root[data-theme="light"] {
+    --pass-fg:#15803d; --pass-bg:#dcfce7; --pass-border:#86efac;
+    --fail-fg:#b91c1c; --fail-bg:#fee2e2; --fail-border:#fca5a5;
+    --cell-exp:#166534; --cell-act:#b91c1c;
+  }
+  :root[data-theme="dark"] {
+    --pass-fg:#4ade80; --pass-bg:#0f2a1a; --pass-border:#166534;
+    --fail-fg:#f87171; --fail-bg:#2a1113; --fail-border:#7f1d1d;
+    --cell-exp:#4ade80; --cell-act:#f87171;
+  }
+  html, body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--text); font:14px/1.5 system-ui, sans-serif; }
+  .bar {
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+    padding:12px 20px; background:var(--surface); border-bottom:1px solid var(--border);
+    position:sticky; top:0; z-index:2;
+  }
+  .bar h1 { font-size:15px; margin:0; font-weight:700; }
+  #summary {
+    font-weight:700; padding:5px 12px; border-radius:var(--radius); font-variant-numeric:tabular-nums;
+  }
+  #summary.ok  { color:var(--pass-fg); background:var(--pass-bg); border:1px solid var(--pass-border); }
+  #summary.bad { color:var(--fail-fg); background:var(--fail-bg); border:1px solid var(--fail-border); }
+  .bar .note { font-size:12.5px; color:var(--muted); }
+  .bar button {
+    background:var(--bg); color:var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:6px 12px; cursor:pointer;
+  }
+  .bar button:hover { background:var(--surface-2); }
+  main { padding:20px; max-width:1100px; margin:0 auto; }
+  #status { color:var(--muted); }
+  .empty { color:var(--pass-fg); font-weight:600; }
+  h2.grp { font-size:14px; margin:26px 0 8px; }
+  /* Per-section summary table */
+  table.sections { border-collapse:collapse; width:100%; margin:6px 0 20px; font-variant-numeric:tabular-nums; }
+  table.sections th, table.sections td { text-align:left; padding:5px 10px; border-bottom:1px solid var(--border); }
+  table.sections th { color:var(--faint); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  table.sections td.num { text-align:right; }
+  table.sections tr.clean td.fail { color:var(--pass-fg); }
+  table.sections tr.dirty td.fail { color:var(--fail-fg); font-weight:700; }
+  ul#failures { list-style:none; padding:0; margin:0; display:grid; gap:14px; }
+  .case {
+    border:1px solid var(--fail-border); border-left:4px solid var(--fail-fg);
+    border-radius:var(--radius); background:var(--surface); overflow:hidden;
+  }
+  .case-head {
+    display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+    padding:8px 12px; background:var(--surface-2); border-bottom:1px solid var(--border);
+  }
+  .case-head .sec { font-weight:700; }
+  .case-head .ex { color:var(--muted); font-size:12.5px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:0; }
+  .grid > div { padding:10px 12px; border-top:1px solid var(--border); }
+  .grid .k { font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); margin-bottom:5px; }
+  pre.code {
+    margin:0; padding:8px 10px; background:var(--code-bg); color:var(--code-text);
+    border:1px solid var(--code-border); border-radius:6px; overflow-x:auto;
+    white-space:pre-wrap; word-break:break-word; font:12.5px/1.5 ui-monospace, monospace;
+  }
+  .exp pre.code { color:var(--cell-exp); }
+  .act pre.code { color:var(--cell-act); }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <h1>CommonMark 0.31.2 — FULL official spec.json</h1>
+    <span id="summary" aria-live="polite">running…</span>
+    <span class="note">TRUE compliance: every example in the official
+      <code>spec.json</code> is rendered by <code>renderMarkdown()</code> and compared
+      under the same HTML normalization the curated harness uses. Nothing is skipped.</span>
+    <button id="themeToggle" type="button">Toggle theme</button>
+  </div>
+  <main>
+    <p id="status">Loading official spec.json…</p>
+    <h2 class="grp" id="secHead" hidden>By spec section</h2>
+    <div id="sectionTableWrap"></div>
+    <h2 class="grp" id="failHead" hidden>Failing examples</h2>
+    <ul id="failures"></ul>
+  </main>
+
+  <script type="module">
+    import { renderMarkdown } from '/js/commonmark.js';
+
+    const $ = id => document.getElementById(id);
+
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      const root = document.documentElement;
+      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('wd-theme', next); } catch (e) {}
+    });
+
+    // CommonMark-style HTML normalization: collapse whitespace that is
+    // insignificant between block-level tags, while protecting <pre>/<code>
+    // content where whitespace is meaningful.
+    // (Copied verbatim from app/dev/conformance.html so both harnesses judge
+    //  parser output by an identical standard.)
+    const BLOCK = '(?:html|head|body|address|article|aside|blockquote|details|div|dl|dt|dd|' +
+      'fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|' +
+      'table|tbody|td|tfoot|th|thead|tr|ul)';
+    function normalizeHtml(html) {
+      const tokens = html.split(/(<[^>]*>)/);
+      let out = '', protect = 0;
+      for (const tok of tokens) {
+        if (tok === '') continue;
+        if (/^<[^>]*>$/.test(tok)) {
+          const m = /^<\/?([a-zA-Z0-9]+)/.exec(tok);
+          const name = m ? m[1].toLowerCase() : '';
+          if (name === 'pre' || name === 'code') {
+            if (tok[1] === '/') protect = Math.max(0, protect - 1);
+            else if (!/\/>$/.test(tok)) protect++;
+          }
+          out += tok;
+        } else {
+          out += protect > 0 ? tok : tok.replace(/\s+/g, ' ');
+        }
+      }
+      out = out.replace(new RegExp('\\s+(</?' + BLOCK + '\\b)', 'gi'), '$1');
+      out = out.replace(new RegExp('(</?' + BLOCK + '\\b[^>]*>)\\s+', 'gi'), '$1');
+      return out.trim();
+    }
+
+    function textCell(label, value, cls) {
+      const wrap = document.createElement('div');
+      if (cls) wrap.className = cls;
+      const k = document.createElement('div');
+      k.className = 'k'; k.textContent = label;
+      const pre = document.createElement('pre');
+      pre.className = 'code'; pre.textContent = value;
+      wrap.appendChild(k); wrap.appendChild(pre);
+      return wrap;
+    }
+
+    function fail(msg) {
+      $('status').textContent = msg;
+      const s = $('summary');
+      s.textContent = 'ERROR';
+      s.className = 'bad';
+      document.body.setAttribute('data-error', msg);
+      document.body.setAttribute('data-done', '1');
+    }
+
+    async function run() {
+      let spec;
+      try {
+        const res = await fetch('/dev/commonmark-spec.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        spec = await res.json();
+      } catch (e) {
+        return fail('Could not load /dev/commonmark-spec.json (' + e.message + '). ' +
+          'Is the static server running and was the spec fetched?');
+      }
+
+      const cases = spec.filter(c => c && typeof c.markdown === 'string' && typeof c.html === 'string');
+      const failures = $('failures');
+
+      // Per-section tally: section -> { total, pass, fail }
+      const sections = new Map();
+      const order = []; // preserve first-seen section order (== spec order)
+      let pass = 0;
+
+      for (const c of cases) {
+        const section = c.section || '(no section)';
+        if (!sections.has(section)) { sections.set(section, { total: 0, pass: 0, fail: 0 }); order.push(section); }
+        const bucket = sections.get(section);
+        bucket.total++;
+
+        let actual;
+        try { actual = renderMarkdown(c.markdown); }
+        catch (e) { actual = 'THREW: ' + (e && e.message) + '\n' + ((e && e.stack) || ''); }
+
+        const expN = normalizeHtml(c.html);
+        const actN = normalizeHtml(actual);
+        if (expN === actN) { pass++; bucket.pass++; continue; }
+        bucket.fail++;
+
+        const li = document.createElement('li');
+        li.className = 'case';
+        const head = document.createElement('div');
+        head.className = 'case-head';
+        const sec = document.createElement('span');
+        sec.className = 'sec'; sec.textContent = section;
+        const ex = document.createElement('span');
+        ex.className = 'ex'; ex.textContent = 'example ' + (c.example != null ? c.example : '?');
+        head.appendChild(sec); head.appendChild(ex);
+        li.appendChild(head);
+
+        const grid = document.createElement('div');
+        grid.className = 'grid';
+        grid.appendChild(textCell('markdown', c.markdown));
+        grid.appendChild(textCell('expected (normalized)', expN, 'exp'));
+        grid.appendChild(textCell('actual (normalized)', actN, 'act'));
+        li.appendChild(grid);
+        failures.appendChild(li);
+      }
+
+      const total = cases.length;
+
+      // Build the per-section summary table (spec order).
+      const table = document.createElement('table');
+      table.className = 'sections';
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Section</th><th class="num">Pass</th>' +
+        '<th class="num">Fail</th><th class="num">Total</th></tr>';
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      const sectionReport = {};
+      for (const name of order) {
+        const b = sections.get(name);
+        sectionReport[name] = { pass: b.pass, fail: b.fail, total: b.total };
+        const tr = document.createElement('tr');
+        tr.className = b.fail === 0 ? 'clean' : 'dirty';
+        const td = (txt, cls) => { const d = document.createElement('td'); if (cls) d.className = cls; d.textContent = txt; return d; };
+        tr.appendChild(td(name));
+        tr.appendChild(td(String(b.pass), 'num'));
+        tr.appendChild(td(String(b.fail), 'num fail'));
+        tr.appendChild(td(String(b.total), 'num'));
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      $('sectionTableWrap').appendChild(table);
+      $('secHead').hidden = false;
+
+      const summary = $('summary');
+      const pct = total ? (100 * pass / total).toFixed(2) : '0.00';
+      summary.textContent = 'PASS ' + pass + ' / ' + total + '  (' + pct + '%)';
+      summary.className = pass === total ? 'ok' : 'bad';
+
+      $('status').innerHTML = '';
+      const statusLine = document.createElement('span');
+      statusLine.innerHTML = 'Ran <strong>' + total + '</strong> official examples across <strong>' +
+        order.length + '</strong> sections.';
+      $('status').appendChild(statusLine);
+      if (pass === total) {
+        const ok = document.createElement('p');
+        ok.className = 'empty';
+        ok.textContent = 'Full CommonMark compliance: every official example passes.';
+        $('status').appendChild(ok);
+      } else {
+        $('failHead').hidden = false;
+      }
+
+      // Machine-readable hooks for the Playwright test.
+      document.body.setAttribute('data-pass', String(pass));
+      document.body.setAttribute('data-total', String(total));
+      document.body.setAttribute('data-sections', JSON.stringify(sectionReport));
+      document.body.setAttribute('data-done', '1');
+    }
+
+    run();
+  </script>
+</body>
+</html>

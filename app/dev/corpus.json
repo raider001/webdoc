@@ -1,0 +1,725 @@
+[
+  {
+    "_note": "curated representative subset authored from spec knowledge; NOT the official 632-case spec.json (added later for the full ratchet)"
+  },
+  {
+    "markdown": "\tcode",
+    "html": "<pre><code>code\n</code></pre>",
+    "section": "Tabs",
+    "example": 1
+  },
+  {
+    "markdown": "- \ttab",
+    "html": "<ul>\n<li>tab</li>\n</ul>",
+    "section": "Tabs",
+    "example": 2
+  },
+  {
+    "markdown": "  \tfoo",
+    "html": "<pre><code>foo\n</code></pre>",
+    "section": "Tabs",
+    "example": 3
+  },
+  {
+    "markdown": "---",
+    "html": "<hr />",
+    "section": "Thematic breaks",
+    "example": 1
+  },
+  {
+    "markdown": "***",
+    "html": "<hr />",
+    "section": "Thematic breaks",
+    "example": 2
+  },
+  {
+    "markdown": "___",
+    "html": "<hr />",
+    "section": "Thematic breaks",
+    "example": 3
+  },
+  {
+    "markdown": "- - -",
+    "html": "<hr />",
+    "section": "Thematic breaks",
+    "example": 4
+  },
+  {
+    "markdown": "* * *",
+    "html": "<hr />",
+    "section": "Thematic breaks",
+    "example": 5
+  },
+  {
+    "markdown": "_____",
+    "html": "<hr />",
+    "section": "Thematic breaks",
+    "example": 6
+  },
+  {
+    "markdown": "# Hello",
+    "html": "<h1>Hello</h1>",
+    "section": "ATX headings",
+    "example": 1
+  },
+  {
+    "markdown": "## Head ##",
+    "html": "<h2>Head</h2>",
+    "section": "ATX headings",
+    "example": 2
+  },
+  {
+    "markdown": "###### six",
+    "html": "<h6>six</h6>",
+    "section": "ATX headings",
+    "example": 3
+  },
+  {
+    "markdown": "#no",
+    "html": "<p>#no</p>",
+    "section": "ATX headings",
+    "example": 4
+  },
+  {
+    "markdown": "#",
+    "html": "<h1></h1>",
+    "section": "ATX headings",
+    "example": 5
+  },
+  {
+    "markdown": "## ##",
+    "html": "<h2></h2>",
+    "section": "ATX headings",
+    "example": 6
+  },
+  {
+    "markdown": "# foo #####",
+    "html": "<h1>foo</h1>",
+    "section": "ATX headings",
+    "example": 7
+  },
+  {
+    "markdown": "# H #\n\ntext",
+    "html": "<h1>H</h1>\n<p>text</p>",
+    "section": "ATX headings",
+    "example": 8
+  },
+  {
+    "markdown": "# *em* head",
+    "html": "<h1><em>em</em> head</h1>",
+    "section": "ATX headings",
+    "example": 9
+  },
+  {
+    "markdown": "Setext\n======",
+    "html": "<h1>Setext</h1>",
+    "section": "Setext headings",
+    "example": 1
+  },
+  {
+    "markdown": "foo\n---",
+    "html": "<h2>foo</h2>",
+    "section": "Setext headings",
+    "example": 2
+  },
+  {
+    "markdown": "foo\nbar\n---",
+    "html": "<h2>foo\nbar</h2>",
+    "section": "Setext headings",
+    "example": 3
+  },
+  {
+    "markdown": "foo *bar*\n=========",
+    "html": "<h1>foo <em>bar</em></h1>",
+    "section": "Setext headings",
+    "example": 4
+  },
+  {
+    "markdown": "    indented\n    code",
+    "html": "<pre><code>indented\ncode\n</code></pre>",
+    "section": "Indented code blocks",
+    "example": 1
+  },
+  {
+    "markdown": "    a\n\n    b",
+    "html": "<pre><code>a\n\nb\n</code></pre>",
+    "section": "Indented code blocks",
+    "example": 2
+  },
+  {
+    "markdown": "```js\nvar x=1;\n```",
+    "html": "<pre><code class=\"language-js\">var x=1;\n</code></pre>",
+    "section": "Fenced code blocks",
+    "example": 1
+  },
+  {
+    "markdown": "```\n<b>\n```",
+    "html": "<pre><code>&lt;b&gt;\n</code></pre>",
+    "section": "Fenced code blocks",
+    "example": 2
+  },
+  {
+    "markdown": "~~~\ncode ` ~~~\n~~~",
+    "html": "<pre><code>code ` ~~~\n</code></pre>",
+    "section": "Fenced code blocks",
+    "example": 3
+  },
+  {
+    "markdown": "``` ruby startline=3\nputs 1\n```",
+    "html": "<pre><code class=\"language-ruby\">puts 1\n</code></pre>",
+    "section": "Fenced code blocks",
+    "example": 4
+  },
+  {
+    "markdown": "```\n\n```",
+    "html": "<pre><code>\n</code></pre>",
+    "section": "Fenced code blocks",
+    "example": 5
+  },
+  {
+    "markdown": "<div>\nraw\n</div>",
+    "html": "<div>\nraw\n</div>",
+    "section": "HTML blocks",
+    "example": 1
+  },
+  {
+    "markdown": "<!-- c -->\ntext",
+    "html": "<!-- c -->\n<p>text</p>",
+    "section": "HTML blocks",
+    "example": 2
+  },
+  {
+    "markdown": "<pre>\na *b*\n</pre>",
+    "html": "<pre>\na *b*\n</pre>",
+    "section": "HTML blocks",
+    "example": 3
+  },
+  {
+    "markdown": "<table>\n<tr><td>x</td></tr>\n</table>",
+    "html": "<table>\n<tr><td>x</td></tr>\n</table>",
+    "section": "HTML blocks",
+    "example": 4
+  },
+  {
+    "markdown": "[foo]\n\n[foo]: /bar",
+    "html": "<p><a href=\"/bar\">foo</a></p>",
+    "section": "Link reference definitions",
+    "example": 1
+  },
+  {
+    "markdown": "[foo]: /url \"title\"\n\n[foo]",
+    "html": "<p><a href=\"/url\" title=\"title\">foo</a></p>",
+    "section": "Link reference definitions",
+    "example": 2
+  },
+  {
+    "markdown": "[foo][]\n\n[foo]: /bar",
+    "html": "<p><a href=\"/bar\">foo</a></p>",
+    "section": "Link reference definitions",
+    "example": 3
+  },
+  {
+    "markdown": "[foo][ref]\n\n[ref]: /bar \"T\"",
+    "html": "<p><a href=\"/bar\" title=\"T\">foo</a></p>",
+    "section": "Link reference definitions",
+    "example": 4
+  },
+  {
+    "markdown": "[FOO][BaR]\n\n[bar]: /x",
+    "html": "<p><a href=\"/x\">FOO</a></p>",
+    "section": "Link reference definitions",
+    "example": 5
+  },
+  {
+    "markdown": "[foo  bar]\n\n[foo bar]: /x",
+    "html": "<p><a href=\"/x\">foo  bar</a></p>",
+    "section": "Link reference definitions",
+    "example": 6
+  },
+  {
+    "markdown": "a paragraph\n\nanother",
+    "html": "<p>a paragraph</p>\n<p>another</p>",
+    "section": "Paragraphs",
+    "example": 1
+  },
+  {
+    "markdown": "foo\n\n\nbar",
+    "html": "<p>foo</p>\n<p>bar</p>",
+    "section": "Paragraphs",
+    "example": 2
+  },
+  {
+    "markdown": "aaa\nbbb",
+    "html": "<p>aaa\nbbb</p>",
+    "section": "Paragraphs",
+    "example": 3
+  },
+  {
+    "markdown": "> quote",
+    "html": "<blockquote>\n<p>quote</p>\n</blockquote>",
+    "section": "Block quotes",
+    "example": 1
+  },
+  {
+    "markdown": "> foo\nbar",
+    "html": "<blockquote>\n<p>foo\nbar</p>\n</blockquote>",
+    "section": "Block quotes",
+    "example": 2
+  },
+  {
+    "markdown": "> foo\n> bar",
+    "html": "<blockquote>\n<p>foo\nbar</p>\n</blockquote>",
+    "section": "Block quotes",
+    "example": 3
+  },
+  {
+    "markdown": "> # H\n> para",
+    "html": "<blockquote>\n<h1>H</h1>\n<p>para</p>\n</blockquote>",
+    "section": "Block quotes",
+    "example": 4
+  },
+  {
+    "markdown": "> - a\n> - b",
+    "html": "<blockquote>\n<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n</blockquote>",
+    "section": "Block quotes",
+    "example": 5
+  },
+  {
+    "markdown": "- a\n- b",
+    "html": "<ul>\n<li>a</li>\n<li>b</li>\n</ul>",
+    "section": "List items",
+    "example": 1
+  },
+  {
+    "markdown": "-\n-\n-",
+    "html": "<ul>\n<li></li>\n<li></li>\n<li></li>\n</ul>",
+    "section": "List items",
+    "example": 2
+  },
+  {
+    "markdown": "- a\n  - b\n  - c",
+    "html": "<ul>\n<li>a\n<ul>\n<li>b</li>\n<li>c</li>\n</ul>\n</li>\n</ul>",
+    "section": "List items",
+    "example": 3
+  },
+  {
+    "markdown": "1. a\n2. b",
+    "html": "<ol>\n<li>a</li>\n<li>b</li>\n</ol>",
+    "section": "Lists",
+    "example": 1
+  },
+  {
+    "markdown": "3. a\n4. b",
+    "html": "<ol start=\"3\">\n<li>a</li>\n<li>b</li>\n</ol>",
+    "section": "Lists",
+    "example": 2
+  },
+  {
+    "markdown": "- a\n\n- b",
+    "html": "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>",
+    "section": "Lists",
+    "example": 3
+  },
+  {
+    "markdown": "- a\n\n- b\n- c",
+    "html": "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n<li>\n<p>c</p>\n</li>\n</ul>",
+    "section": "Lists",
+    "example": 4
+  },
+  {
+    "markdown": "- a\n  - b\n\n  - c",
+    "html": "<ul>\n<li>a\n<ul>\n<li>\n<p>b</p>\n</li>\n<li>\n<p>c</p>\n</li>\n</ul>\n</li>\n</ul>",
+    "section": "Lists",
+    "example": 5
+  },
+  {
+    "markdown": "a\n1. b",
+    "html": "<p>a</p>\n<ol>\n<li>b</li>\n</ol>",
+    "section": "Lists",
+    "example": 6
+  },
+  {
+    "markdown": "a\n2. b",
+    "html": "<p>a\n2. b</p>",
+    "section": "Lists",
+    "example": 7
+  },
+  {
+    "markdown": "\\*not em\\*",
+    "html": "<p>*not em*</p>",
+    "section": "Backslash escapes",
+    "example": 1
+  },
+  {
+    "markdown": "\\`code",
+    "html": "<p>`code</p>",
+    "section": "Backslash escapes",
+    "example": 2
+  },
+  {
+    "markdown": "a\\_b\\_c",
+    "html": "<p>a_b_c</p>",
+    "section": "Backslash escapes",
+    "example": 3
+  },
+  {
+    "markdown": "\\[not a link\\]",
+    "html": "<p>[not a link]</p>",
+    "section": "Backslash escapes",
+    "example": 4
+  },
+  {
+    "markdown": "&copy; &#65; &#x41;",
+    "html": "<p>© A A</p>",
+    "section": "Entity references",
+    "example": 1
+  },
+  {
+    "markdown": "AT&T &amp; foo",
+    "html": "<p>AT&amp;T &amp; foo</p>",
+    "section": "Entity references",
+    "example": 2
+  },
+  {
+    "markdown": "&nbsp;&auml;&ouml;",
+    "html": "<p> äö</p>",
+    "section": "Entity references",
+    "example": 3
+  },
+  {
+    "markdown": "&MadeUp; &nbsp",
+    "html": "<p>&amp;MadeUp; &amp;nbsp</p>",
+    "section": "Entity references",
+    "example": 4
+  },
+  {
+    "markdown": "&#0;",
+    "html": "<p>�</p>",
+    "section": "Entity references",
+    "example": 5
+  },
+  {
+    "markdown": "`code` span",
+    "html": "<p><code>code</code> span</p>",
+    "section": "Code spans",
+    "example": 1
+  },
+  {
+    "markdown": "`` a`b ``",
+    "html": "<p><code>a`b</code></p>",
+    "section": "Code spans",
+    "example": 2
+  },
+  {
+    "markdown": "`  padded  `",
+    "html": "<p><code> padded </code></p>",
+    "section": "Code spans",
+    "example": 3
+  },
+  {
+    "markdown": "`&amp;`",
+    "html": "<p><code>&amp;amp;</code></p>",
+    "section": "Code spans",
+    "example": 4
+  },
+  {
+    "markdown": "`<a>`",
+    "html": "<p><code>&lt;a&gt;</code></p>",
+    "section": "Code spans",
+    "example": 5
+  },
+  {
+    "markdown": "*foo `*` bar*",
+    "html": "<p><em>foo <code>*</code> bar</em></p>",
+    "section": "Code spans",
+    "example": 6
+  },
+  {
+    "markdown": "`*` not em",
+    "html": "<p><code>*</code> not em</p>",
+    "section": "Code spans",
+    "example": 7
+  },
+  {
+    "markdown": "*em* and **strong**",
+    "html": "<p><em>em</em> and <strong>strong</strong></p>",
+    "section": "Emphasis and strong",
+    "example": 1
+  },
+  {
+    "markdown": "a*b*c",
+    "html": "<p>a<em>b</em>c</p>",
+    "section": "Emphasis and strong",
+    "example": 2
+  },
+  {
+    "markdown": "a_b_c",
+    "html": "<p>a_b_c</p>",
+    "section": "Emphasis and strong",
+    "example": 3
+  },
+  {
+    "markdown": "**foo bar**",
+    "html": "<p><strong>foo bar</strong></p>",
+    "section": "Emphasis and strong",
+    "example": 4
+  },
+  {
+    "markdown": "***foo***",
+    "html": "<p><em><strong>foo</strong></em></p>",
+    "section": "Emphasis and strong",
+    "example": 5
+  },
+  {
+    "markdown": "*foo**bar**baz*",
+    "html": "<p><em>foo<strong>bar</strong>baz</em></p>",
+    "section": "Emphasis and strong",
+    "example": 6
+  },
+  {
+    "markdown": "**foo*bar*baz**",
+    "html": "<p><strong>foo<em>bar</em>baz</strong></p>",
+    "section": "Emphasis and strong",
+    "example": 7
+  },
+  {
+    "markdown": "foo***bar***baz",
+    "html": "<p>foo<em><strong>bar</strong></em>baz</p>",
+    "section": "Emphasis and strong",
+    "example": 8
+  },
+  {
+    "markdown": "*foo**bar*",
+    "html": "<p><em>foo**bar</em></p>",
+    "section": "Emphasis and strong",
+    "example": 9
+  },
+  {
+    "markdown": "**foo*bar**",
+    "html": "<p><strong>foo*bar</strong></p>",
+    "section": "Emphasis and strong",
+    "example": 10
+  },
+  {
+    "markdown": "a****b",
+    "html": "<p>a****b</p>",
+    "section": "Emphasis and strong",
+    "example": 11
+  },
+  {
+    "markdown": "*a *b**",
+    "html": "<p><em>a <em>b</em></em></p>",
+    "section": "Emphasis and strong",
+    "example": 12
+  },
+  {
+    "markdown": "_foo bar_",
+    "html": "<p><em>foo bar</em></p>",
+    "section": "Emphasis and strong",
+    "example": 13
+  },
+  {
+    "markdown": "foo_bar_baz",
+    "html": "<p>foo_bar_baz</p>",
+    "section": "Emphasis and strong",
+    "example": 14
+  },
+  {
+    "markdown": "**_mixed_**",
+    "html": "<p><strong><em>mixed</em></strong></p>",
+    "section": "Emphasis and strong",
+    "example": 15
+  },
+  {
+    "markdown": "****foo****",
+    "html": "<p><strong><strong>foo</strong></strong></p>",
+    "section": "Emphasis and strong",
+    "example": 16
+  },
+  {
+    "markdown": "*foo* *bar*",
+    "html": "<p><em>foo</em> <em>bar</em></p>",
+    "section": "Emphasis and strong",
+    "example": 17
+  },
+  {
+    "markdown": "a * b * c",
+    "html": "<p>a * b * c</p>",
+    "section": "Emphasis and strong",
+    "example": 18
+  },
+  {
+    "markdown": "a*\"foo\"*",
+    "html": "<p>a*\"foo\"*</p>",
+    "section": "Emphasis and strong",
+    "example": 19
+  },
+  {
+    "markdown": "[link](/url \"t\")",
+    "html": "<p><a href=\"/url\" title=\"t\">link</a></p>",
+    "section": "Links",
+    "example": 1
+  },
+  {
+    "markdown": "[a](<b c>)",
+    "html": "<p><a href=\"b%20c\">a</a></p>",
+    "section": "Links",
+    "example": 2
+  },
+  {
+    "markdown": "[a]()",
+    "html": "<p><a href=\"\">a</a></p>",
+    "section": "Links",
+    "example": 3
+  },
+  {
+    "markdown": "[a](/b (t))",
+    "html": "<p><a href=\"/b\" title=\"t\">a</a></p>",
+    "section": "Links",
+    "example": 4
+  },
+  {
+    "markdown": "[not](link",
+    "html": "<p>[not](link</p>",
+    "section": "Links",
+    "example": 5
+  },
+  {
+    "markdown": "[[nested]](/u)",
+    "html": "<p><a href=\"/u\">[nested]</a></p>",
+    "section": "Links",
+    "example": 6
+  },
+  {
+    "markdown": "[a *b*](/u)",
+    "html": "<p><a href=\"/u\">a <em>b</em></a></p>",
+    "section": "Links",
+    "example": 7
+  },
+  {
+    "markdown": "[a](/u) [b](/v)",
+    "html": "<p><a href=\"/u\">a</a> <a href=\"/v\">b</a></p>",
+    "section": "Links",
+    "example": 8
+  },
+  {
+    "markdown": "![img](/i.png)",
+    "html": "<p><img src=\"/i.png\" alt=\"img\" /></p>",
+    "section": "Images",
+    "example": 1
+  },
+  {
+    "markdown": "![a *b*](/i)",
+    "html": "<p><img src=\"/i\" alt=\"a b\" /></p>",
+    "section": "Images",
+    "example": 2
+  },
+  {
+    "markdown": "![f](/u \"t\")",
+    "html": "<p><img src=\"/u\" alt=\"f\" title=\"t\" /></p>",
+    "section": "Images",
+    "example": 3
+  },
+  {
+    "markdown": "<http://ex.com>",
+    "html": "<p><a href=\"http://ex.com\">http://ex.com</a></p>",
+    "section": "Autolinks",
+    "example": 1
+  },
+  {
+    "markdown": "<a@b.com>",
+    "html": "<p><a href=\"mailto:a@b.com\">a@b.com</a></p>",
+    "section": "Autolinks",
+    "example": 2
+  },
+  {
+    "markdown": "a <b>bold</b> c",
+    "html": "<p>a <b>bold</b> c</p>",
+    "section": "Raw HTML",
+    "example": 1
+  },
+  {
+    "markdown": "x <!-- y --> z",
+    "html": "<p>x <!-- y --> z</p>",
+    "section": "Raw HTML",
+    "example": 2
+  },
+  {
+    "markdown": "a\\\nb",
+    "html": "<p>a<br />\nb</p>",
+    "section": "Hard line breaks",
+    "example": 1
+  },
+  {
+    "markdown": "a  \nb",
+    "html": "<p>a<br />\nb</p>",
+    "section": "Hard line breaks",
+    "example": 2
+  },
+  {
+    "markdown": "a\nb",
+    "html": "<p>a\nb</p>",
+    "section": "Soft line breaks",
+    "example": 1
+  },
+  {
+    "markdown": "x < y & z > w",
+    "html": "<p>x &lt; y &amp; z &gt; w</p>",
+    "section": "Textual content",
+    "example": 1
+  },
+  {
+    "markdown": "| a | b |\n| - | - |\n| 1 | 2 |",
+    "html": "<table>\n<thead>\n<tr>\n<th>a</th>\n<th>b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>1</td>\n<td>2</td>\n</tr>\n</tbody>\n</table>",
+    "section": "GFM tables",
+    "example": 1
+  },
+  {
+    "markdown": "| L | C | R |\n|:--|:-:|--:|\n| 1 | 2 | 3 |",
+    "html": "<table>\n<thead>\n<tr>\n<th align=\"left\">L</th>\n<th align=\"center\">C</th>\n<th align=\"right\">R</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td align=\"left\">1</td>\n<td align=\"center\">2</td>\n<td align=\"right\">3</td>\n</tr>\n</tbody>\n</table>",
+    "section": "GFM tables",
+    "example": 2
+  },
+  {
+    "markdown": "a | b\n--- | ---\n*x* | `y`",
+    "html": "<table>\n<thead>\n<tr>\n<th>a</th>\n<th>b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><em>x</em></td>\n<td><code>y</code></td>\n</tr>\n</tbody>\n</table>",
+    "section": "GFM tables",
+    "example": 3
+  },
+  {
+    "markdown": "~~struck~~",
+    "html": "<p><del>struck</del></p>",
+    "section": "GFM strikethrough",
+    "example": 1
+  },
+  {
+    "markdown": "~~*a*~~",
+    "html": "<p><del><em>a</em></del></p>",
+    "section": "GFM strikethrough",
+    "example": 2
+  },
+  {
+    "markdown": "~one~",
+    "html": "<p>~one~</p>",
+    "section": "GFM strikethrough",
+    "example": 3
+  },
+  {
+    "markdown": "- [ ] todo\n- [x] done",
+    "html": "<ul>\n<li><input disabled=\"\" type=\"checkbox\" /> todo</li>\n<li><input checked=\"\" disabled=\"\" type=\"checkbox\" /> done</li>\n</ul>",
+    "section": "GFM task lists",
+    "example": 1
+  },
+  {
+    "markdown": "visit https://example.com now",
+    "html": "<p>visit <a href=\"https://example.com\">https://example.com</a> now</p>",
+    "section": "GFM autolinks",
+    "example": 1
+  },
+  {
+    "markdown": "see www.example.com.",
+    "html": "<p>see <a href=\"http://www.example.com\">www.example.com</a>.</p>",
+    "section": "GFM autolinks",
+    "example": 2
+  }
+]

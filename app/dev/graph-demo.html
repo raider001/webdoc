@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Graph / Map view — dev harness</title>
+<!-- Resolve theme before first paint, same policy as the real app. -->
+<script>
+  (function () {
+    try {
+      var stored = localStorage.getItem('wd-theme');
+      var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+<!-- Base tokens/theme FIRST, then the graph styles. -->
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/graph.css">
+<style>
+  html, body { height:100%; margin:0; }
+  body { display:flex; flex-direction:column; background:var(--bg); color:var(--text); }
+  .harness-bar {
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:10px 16px; background:var(--surface); border-bottom:1px solid var(--border);
+  }
+  .harness-bar h1 { font-size:15px; margin:0; font-weight:700; }
+  .harness-bar .note { font-size:12.5px; color:var(--muted); }
+  .harness-bar button {
+    height:32px; padding:0 12px; cursor:pointer; font-size:13px;
+    background:var(--bg); color:var(--text);
+    border:1px solid var(--border); border-radius:8px;
+  }
+  .harness-bar button:hover { background:var(--surface-2); border-color:var(--accent); color:var(--accent); }
+  .harness-bar .spacer { flex:1; }
+  #log { font-size:12.5px; color:var(--accent); min-width:160px; }
+  #stage { flex:1; min-height:0; position:relative; }
+</style>
+</head>
+<body>
+<div class="harness-bar">
+  <h1>Map view — dev harness</h1>
+  <span class="note">Wheel = zoom · drag = pan · click a node = open</span>
+  <div class="spacer"></div>
+  <span id="log" aria-live="polite"></span>
+  <button id="fitBtn">Fit</button>
+  <button id="findBtn">Find “deploy”</button>
+  <button id="themeBtn">Toggle theme</button>
+</div>
+<div id="stage"></div>
+
+<script type="module">
+  import { createGraph } from '/js/graph.js';
+
+  // ~8 docs forming a small DAG, plus: one edge to a MISSING id, one CYCLE,
+  // and a separate disconnected component (glossary/appendix).
+  const docs = [
+    { id: 'intro',       title: 'Introduction',      description: 'What this system is and why it exists.',              assumes: [],                     next: ['setup'] },
+    { id: 'setup',       title: 'Installation',      description: 'Get the toolchain onto your machine.',                assumes: ['intro'],              next: ['config', 'cli'] },
+    { id: 'config',      title: 'Configuration',     description: 'Project settings, environment variables and files.',  assumes: ['setup'],              next: ['deploy'] },
+    { id: 'cli',         title: 'The CLI',           description: 'Command-line interface reference and everyday flags.', assumes: ['setup'],              next: ['deploy'] },
+    { id: 'deploy',      title: 'Deploying',         description: 'Ship a build to a running environment safely.',       assumes: ['config', 'cli'],      next: ['advanced', 'monitoring'] },
+    { id: 'advanced',    title: 'Advanced patterns', description: 'Power-user techniques and composition.',              assumes: ['deploy', 'internals'], next: ['intro'] }, // internals = MISSING; next:intro = CYCLE
+    { id: 'monitoring',  title: 'Monitoring',        description: 'Metrics, logs and alerting for live systems.',        assumes: ['deploy'],             next: [] },
+    { id: 'troubleshoot',title: 'Troubleshooting',   description: 'Diagnose and fix the usual failure modes.',           assumes: ['cli'],                next: ['advanced'] },
+    // Disconnected component:
+    { id: 'glossary',    title: 'Glossary',          description: 'Definitions of the terms used throughout.',           assumes: [],                     next: ['appendix'] },
+    { id: 'appendix',    title: 'Appendix A',        description: 'Reference tables and extra material.',                assumes: ['glossary'],           next: [] }
+  ];
+
+  const stage = document.getElementById('stage');
+  const log = document.getElementById('log');
+
+  const graph = createGraph(stage, docs, {
+    currentId: 'deploy',
+    onOpenDoc: id => { log.textContent = 'open → ' + id; }
+  });
+
+  document.getElementById('fitBtn').addEventListener('click', () => graph.fit());
+  document.getElementById('findBtn').addEventListener('click', () => {
+    const hit = graph.search('deploy');
+    log.textContent = hit ? 'found → ' + hit : 'no match';
+  });
+  document.getElementById('themeBtn').addEventListener('click', () => {
+    const root = document.documentElement;
+    const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('wd-theme', next); } catch (e) {}
+  });
+
+  // Expose for manual poking in the console.
+  window.__graph = graph;
+</script>
+</body>
+</html>
