@@ -4,7 +4,8 @@ import { loadSite, discover, loadDoc } from './catalog.js';
 import { renderMarkdown, INTERIM } from './commonmark.js';
 import { sanitizeToFragment } from './sanitize.js';
 import { numberHeadings, buildTOC } from './numbering.js';
-import { renderTree, markActive, filterTree } from './tree.js';
+import { renderTree, markActive } from './tree.js';
+import { buildSearchIndex, searchDocs } from './search.js';
 import { createGraph } from './graph.js';
 import { highlightWithin } from './highlighter.js';
 import { buildRequirementIndex, preprocessRequirements, renderRequirements, revealRequirement, reqFromQuery, requirementTraceEdges } from './requirements.js';
@@ -52,6 +53,50 @@ function setupDrawer() {
   scrim.addEventListener('click', close);
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !drawer.hidden) close(); });
   return { open, close };
+}
+
+// ---- All-documents search (titles + headings) in the drawer ---------------
+function setupDrawerSearch(drawer) {
+  const input = el('treeSearch');
+  const results = el('searchResults');
+  const tree = el('treeList');
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (!q) { results.hidden = true; results.textContent = ''; tree.hidden = false; return; }
+    tree.hidden = true;
+    results.hidden = false;
+    results.textContent = '';
+    const hits = searchDocs(q, 50);
+    if (!hits.length) {
+      const p = document.createElement('p');
+      p.className = 'search-empty';
+      p.textContent = 'No documents match “' + q + '”.';
+      results.appendChild(p);
+      return;
+    }
+    for (const hit of hits) {
+      const a = document.createElement('a');
+      a.className = 'search-hit';
+      a.href = '#/' + hit.docId;
+      const t = document.createElement('span');
+      t.className = 'search-hit-title';
+      t.textContent = hit.title;
+      a.appendChild(t);
+      if (hit.headings.length) {
+        const sub = document.createElement('span');
+        sub.className = 'search-hit-sub';
+        sub.textContent = hit.headings.slice(0, 3).join(' · ');
+        a.appendChild(sub);
+      }
+      a.addEventListener('click', ev => {
+        if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
+        ev.preventDefault();
+        navigate(hit.docId);
+        drawer.close();
+      });
+      results.appendChild(a);
+    }
+  });
 }
 
 // ---- Rendering pipeline ---------------------------------------------------
@@ -306,8 +351,11 @@ async function boot() {
   // from every loaded doc body. Component ids come from the per-source config.
   await buildRequirementIndex(state.docs, state.site.sources);
 
+  // All-documents search index (titles + headings).
+  buildSearchIndex(state.docs);
+
   renderTree(el('treeList'), state.docs, id => { navigate(id); drawer.close(); });
-  el('treeSearch').addEventListener('input', e => filterTree(el('treeList'), state.docs, e.target.value));
+  setupDrawerSearch(drawer);
 
   window.addEventListener('hashchange', route);
   if (!location.hash || !location.hash.startsWith('#/')) {

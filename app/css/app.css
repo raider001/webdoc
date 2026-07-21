@@ -153,6 +153,18 @@ a:hover { text-decoration:underline; }
   font-size:14px; border-left:2px solid transparent;
 }
 .tree a.doc-link:hover { background:var(--surface-2); color:var(--text); text-decoration:none; }
+
+/* All-documents search results (drawer) */
+.search-results { overflow:auto; padding:6px 8px 24px; }
+.search-results[hidden] { display:none; }
+.search-empty { color:var(--muted); font-size:13.5px; padding:8px 10px; }
+.search-hit {
+  display:flex; flex-direction:column; gap:2px; padding:7px 10px; border-radius:6px;
+  color:var(--text); border-left:2px solid transparent;
+}
+.search-hit:hover { background:var(--surface-2); text-decoration:none; border-left-color:var(--accent); }
+.search-hit-title { font-size:14px; font-weight:500; }
+.search-hit-sub { font-size:12px; color:var(--muted); }
 .tree a.doc-link[aria-current="page"] { background:var(--accent-soft); color:var(--text); border-left-color:var(--accent); font-weight:600; }
 .tree .hit { display:none; }
 .tree.filtering .hit { display:block; }
