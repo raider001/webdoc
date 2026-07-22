@@ -201,6 +201,9 @@ a:hover { text-decoration:underline; }
 .doc th, .doc td { border:1px solid var(--border); padding:8px 11px; text-align:left; }
 .doc th { background:var(--surface-2); }
 .doc img { max-width:100%; height:auto; }
+/* Block images (a screenshot on its own line becomes <p><img>) get a subtle
+   frame so UI captures read as captures. */
+.doc p > img:only-child { display:block; margin:6px 0; border:1px solid var(--border); border-radius:8px; }
 .doc :target { scroll-margin-top:16px; }
 
 /* Collapsible disclosure (<details>/<summary>). */
