@@ -74,7 +74,7 @@ new-document modal or the in-page edit button, that normalises back to Markdown
 and saves it to the server. See [Authoring](Docs/reference/authoring).
 - **Search** — an all-documents search over titles and headings, from the drawer.
 See [Search](Docs/features/search).
-- **Theming** — day and night themes built on CSS custom-property design tokens,
+- **Theming** — light and dark themes built on CSS custom-property design tokens,
 resolved before the first paint. See [Theming](Docs/design/theming).
 
 ## How a document becomes a page

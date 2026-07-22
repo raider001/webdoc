@@ -16,7 +16,7 @@ diagram library introduced in the final stage.
 The application shell and everything needed to read a single document.
 
 - App shell: header, two-pane layout (contents beside content), and footer.
-- Day/night theming resolved before first paint.
+- Light/dark theming resolved before first paint.
 - The HTML sanitizer (allowlist pass over the rendered DOM).
 - Heading auto-numbering and the on-this-page contents list.
 - Config-driven document discovery.
@@ -123,7 +123,7 @@ The one place the core opens the door to an outside library.
 | Feature | Stage |
 | ------- | ----- |
 | App shell (header, two-pane, footer) | 1 |
-| Day/night theming | 1 |
+| Light/dark theming | 1 |
 | HTML sanitizer | 1 |
 | Heading auto-numbering + contents | 1 |
 | Config-driven document discovery | 1 |

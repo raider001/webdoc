@@ -62,11 +62,12 @@ the document id.
 Every document is addressable. The reader uses hash routing, so the current
 document is encoded in the URL as `#/<docId>` — for example
 `#/Docs/features/navigation` opens this page directly. That makes any document
-shareable: copy the address bar and the recipient opens the same page — always
-scrolled to the top, because loading a document resets the scroll position. The
-route encodes only the document (optionally with a `?req=`/`?test=` query), never
-a heading or where you had scrolled, so there is no URL that lands on a specific
-section.
+shareable: copy the address bar and the recipient opens the same page. A plain
+`#/<docId>` link opens at the top, because loading a document resets the scroll
+position; a link that also carries a `?req=`/`?test=` query goes further,
+scrolling to and centering that requirement or test. Beyond that optional query
+the route encodes only the document, never a heading or where you had scrolled,
+so there is no URL that lands on a specific heading.
 
 Headings still receive anchor ids, so an authored in-body link can point at one —
 for example `[text](Docs/features/map#some-heading)` jumps to that heading when

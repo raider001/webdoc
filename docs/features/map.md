@@ -46,8 +46,9 @@ declutter the view and focus on one kind of relationship at a time.
 Not every link points at another document. When the prose links to an outside
 URL — say, [the CommonMark spec](https://spec.commonmark.org/0.31.2/) that the
 parser conforms to — the map renders the target as a distinct URL box carrying a
-small "?" bubble. Activating that bubble **opens the URL in a new tab**, leaving
-the map and your place in the docs untouched. This lets the graph represent the
+small "?" bubble that marks the destination as external. Activating the box
+**opens the URL in a new tab**, leaving the map and your place in the docs
+untouched. This lets the graph represent the
 document set's outbound references without pretending an external site is one of
 your own pages.
 

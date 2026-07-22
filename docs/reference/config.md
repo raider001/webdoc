@@ -42,8 +42,9 @@ The fields:
 | `plugins` | string[] | `[]` | Renderer plugins to enable for rich fenced blocks such as diagrams. Each name loads `app/thirdpartyrenderer/<name>.js`. See [Diagrams & renderer plugins](Docs/features/diagrams). Optional. |
 
 Automated test results are configured **per source** with a `testResults` field
-on each `sources` entry (see [Sources and components](#sources-and-components)),
-not with a top-level key.
+on each `sources` entry (see [Sources and components](#sources-and-components)); a
+top-level `testResults` key is honored only as a fallback for sources that omit
+their own.
 
 The `theme` field is currently **inert**: it is passed through into `/site.json`,
 but no client code reads it, so setting it in `config.json` has no effect on the

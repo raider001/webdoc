@@ -5,7 +5,7 @@
 # Architecture
 
 WebDocs is two cooperating halves that share almost no responsibility. A tiny
-Python server *discovers* documents and hands them to the browser as files. The
+Python server *serves* documents and hands them to the browser as files. The
 browser application *renders* them. Nothing on the server side ever transforms
 Markdown; nothing on the client side ever touches the filesystem. Keeping that
 line sharp is what lets the whole thing stay static, dependency-free, and easy to
@@ -102,7 +102,7 @@ description of the library from the server.
   folder of Markdown plus a component id.
 - The server emits `/site.json`, but that is only the site *config* plus its
   source mounts: the site title, default document, theme, enabled plugins, and
-  for each source a name, url and component. It carries no document ids and no
+  for each source a name, url, component and optional testResults. It carries no document ids and no
   folder tree.
 - Document discovery happens client-side. The client fetches `/site.json`, then
   walks each source's url on demand via `GET /docs/<source>/` directory listings

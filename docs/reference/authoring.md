@@ -95,12 +95,12 @@ highlighter for still gets a generic fallback that colours only comments, string
 and numbers. Either way you never lose content. A tagged block looks like this in
 source:
 
-```text
+````text
 ```python
 def greet(name):
     return f"hello, {name}"
 ```
-```
+````
 
 For the full showcase of every supported language, see
 [Syntax Highlighting](Docs/features/highlighting).
@@ -128,7 +128,7 @@ box with a small "?" bubble that opens in a new tab rather than a document node:
 Conformance is measured against [the CommonMark spec](https://spec.commonmark.org/0.31.2/).
 ```
 
-Standard Markdown link and autolink syntax both work, including bare-URL
+Standard Markdown link and autolink syntax both work, including
 autolinks such as `<https://example.org>`.
 
 ## Requirement-group tables

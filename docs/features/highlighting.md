@@ -26,8 +26,8 @@ pipeline, after the Markdown has already been parsed and sanitized:
   operator, and so on. There is no shared mega-grammar; adding a language means
   adding a tokenizer, not editing the others.
 - **Theme-aware.** Tokens are coloured with CSS custom-property tokens, not fixed
-  hex values, so the same highlighted block reads correctly in both the day and
-  night themes. See [theming](Docs/design/theming) for the token system.
+  hex values, so the same highlighted block reads correctly in both the light and
+  dark themes. See [theming](Docs/design/theming) for the token system.
 
 A fence with **no language tag** is left completely untouched — plain, monospaced
 code, safe by default. A fence tagged with an **unknown or unsupported** language

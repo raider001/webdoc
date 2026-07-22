@@ -17,8 +17,9 @@ index from two things:
 - **Titles** — the `title` field from each document's metadata header.
 - **Headings** — every ATX heading (a line beginning with one to six `#`
   characters) found in the document's raw Markdown source. Setext/underline
-  headings, and any `#` lines inside fenced code or requirement/meta blocks, are
-  stripped before scanning and so are not indexed.
+  headings are never matched — only ATX `#` lines are recognised — so they are
+  never indexed. Any `#` lines inside fenced code or requirement/meta blocks are
+  removed before scanning, so those are not indexed either.
 
 That is the whole index. The body prose is intentionally *not* indexed. This is a
 design choice, not a limitation: titles and headings are the document's own

@@ -186,13 +186,13 @@
     <div class="wrap">
       <h1 class="doc-title">Web Document Tool</h1>
       <p class="lede">A zero-dependency, static, richly-navigable documentation reader that turns a folder of Markdown files into a browsable site — with a hierarchical navigator, per-page contents, automatic section numbering, and a pannable/zoomable map of how the documents relate.</p>
-      <p class="lede" style="font-size:14px">This document describes the design and tracks its build status: phases&nbsp;1–2 have shipped and phases&nbsp;3–5 are in progress (see §16). Section&nbsp;17 records the decisions that shaped it.</p>
+      <p class="lede" style="font-size:14px">This document describes the design and tracks its build status: phases&nbsp;1–2 have shipped and the CommonMark engine, graph, requirements, editor, coverage and diagrams are in progress (see §16). Section&nbsp;17 records the decisions that shaped it.</p>
 
       <hr>
 
       <section id="overview">
         <h2><span class="secn">1</span>Overview &amp; goals</h2>
-        <p>You drop Markdown files into a folder. The tool presents them as a documentation website: a pop-out hamburger tree of the whole library, a two-pane reading view (contents on the left, rendered document on the right), automatic hierarchical section numbers, a day/night theme, and a separate visual "map" that draws each document as a box and connects them by the relationships declared in each document's metadata.</p>
+        <p>You drop Markdown files into a folder. The tool presents them as a documentation website: a pop-out hamburger tree of the whole library, a two-pane reading view (contents on the left, rendered document on the right), automatic hierarchical section numbers, a light/dark theme, and a separate visual "map" that draws each document as a box and connects them by the relationships declared in each document's metadata.</p>
         <p>Core experiences:</p>
         <ul>
           <li><strong>Read</strong> — pick a document from the tree; read it rendered, with a live table of contents.</li>
@@ -339,7 +339,7 @@ requests avoid recomputation. You can embed raw HTML here...
 
         <h3>Syntax highlighting</h3>
         <p>Fenced code blocks are highlighted with <strong>hand-written, zero-dependency tokenizers</strong> — no Prism, no highlight.js. A fenced block's info string (e.g. <code>```python</code>) becomes <code>class="language-python"</code> on the <code>&lt;code&gt;</code> element, exactly as CommonMark/GFM prescribe (so the compliance suite still passes on raw output). Highlighting then runs as a <strong>post-sanitize, post-numbering DOM decoration</strong>: it reads the language, tokenizes the code's text, and wraps tokens in trusted <code>&lt;span class="tok-…"&gt;</code> elements — the same layering pattern as heading numbers.</p>
-        <p><strong>Languages at launch:</strong> Python, Robot Framework, Makefile, shell, and Java, plus a generic fallback (strings / comments / numbers) for a fence tagged with any <em>other</em> (unrecognised) language. A fence with <strong>no</strong> language hint is left completely untouched — plain text, never re-tokenised. Each is a small state-machine tokenizer; token colours are theme tokens, so highlighting adapts to day and night. Because highlighting operates only on already-sanitized text and emits only span wrappers, it adds no attack surface.</p>
+        <p><strong>Languages at launch:</strong> Python, Robot Framework, Makefile, shell, and Java, plus a generic fallback (strings / comments / numbers) for a fence tagged with any <em>other</em> (unrecognised) language. A fence with <strong>no</strong> language hint is left completely untouched — plain text, never re-tokenised. Each is a small state-machine tokenizer; token colours are theme tokens, so highlighting adapts to the light and dark themes. Because highlighting operates only on already-sanitized text and emits only span wrappers, it adds no attack surface.</p>
       </section>
 
       <section id="sanitize">
@@ -627,7 +627,7 @@ pytest</code></pre>
       <section id="roadmap">
         <h2><span class="secn">16</span>Suggested build order</h2>
         <ol>
-          <li><strong>Skeleton + shell + theming</strong> — header/footer/two-pane, tokens, day/night toggle, no-flash script. <span class="pill rec">✓ done</span></li>
+          <li><strong>Skeleton + shell + theming</strong> — header/footer/two-pane, tokens, light/dark toggle, no-flash script. <span class="pill rec">✓ done</span></li>
           <li><strong>Sanitizer + numbering + TOC + discovery + tree + router + multi-link footer</strong> — the app layers around the parser, client-side discovery, and navigation. <span class="pill rec">✓ done</span></li>
           <li><strong>Full CommonMark engine</strong> — block phase, inline phase (delimiter stack), GFM; ratchet the pass-rate to 100% against <code>spec.json</code>. The largest single piece; it also tags fenced code with its language for highlighting. <span class="pill">in progress</span></li>
           <li><strong>Syntax highlighting</strong> — hand-written, zero-dependency tokenizers for Python, Robot Framework, Makefile, shell, and Java (plus a plain fallback), applied as a post-sanitize decoration on fenced code blocks. See §6. <span class="pill">in progress</span></li>
@@ -752,7 +752,7 @@ pytest</code></pre>
         <p>The mermaid facade resolves its library in order: an already-present <code>window.mermaid</code>, then an explicitly set <code>LIB_URL</code> (which wins when set), otherwise the local, git-ignored <code>app/thirdpartyrenderer/mermaid.min.js</code> — keeping the shipped tree free of a bundled third-party runtime. The rendered diagram is wrapped in the same pan/zoom viewport (<code>panzoom.js</code>) as the map, and its <code>&lt;svg&gt;</code> is scrubbed of scripts, <code>on*</code> handlers and <code>javascript:</code> URLs.</p>
       </section>
     </div>
-    <footer class="foot">Design overview for the Web Document Tool · phases 1–2 shipped, 3–5 in progress · wireframes are indicative.</footer>
+    <footer class="foot">Design overview for the Web Document Tool · phases 1–2 shipped; the CommonMark engine, graph, requirements, editor, coverage and diagrams in progress · wireframes are indicative.</footer>
   </main>
 </div>
 

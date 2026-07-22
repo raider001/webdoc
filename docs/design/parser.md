@@ -81,8 +81,8 @@ These slot into the pipeline at different points. Tables are **not** recognised
 during line-by-line block parsing; instead a distinct post-parse pass
 (`extractTables`) runs after the block-structure loop completes and before the
 inline phase, scanning the already-parsed paragraph blocks and rewriting any
-whose first two lines form a header row plus an alignment/delimiter row into a
-table. Strikethrough and extended autolinks, by contrast, are resolved as
+paragraph that contains a header row immediately followed by an
+alignment/delimiter row into a table. Strikethrough and extended autolinks, by contrast, are resolved as
 additional delimiter and scanning rules in the inline phase.
 
 ## Rendering a sample

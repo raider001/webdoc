@@ -20,10 +20,10 @@ different set of values for the same names.
 :root {
   /* semantic surface + text tokens (light theme defaults) */
   --bg:        #ffffff;
-  --surface:   #f5f6f8;
-  --text:      #1a1c1f;
-  --muted:     #5b6570;
-  --border:    #d9dde2;
+  --surface:   #f6f7f9;
+  --text:      #1b1e22;
+  --muted:     #5b636c;
+  --border:    #d8dce1;
   --accent:    #2563eb;
   --code-bg:   #f0f2f5;
 }
@@ -31,12 +31,12 @@ different set of values for the same names.
 :root[data-theme="dark"] {
   /* the dark theme redefines the same names */
   --bg:        #0d1117;
-  --surface:   #1c2027;
-  --text:      #e6e9ee;
+  --surface:   #161b22;
+  --text:      #e6edf3;
   --muted:     #9aa4b0;
   --border:    #2a2f38;
   --accent:    #58a6ff;
-  --code-bg:   #1a1e25;
+  --code-bg:   #161b22;
 }
 
 /* every component reads tokens, never raw colours; links read --accent */
