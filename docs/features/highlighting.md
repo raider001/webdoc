@@ -29,8 +29,11 @@ pipeline, after the Markdown has already been parsed and sanitized:
   hex values, so the same highlighted block reads correctly in both the day and
   night themes. See [theming](Docs/design/theming) for the token system.
 
-An unknown or missing language tag is left as plain, monospaced code — safe by
-default. The five languages below each ship with a dedicated highlighter.
+A fence with **no language tag** is left completely untouched — plain, monospaced
+code, safe by default. A fence tagged with an **unknown or unsupported** language
+still gets a generic fallback pass that highlights comments, strings and numbers
+(but not keywords, builtins or operators). Either way no content is lost. The five
+languages below each ship with a dedicated highlighter.
 
 ## Python
 

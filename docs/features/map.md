@@ -14,9 +14,12 @@ layered layout, drawn entirely in the browser with no charting library.
 
 Each document is a node. Their positions come from a layered layout that flows
 from prerequisites toward the documents that build on them, so reading order
-tends to run in a consistent direction across the canvas. Every node is
-clickable, and the currently open document is highlighted so you always know
-where you stand.
+tends to run in a consistent direction across the canvas. Every *existing*
+document node is clickable, and the currently open document is highlighted so
+you always know where you stand. Documents that are referenced but not present
+in the set are drawn as non-interactive "missing" placeholders — you cannot
+select or focus them — and an outside-URL target renders as a box that opens in
+a new tab (see below) rather than a selectable document.
 
 ## Four kinds of edge
 
@@ -55,7 +58,9 @@ The map is meant to be roamed:
 - **Pan** by dragging the background.
 - **Zoom** with the mouse wheel toward the cursor.
 - **Fit** to recentre and frame the whole graph.
-- **Node search** to filter and locate a node by name in a large set.
+- **Node search** to locate and centre a node by name in a large set; a match
+  is centred and flashed, and the other nodes stay put (it does not filter or
+  hide them).
 - **Minimap** for orientation while you are zoomed in on one region.
 
 ## Select and stay

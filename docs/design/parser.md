@@ -77,9 +77,13 @@ authors expect:
 - **Strikethrough** — `~~deleted~~`.
 - **Autolinks** — bare URLs turned into links without explicit `<…>` brackets.
 
-These are integrated into the two phases rather than bolted on afterward: tables
-are recognised in the block phase, while strikethrough and extended autolinks are
-resolved as additional delimiter and scanning rules in the inline phase.
+These slot into the pipeline at different points. Tables are **not** recognised
+during line-by-line block parsing; instead a distinct post-parse pass
+(`extractTables`) runs after the block-structure loop completes and before the
+inline phase, scanning the already-parsed paragraph blocks and rewriting any
+whose first two lines form a header row plus an alignment/delimiter row into a
+table. Strikethrough and extended autolinks, by contrast, are resolved as
+additional delimiter and scanning rules in the inline phase.
 
 ## Rendering a sample
 
@@ -106,9 +110,12 @@ highlighter can tokenize it — none of the `*`/`<`/`>` are treated as Markdown.
 
 The parser's job ends at producing an HTML string. It is **not** the security
 boundary. A distinct sanitizer pass walks the parsed DOM against an allowlist and
-removes anything that could style or script the page — inline styles, `style` and
-`class` attributes, `script` elements, event-handler attributes, and
-`javascript:`/`data:` URLs. Keeping sanitization independent of the parser means
+removes anything that could style or script the page — inline styles, `style`
+attributes, `script` elements, event-handler attributes, and
+`javascript:`/`data:` URLs. It also strips every `class` attribute, with a single
+exception: one `language-*` token is preserved (lowercased) on `<code>`/`<pre>`
+as the hint the syntax highlighter relies on. Keeping sanitization independent of
+the parser means
 a parser bug can never become an injection bug: even malformed or adversarial
 Markdown is scrubbed after parsing, before it is numbered, decorated, or
 injected. The exact rules are specified in

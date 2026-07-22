@@ -1,8 +1,9 @@
 {
   "siteTitle": "WebDocs",
   "sources": [
-    { "name": "Docs", "path": "docs", "component": "WD" }
+    { "name": "Docs", "path": "docs", "component": "WD", "testResults": ".results.xml" }
   ],
   "defaultDoc": "Docs/overview",
-  "theme": "auto"
+  "theme": "auto",
+  "plugins": ["mermaid"]
 }

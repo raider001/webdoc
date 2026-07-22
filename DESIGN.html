@@ -175,6 +175,9 @@
       <li><a href="#roadmap"><span class="n">16</span>Roadmap</a></li>
       <li><a href="#decisions"><span class="n">17</span>Decisions — settled</a></li>
       <li><a href="#requirements"><span class="n">18</span>Requirements traceability</a></li>
+      <li><a href="#editor"><span class="n">19</span>Authoring — the block editor</a></li>
+      <li><a href="#coverage"><span class="n">20</span>Test coverage — runner &amp; report</a></li>
+      <li><a href="#diagrams"><span class="n">21</span>Diagrams &amp; renderer plugins</a></li>
     </ol>
   </nav>
 
@@ -183,7 +186,7 @@
     <div class="wrap">
       <h1 class="doc-title">Web Document Tool</h1>
       <p class="lede">A zero-dependency, static, richly-navigable documentation reader that turns a folder of Markdown files into a browsable site — with a hierarchical navigator, per-page contents, automatic section numbering, and a pannable/zoomable map of how the documents relate.</p>
-      <p class="lede" style="font-size:14px">This document describes the proposed design for your review. Nothing is built yet. Section&nbsp;17 lists the specific decisions I need from you before I start.</p>
+      <p class="lede" style="font-size:14px">This document describes the design and tracks its build status: phases&nbsp;1–2 have shipped and phases&nbsp;3–5 are in progress (see §16). Section&nbsp;17 records the decisions that shaped it.</p>
 
       <hr>
 
@@ -256,14 +259,25 @@ Python built-in HTTP server  (serve.py, stdlib only — NO build step)
 │  ├─ index.html
 │  ├─ css/app.css
 │  └─ js/
-│     ├─ main.js             # boot: read config, discover, route, render
-│     ├─ markdown.js         # hand-written CommonMark parser + GFM
+│     ├─ main.js             # boot: read config, discover, route, render (routing lives here)
+│     ├─ commonmark.js       # hand-written CommonMark parser + GFM (the ACTIVE engine)
+│     ├─ markdown.js         # legacy first-cut parser — kept on disk, imported by nothing
+│     ├─ catalog.js          # client-side discovery: fetch listings, build the doc catalog
 │     ├─ sanitize.js         # allowlist sanitizer (styling rejected)
 │     ├─ numbering.js        # heading numbers + TOC
-│     ├─ tree.js             # hamburger hierarchy (folders) + all-docs search
+│     ├─ highlighter.js      # syntax-highlight tokenizers (post-sanitize decoration)
+│     ├─ tree.js             # hamburger hierarchy (folders)
+│     ├─ search.js           # in-document find + all-documents (title + headings) index
 │     ├─ graph.js            # relationship map: layout, pan/zoom, node search
-│     ├─ search.js           # in-document + all-documents indexes
-│     └─ router.js           # #/doc-id deep links + history
+│     ├─ doclinks.js         # derives the map's edges from metadata + in-body links
+│     ├─ panzoom.js          # shared pan/zoom viewport (map + diagrams)
+│     ├─ requirements.js     # requirement groups + test cases, cross-document tracing
+│     ├─ coverage.js         # test-coverage graph view (status colours + filters)
+│     ├─ runner.js           # test-runner checklist grid (records pass/fail per step)
+│     ├─ report.js           # exports a self-contained HTML coverage report
+│     ├─ blocks.js           # renderer-plugin registry (post-sanitize block stage)
+│     ├─ plugins.js          # bundled plugins (mermaid diagrams, on by default)
+│     └─ editor.js           # zero-dependency WYSIWYG block editor
 │
 ├─ serve.py                  # stdlib HTTP server: mounts app/ + each source folder,
 │                            #   static files + JSON directory listings. No build step.
@@ -325,7 +339,7 @@ requests avoid recomputation. You can embed raw HTML here...
 
         <h3>Syntax highlighting</h3>
         <p>Fenced code blocks are highlighted with <strong>hand-written, zero-dependency tokenizers</strong> — no Prism, no highlight.js. A fenced block's info string (e.g. <code>```python</code>) becomes <code>class="language-python"</code> on the <code>&lt;code&gt;</code> element, exactly as CommonMark/GFM prescribe (so the compliance suite still passes on raw output). Highlighting then runs as a <strong>post-sanitize, post-numbering DOM decoration</strong>: it reads the language, tokenizes the code's text, and wraps tokens in trusted <code>&lt;span class="tok-…"&gt;</code> elements — the same layering pattern as heading numbers.</p>
-        <p><strong>Languages at launch:</strong> Python, Robot Framework, Makefile, shell, and Java, plus a generic fallback (strings / comments / numbers) for anything else and untagged blocks. Each is a small state-machine tokenizer; token colours are theme tokens, so highlighting adapts to day and night. Because highlighting operates only on already-sanitized text and emits only span wrappers, it adds no attack surface.</p>
+        <p><strong>Languages at launch:</strong> Python, Robot Framework, Makefile, shell, and Java, plus a generic fallback (strings / comments / numbers) for a fence tagged with any <em>other</em> (unrecognised) language. A fence with <strong>no</strong> language hint is left completely untouched — plain text, never re-tokenised. Each is a small state-machine tokenizer; token colours are theme tokens, so highlighting adapts to day and night. Because highlighting operates only on already-sanitized text and emits only span wrappers, it adds no attack surface.</p>
       </section>
 
       <section id="sanitize">
@@ -369,8 +383,8 @@ for each heading of level L in document order:
           <tr><td><strong>Left-pane contents</strong> (TOC)</td><td>Current document</td><td>Within the page (scrolls to a heading)</td><td>The current doc's headings + injected numbers</td></tr>
           <tr><td><strong>Graph view</strong> (overlay)</td><td>Whole library</td><td>Between documents, spatially</td><td>Metadata edges: <code>assumes</code> + <code>next</code></td></tr>
         </table>
-        <p>Plain-language labels bake the distinction into the UI: hamburger = <em>"All documents"</em>, left pane = <em>"On this page"</em>, graph = <em>"Map"</em>. The header carries the site title, the hamburger button (left), and a right-hand cluster with the graph toggle and the theme toggle. The footer carries, straight from the current document's metadata, its <em>assumed-knowledge</em> links (read first) and its <em>recommended-next</em> links — each of which may be several.</p>
-        <p><strong>Search (D6) lives in three places, each scoped to its surface:</strong> an <em>in-document</em> search in the reading pane (find &amp; jump within the current doc), an <em>all-documents</em> search in the hamburger drawer (filters the whole library by title + content), and a <em>node</em> search in the graph / mini-map (locates a document box and centers it).</p>
+        <p>Plain-language labels bake the distinction into the UI: hamburger = <em>"All documents"</em>, left pane = <em>"On this page"</em>, graph = <em>"Map"</em>. The header carries the site title, the hamburger button and breadcrumb (left), an in-page <em>Find</em> input, and a right-hand cluster of controls: a <em>New document</em> button (+), a <em>Test coverage</em> button (✓, §20), the <em>Map</em> toggle, and the <em>theme</em> toggle. A floating <em>Edit</em> button in the reading pane opens the current document in the block editor (§19). The footer carries, straight from the current document's metadata, its <em>assumed-knowledge</em> links (read first) and its <em>recommended-next</em> links — each of which may be several.</p>
+        <p><strong>Search (D6) lives in three places, each scoped to its surface:</strong> an <em>in-document</em> search in the reading pane (find &amp; jump within the current doc), an <em>all-documents</em> search in the hamburger drawer (indexes document <strong>titles and headings only</strong> — not body text — and navigates to the top of a matched document), and a <em>node</em> search in the graph / mini-map (locates a document box and centers it).</p>
       </section>
 
       <section id="wireframes">
@@ -505,7 +519,7 @@ for each heading of level L in document order:
             <rect class="r-surface" x="820" y="470" width="164" height="110" rx="8" stroke="var(--border)"/><text class="tm" x="834" y="490">mini-map</text>
             <rect class="a-stroke" x="856" y="500" width="60" height="40"/>
           </svg>
-          <figcaption>(C) Graph view — each document is a box; solid arrows are prerequisites (<code>assumes</code>), dashed arrows are recommended-next. Pan by dragging, zoom at the cursor, click a box to open it. Colour + dash distinguish edge kinds (colour-blind safe); a dangling reference shows as a marked placeholder.</figcaption>
+          <figcaption>(C) Graph view — each document is a box; solid arrows are prerequisites (<code>assumes</code>), dashed arrows are recommended-next. Pan by dragging, zoom at the cursor; a single click selects and centres a box (staying on the map), a double click opens its document. Colour + dash distinguish edge kinds (colour-blind safe); a dangling reference shows as a marked placeholder.</figcaption>
         </figure>
 
         <figure class="figure">
@@ -537,7 +551,7 @@ for each heading of level L in document order:
 
       <section id="graph">
         <h2><span class="secn">11</span>The relationship graph</h2>
-        <p>This is the most algorithmically interesting part, and it's built entirely by hand. It draws the documents as boxes and the metadata relationships as directed edges, then lets you pan, zoom, and click through.</p>
+        <p>This is the most algorithmically interesting part, and it's built entirely by hand. It draws the documents as boxes and the metadata relationships as directed edges, then lets you pan, zoom, and click through — a single click selects a box and centres it without leaving the map, a double click opens its document.</p>
         <ul>
           <li><strong>Substrate: SVG.</strong> At our scale (tens to low-hundreds of docs) SVG gives free hit-testing (every box is a real element with a click handler), crisp text at any zoom, and declarative edges/arrowheads — exactly the things Canvas would make us reimplement.</li>
           <li><strong>Layout: a hand-rolled layered (Sugiyama-lite) algorithm.</strong> Edges flow in the learning direction (prerequisite → dependent). Stages: break any accidental cycles from bad metadata (drawn, but flagged, never hidden) → assign layers by longest-path → order within layers by the barycenter heuristic to reduce crossings → assign coordinates → route edges. Disconnected clusters are laid out separately and packed. Deterministic, so the same docs always produce the same map (important for you <em>and</em> for tests).</li>
@@ -576,18 +590,26 @@ for each heading of level L in document order:
         <p>Tests use <strong>Playwright through its Python binding</strong> (<code>pytest-playwright</code>) — <strong>no Node, no npm</strong>, keeping the whole toolchain to Python + a browser. They live only in <code>tests/</code>; Chromium installs outside the repo via <code>playwright install</code>. Tests run over HTTP against <code>serve.py</code> (started as a fixture, bound to <code>127.0.0.1</code> for a stable origin). Two test streams:</p>
         <ul>
           <li><strong>Compliance harness:</strong> a vanilla-JS page loads the parser and runs every vendored CommonMark <code>spec.json</code> case (and a separate GFM corpus) <em>in the browser</em>, diffs normalized HTML, and writes the pass-rate to the DOM; a Playwright test opens it and asserts the rate (ratchet: it can only go up). The parser executes in a real browser engine — never Node.</li>
-          <li><strong>End-to-end suite:</strong> tree builds correctly; a doc renders; every Markdown feature renders; the sanitizer <em>positively neutralizes</em> styling/scripts (assert <code>window.__pwned</code> stays undefined and no dialog fires, not merely that a tag is absent); metadata parses; heading numbers match between content and TOC; TOC links scroll; theme toggle persists across reload; tree navigation updates the URL and deep-links work; the graph renders nodes+edges, pans, zooms, and node-clicks open the right doc; missing references degrade gracefully.</li>
+          <li><strong>End-to-end suite:</strong> tree builds correctly; a doc renders; every Markdown feature renders; the sanitizer <em>positively neutralizes</em> styling/scripts (assert <code>window.__pwned</code> stays undefined and no dialog fires, not merely that a tag is absent); metadata parses; heading numbers match between content and TOC; TOC links scroll; theme toggle persists across reload; tree navigation updates the URL and deep-links work; the graph renders nodes+edges, pans, zooms, and a node double-click opens the right doc; missing references degrade gracefully.</li>
         </ul>
         <p>The graph is made deterministic and non-flaky by design: a <code>?test=1</code> mode disables animation and uses fixed layout, and the transform state is exposed as <code>data-scale</code>/<code>data-tx</code>/<code>data-ty</code> with stable <code>data-node-id</code>s, so tests assert exact numbers instead of pixel-diffing. A <code>data-app-ready</code> flag gates every assertion so nothing races startup. The demo corpus <em>is</em> the test fixture set (a normal doc, a Markdown kitchen-sink, an XSS-payload doc, a deep-nesting doc, and a broken-links doc), so the tool ships with meaningful sample content.</p>
       </section>
 
       <section id="run">
         <h2><span class="secn">15</span>Build &amp; run</h2>
-        <pre><code># Configure sources once in config.json (one OR MANY folders):
+        <pre><code># Configure sources once in config.json (one OR MANY folders).
+# Every source MUST declare a non-empty "component" id — it is used to
+# machine-compose requirement/test ids (§18); serve.py exits at startup
+# (SystemExit) if any source is missing one:
 #   { "siteTitle": "My Docs",
-#     "sources": [ { "name": "Guides", "path": "docs" },
-#                  { "name": "API",    "path": "../service/api-docs" } ],
-#     "defaultDoc": "Guides/getting-started" }
+#     "defaultDoc": "Guides/getting-started",
+#     "theme": "auto",
+#     "plugins": ["mermaid"],
+#     "sources": [
+#       { "name": "Guides", "path": "docs", "component": "GD",
+#         "testResults": ".results.xml" },
+#       { "name": "API", "path": "../service/api-docs", "component": "API" }
+#     ] }
 
 # Run it — there is NO build step:
 python serve.py                  # serves app/ + every configured source
@@ -612,7 +634,10 @@ pytest</code></pre>
           <li><strong>Graph view</strong> — layered layout, pan/zoom, edge styling, node search, smarts. <span class="pill">in progress</span></li>
           <li><strong>All-documents search</strong> — the drawer's library-wide search index.</li>
           <li><strong>Playwright suite + demo corpus</strong> — wired throughout (incl. the <code>spec.json</code> conformance run), then hardened.</li>
-          <li><strong>Requirements traceability</strong> — requirement blocks, the global trace index, requirement cards, and the traceability views (graph mode, matrix, coverage dashboard). See §18.</li>
+          <li><strong>Requirements traceability</strong> — meta-wrapped requirement tables and test cases, the global trace index with calculated inverse columns, and the map's requirement-trace edges. See §18. <span class="pill">in progress</span></li>
+          <li><strong>WYSIWYG block editor</strong> — the zero-dependency editor behind the <code>+</code> (new document) and floating <em>Edit</em> buttons; saving normalises blocks back to Markdown and PUTs it to the server. See §19. <span class="pill">in progress</span></li>
+          <li><strong>Test-coverage runner &amp; report</strong> — the status-coloured coverage graph, the manual runner grid, and the exportable self-contained HTML report. See §20. <span class="pill">in progress</span></li>
+          <li><strong>Diagrams &amp; renderer plugins</strong> — the post-sanitize plugin registry; mermaid is enabled by default, so <code>```mermaid</code> blocks render as pan/zoom diagrams. See §21. <span class="pill">in progress</span></li>
         </ol>
         <p>Steps 3–5 are being built in parallel; each step is independently demonstrable, so you can review as we go rather than all at the end.</p>
       </section>
@@ -632,99 +657,102 @@ pytest</code></pre>
 
       <section id="requirements">
         <h2><span class="secn">18</span>Requirements traceability</h2>
-        <p>You can build a <strong>requirement hierarchy</strong> on top of this exact system — <code>Requirements.md</code> pages whose requirements are tracked and traced across every document — by reusing what the design already provides: fenced-block transforms (like syntax highlighting), the metadata index, the relationship graph, search, deep-links, and theming. Almost nothing here is new machinery; it is the same capabilities pointed at requirements.</p>
+        <p>A <strong>requirement hierarchy</strong> is layered on top of this exact system — <code>Requirements.md</code> pages whose requirements are tracked and traced across every document — by reusing what the design already provides: the metadata index, the relationship graph, search, deep-links, and theming. Almost nothing here is new machinery; it is the same capabilities pointed at requirements and their test cases.</p>
 
-        <h3>Authoring a requirement</h3>
-        <p>A requirement is a <strong>fenced code block with the info string <code>requirement</code></strong> — valid CommonMark (so compliance is untouched), which the app turns into a requirement card using the very same post-sanitize hook the syntax highlighter uses. A page holds as many as you like, under normal headings.</p>
-        <pre><code>```requirement
-{
-  "id": "FR-012",
-  "title": "Users can reset their password via email",
-  "type": "functional",
-  "status": "approved",
-  "parents": ["SR-004"],
-  "satisfiedBy": ["design/auth-flow", "FR-013"],
-  "verifiedBy": ["TC-101", "TC-102"],
-  "tags": ["auth", "security"]
-}
-```</code></pre>
-        <p>A <code>Requirements.md</code> page is just a normal document (with the usual <code>&lt;!--meta--&gt;</code> header) that contains these blocks. Requirement <code>id</code>s are author-assigned and <strong>globally unique</strong>; a collision is a flagged warning.</p>
+        <h3>Authoring a requirement group</h3>
+        <p>Requirements are authored as a plain <strong>Markdown table wrapped in a pair of HTML comments</strong> — <code>&lt;!--meta start … --&gt;</code> above and <code>&lt;!--meta end … --&gt;</code> below. The comment wrapper is invisible in any Markdown viewer and is stripped before parsing (so CommonMark compliance is untouched); the app extracts the region from the raw Markdown and renders the built table in its place. The opening comment names the <strong>requirement group</strong>; the table's authored columns are <code>requirement-no</code>, <code>description</code>, and <code>trace-to</code>.</p>
+        <pre><code>&lt;!--meta start {"requirement-group":"nav"}--&gt;
+| requirement-no | description                            | trace-to |
+| -------------- | -------------------------------------- | -------- |
+| 1              | The tree lists every document.         | sys_1    |
+| 2              | Selecting a node opens that document.  | 1        |
+&lt;!--meta end {"requirement-group":"nav"}--&gt;</code></pre>
+        <p>You never write the id. Each id is <strong>machine-composed</strong> as <code>R_{COMPONENT}_{GROUP}_{NO}</code> and forced to <strong>upper case</strong> — so row&nbsp;1 above becomes <code>R_WD_NAV_1</code>. The <em>component</em> comes from the per-source <code>config.json</code> (e.g. <code>"component":"WD"</code>), <strong>not</strong> from the author; a source with no component is a startup error (§15). The only authored trace field is <code>trace-to</code>. Short refs resolve case-insensitively: inside a group a bare <code>1</code> means "requirement&nbsp;1 of this group", <code>nav_1</code> (or <code>NAV_1</code>) names a group within the same component, and the full <code>R_WD_NAV_1</code> is always accepted.</p>
 
-        <h3>The trace model</h3>
+        <h3>Authoring a test case</h3>
+        <p>A test case is a second kind of meta-wrapped block. Its opening comment carries the test <code>key</code>, a <code>name</code>, the requirements it <code>verifies</code>, and its <code>steps</code> (each an action + its expected response). The test id is composed as <code>T_{component}_{key}</code> with the <strong>key preserved exactly as written</strong> (it is <em>not</em> upper-cased) — so <code>"test":"nav-tree"</code> under component <code>WD</code> becomes <code>T_WD_nav-tree</code>.</p>
+        <pre><code>&lt;!--meta start {"test":"nav-tree","name":"Tree navigation",
+  "verifies":["nav_1"],
+  "steps":[
+    {"action":"Open the tree drawer and click a node.",
+     "expected":"That document opens in the reading pane."}
+  ]}--&gt;
+&lt;!--meta end {"test":"nav-tree"}--&gt;</code></pre>
+
+        <h3>The trace model — authored vs. calculated</h3>
+        <p>Only two trace directions are ever authored: a requirement's <code>trace-to</code> and a test's <code>verifies</code>. Everything else is a <strong>calculated inverse</strong>, so the two ends can never disagree. A rendered requirement group is therefore a <strong>five-column</strong> table:</p>
         <table class="tbl">
-          <tr><th>Field</th><th>Meaning &amp; direction</th></tr>
-          <tr><td><code>id</code>, <code>title</code>, <code>type</code>, <code>status</code>, <code>tags</code></td><td>Identity + classification — drives colour, filtering, and the coverage dashboard.</td></tr>
-          <tr><td><code>parents</code></td><td>Higher-level requirements this <em>derives from</em> — the hierarchy backbone (upward). Children are computed as the inverse.</td></tr>
-          <tr><td><code>satisfiedBy</code></td><td>What <em>fulfils</em> it — may reference other requirement ids <strong>or document ids</strong>, so requirements trace directly into the documentation.</td></tr>
-          <tr><td><code>verifiedBy</code></td><td>What <em>verifies</em> it — test / verification items, modelled as requirement blocks of <code>type:"test"</code> so verification lives in the same graph.</td></tr>
+          <tr><th>Column</th><th>Source</th><th>Meaning</th></tr>
+          <tr><td><strong>Requirement</strong></td><td>Composed</td><td>The upper-cased id (e.g. <code>R_WD_NAV_1</code>); the badge deep-links to it.</td></tr>
+          <tr><td><strong>Description</strong></td><td>Authored</td><td>Inline Markdown rendered from the <code>description</code> cell.</td></tr>
+          <tr><td><strong>Trace To</strong></td><td>Authored</td><td>The requirement's own <code>trace-to</code> refs.</td></tr>
+          <tr><td><strong>Trace From</strong></td><td>Calculated</td><td>The inverse: every other requirement whose <code>trace-to</code> resolves to this one.</td></tr>
+          <tr><td><strong>Verified By</strong></td><td>Calculated</td><td>The inverse of each test case whose <code>verifies</code> references this requirement.</td></tr>
         </table>
-        <p>On load — in the same pass that already fetches every document for the tree and graph — the app scans each page for <code>requirement</code> blocks, parses them, and builds one <strong>global trace index</strong> (<code>id → {page, anchor, fields, computed inverse-links}</code>). Every trace target resolves against the requirement index first, then the document index; anything unresolved is flagged as a <em>dangling reference</em> — the same treatment as a broken document link. Each requirement is deep-linkable: <code>#/&lt;page&gt;?req=FR-012</code>.</p>
+        <p>On load — in the same pass that already fetches every document for the tree and graph — the app scans each page's meta blocks, composes the ids, and builds one <strong>global trace index</strong> (id → page, anchor, fields, computed inverse-links). A test's <code>verifies</code> is resolved <em>without</em> group context, so a bare number won't do from a test — use <code>group_no</code> (e.g. <code>nav_1</code>) or the full id; bare numbers only resolve inside a requirement's own <code>trace-to</code>. A cross-document <code>trace-to</code> target becomes a <em>Requirement-trace</em> edge on the map (§11); anything unresolved is flagged as a <em>dangling reference</em>, the same treatment as a broken document link. Each requirement and test case is deep-linkable.</p>
 
-        <h3>What you get — the traceability views</h3>
+        <h3>Rendered output &amp; the coverage view</h3>
         <p>Each is built by <em>reusing</em> a capability already in the plan:</p>
         <ul>
-          <li><strong>Requirement cards</strong> — every block renders in place as a card: id badge, title, type + status pills, and clickable trace chips (Parents ↑, Children ↓, Verified by, Satisfied by) that jump — across documents — to the target requirement. <em>Reuses the fenced-block transform + sanitizer + deep-links.</em></li>
-          <li><strong>Requirement map</strong> — the §11 graph gains a "Requirements" mode: nodes = requirements, edges = parent→child (solid) and verify / satisfy (styled distinctly). Pan, zoom, node-search and neighbourhood highlighting all come for free. <em>Reuses the graph engine.</em></li>
-          <li><strong>Traceability matrix</strong> — a filterable table (requirements × parent / verification / satisfaction) with coverage cells and gaps highlighted. <em>New view; a plain DOM table.</em></li>
-          <li><strong>Coverage dashboard</strong> — totals, % verified, % satisfied, orphans (no parent), leaves with no verification, dangling references, status breakdown. <em>New; a small summary panel.</em></li>
-          <li><strong>Impact / trace</strong> — from any requirement, list and highlight the full upstream (all ancestors) and downstream (children + verifications). <em>Reuses the graph's neighbourhood highlight.</em></li>
-          <li><strong>Hierarchy outline &amp; filter</strong> — the requirements as a collapsible tree by parent/child, filterable by type / status / tag. <em>Reuses the tree + search patterns.</em></li>
+          <li><strong>Requirement tables</strong> — every group renders in place with the two calculated inverse columns filled in, and every id / ref a live cross-document link. <em>Reuses the post-sanitize hook + sanitizer + deep-links.</em></li>
+          <li><strong>Test cases</strong> — each renders as a figure: a caption (name, <code>T_</code> id, a pass / fail / partial result badge, and a <strong>Run</strong> button), a "Verifies:" line, and a numbered <em>#&nbsp;/&nbsp;Action&nbsp;/&nbsp;Expected&nbsp;response</em> step table.</li>
+          <li><strong>Coverage view</strong> (§20) — a full-screen graph of requirement and test nodes coloured by status, with the status legend doubling as a per-status filter, a manual test <strong>runner</strong>, and an <strong>Export report</strong> button. <em>Reuses the graph engine.</em></li>
+          <li><strong>Requirement map</strong> — the §11 graph draws cross-document <code>trace-to</code> links as distinct <em>Requirement-trace</em> edges; pan, zoom, node-search and neighbourhood highlighting all come for free. <em>Reuses the graph engine.</em></li>
+          <li><strong>Link an existing test</strong> — a requirement's report panel has a "Search to link an existing test…" box; picking a test adds this requirement to that test's <code>verifies</code> (there is no separate inline manual-tests editor). <em>Reuses search + the trace index.</em></li>
         </ul>
 
         <figure class="figure">
-          <svg class="wf" viewBox="0 0 1000 300" role="img" aria-label="Requirement card and traceability matrix wireframe">
-            <rect class="r-surface" x="24" y="20" width="440" height="260" rx="10" stroke="var(--border-strong)"/>
-            <rect class="a-soft" x="44" y="40" width="84" height="26" rx="6"/><text class="a-txt" x="54" y="58">FR-012</text>
-            <rect class="r-surface2" x="138" y="40" width="98" height="26" rx="13" stroke="var(--border)"/><text class="tm" x="150" y="58">APPROVED</text>
-            <text class="tm" x="370" y="58">functional</text>
-            <text class="tb" x="44" y="98" style="font-size:15px">Users can reset their password</text>
-            <line class="ln" x1="44" y1="116" x2="444" y2="116"/>
-            <text class="tm" x="44" y="146">↑ PARENTS</text>
-            <rect class="r-surface2" x="150" y="132" width="70" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="160" y="147">SR-004</text>
-            <text class="tm" x="44" y="184">✓ VERIFIED BY</text>
-            <rect class="r-surface2" x="168" y="170" width="66" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="178" y="185">TC-101</text>
-            <rect class="r-surface2" x="242" y="170" width="66" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="252" y="185">TC-102</text>
-            <text class="tm" x="44" y="222">▣ SATISFIED BY</text>
-            <rect class="r-surface2" x="180" y="208" width="140" height="22" rx="11" stroke="var(--border)"/><text class="a-txt" x="190" y="223">design/auth-flow</text>
-            <text class="tm" x="44" y="262">chips link across documents →</text>
+          <svg class="wf" viewBox="0 0 1000 360" role="img" aria-label="Rendered requirement table and test-case figure wireframe">
+            <!-- requirement group table -->
+            <text class="tm" x="24" y="28">REQUIREMENT GROUP · nav — ids compose to R_WD_NAV_n (component WD, from config)</text>
+            <rect class="r-surface2" x="24" y="40" width="952" height="30"/>
+            <text class="tb" x="36" y="60">Requirement</text><text class="tb" x="212" y="60">Description</text><text class="tb" x="520" y="60">Trace To</text><text class="tb" x="648" y="60">Trace From</text><text class="tb" x="800" y="60">Verified By</text>
+            <line class="ln" x1="24" y1="70" x2="976" y2="70"/>
+            <text class="tc" x="36" y="98">R_WD_NAV_1</text><text class="t" x="212" y="98">The tree lists every document.</text><text class="tc" x="520" y="98">sys_1</text><text class="tc" x="648" y="98">R_WD_NAV_2</text><text class="tc" x="800" y="98">T_WD_nav-tree</text>
+            <line class="ln" x1="24" y1="112" x2="976" y2="112"/>
+            <text class="tc" x="36" y="138">R_WD_NAV_2</text><text class="t" x="212" y="138">Selecting a node opens that document.</text><text class="tc" x="520" y="138">1</text><text class="tm" x="648" y="138">—</text><text class="tm" x="800" y="138">—</text>
+            <line class="ln" x1="24" y1="152" x2="976" y2="152"/>
+            <text class="a-txt" x="24" y="178">authored: requirement-no · description · trace-to</text>
+            <text class="tm" x="392" y="178">calculated (inverse): Trace From · Verified By</text>
 
-            <text class="tm" x="524" y="36">TRACEABILITY MATRIX</text>
-            <rect class="r-surface2" x="524" y="46" width="452" height="30"/>
-            <text class="tb" x="536" y="66">Requirement</text><text class="tb" x="712" y="66">Parent</text><text class="tb" x="800" y="66">Verify</text><text class="tb" x="892" y="66">Satisfy</text>
-            <line class="ln" x1="524" y1="76" x2="976" y2="76"/>
-            <text class="t" x="536" y="102">FR-012 Reset password</text>
-            <text class="a-txt" x="722" y="102">✓</text><text class="a-txt" x="814" y="102">✓</text><text class="a-txt" x="908" y="102">✓</text>
-            <line class="ln" x1="524" y1="114" x2="976" y2="114"/>
-            <text class="t" x="536" y="140">FR-013 Email token</text>
-            <text class="a-txt" x="722" y="140">✓</text>
-            <rect x="798" y="124" width="44" height="24" fill="var(--recnext)" opacity="0.20"/><text class="tm" x="805" y="140">gap</text>
-            <text class="a-txt" x="908" y="140">✓</text>
-            <line class="ln" x1="524" y1="152" x2="976" y2="152"/>
-            <text class="t" x="536" y="178">SR-004 Account security</text>
-            <text class="tm" x="724" y="178">—</text><text class="a-txt" x="814" y="178">✓</text><text class="a-txt" x="908" y="178">✓</text>
-            <line class="ln" x1="524" y1="190" x2="976" y2="190"/>
-            <rect class="r-surface" x="524" y="208" width="452" height="66" rx="8" stroke="var(--border)"/>
-            <text class="tm" x="540" y="232">COVERAGE</text>
-            <text class="tb" x="540" y="258">18 reqs · 83% verified · 1 gap · 0 dangling</text>
+            <!-- test-case figure -->
+            <rect class="r-surface" x="24" y="200" width="952" height="140" rx="10" stroke="var(--border-strong)"/>
+            <text class="tb" x="44" y="230" style="font-size:15px">Tree navigation</text>
+            <text class="tc" x="196" y="230">T_WD_nav-tree</text>
+            <rect class="a-soft" x="326" y="216" width="58" height="20" rx="10"/><text class="a-txt" x="338" y="230">PASS</text>
+            <rect class="ln" x="398" y="214" width="56" height="24" rx="6"/><text class="t" x="410" y="230">▷ Run</text>
+            <text class="tm" x="44" y="256">Verifies:</text><text class="a-txt" x="110" y="256">R_WD_NAV_1</text>
+            <rect class="r-surface2" x="44" y="268" width="912" height="26"/>
+            <text class="tb" x="56" y="286">#</text><text class="tb" x="96" y="286">Action</text><text class="tb" x="520" y="286">Expected response</text>
+            <line class="ln" x1="44" y1="294" x2="956" y2="294"/>
+            <text class="t" x="56" y="318">1</text><text class="t" x="96" y="318">Open the tree drawer and click a node.</text><text class="t" x="520" y="318">That document opens in the reading pane.</text>
           </svg>
-          <figcaption>Requirement card (left) with cross-document trace chips, and the traceability matrix (right) with coverage and gap highlighting — both generated from the same fenced <code>requirement</code> blocks.</figcaption>
+          <figcaption>A rendered requirement group (top): authored <code>requirement-no</code> / <code>description</code> / <code>trace-to</code> plus the calculated <em>Trace From</em> and <em>Verified By</em> inverse columns; ids are machine-composed and upper-cased to <code>R_WD_NAV_n</code>. A test case (bottom): name, <code>T_</code> id, result badge, Run button, a Verifies line, and a numbered action / expected-response step table.</figcaption>
         </figure>
 
         <h3>Integration &amp; what is actually new</h3>
-        <p>Reuses: the Markdown engine (fenced blocks), the sanitizer, discovery/metadata, the graph engine, search, deep-links, and theming. New pieces are small: a <code>requirements.js</code> module (extract → index → render cards → matrix + dashboard + graph feed), a <code>requirements.css</code>, and a "Requirements" entry point in the header. The requirements features switch on automatically for any document set that contains <code>requirement</code> blocks (or via a <code>config.json</code> flag).</p>
+        <p>Reuses: the Markdown engine, the sanitizer, discovery / metadata, the graph engine, search, deep-links, and theming. New pieces are small and self-contained: <code>requirements.js</code> (extract meta blocks → compose ids → index → render tables and test-case figures), <code>coverage.js</code> / <code>runner.js</code> / <code>report.js</code> for the coverage view, the manual runner, and the exportable HTML report, and a <code>requirements.css</code>. The requirements features switch on automatically for any document set whose pages contain requirement-group or test meta blocks.</p>
+      </section>
 
-        <div class="callout">
-          <div class="h">Choices to confirm when we build it</div>
-          <ul>
-            <li><strong>Granularity</strong> — many requirement blocks per page (recommended) vs one requirement per document.</li>
-            <li><strong>Verification</strong> — model test cases as requirement blocks of <code>type:"test"</code> so the whole V-model is one traceable graph (recommended), vs treating <code>verifiedBy</code> as external references only.</li>
-            <li><strong>Trace types</strong> — the v1 set (<code>parents</code>, <code>satisfiedBy</code>, <code>verifiedBy</code>, plus an optional <code>relatedTo</code>); rename/extend to match your process (e.g. DOORS-style derives / refines / satisfies / verifies).</li>
-            <li><strong>ID scheme</strong> — free-form author ids (<code>FR-012</code>) with uniqueness enforced (recommended).</li>
-          </ul>
-        </div>
+      <section id="editor">
+        <h2><span class="secn">19</span>Authoring — the block editor</h2>
+        <p>Documents don't have to be edited by hand. A hand-written, <strong>zero-dependency WYSIWYG block editor</strong> (<code>editor.js</code>) is built in. The header's <code>+</code> button opens a new-document modal; the floating <em>Edit</em> button in the reading pane edits the current document. Both open the same editor: a metadata panel (title, description, <code>assumes</code>, <code>next</code>), a block editor for the body, and dedicated widgets for authoring <strong>requirement groups</strong> and <strong>test cases</strong> — the test widget has a key, a name, a <em>Verifies</em> picker, and action / expected step rows.</p>
+        <p>Saving <strong>normalises the blocks back to Markdown</strong> — including the paired <code>&lt;!--meta start … --&gt;</code> / <code>&lt;!--meta end … --&gt;</code> requirement and test regions from §18 — and <code>PUT</code>s it to <code>/docs/&lt;source&gt;/&lt;path&gt;.md</code> (<code>201</code> on create, <code>200</code> on overwrite). The editor stays inside the zero-dependency rule: it is vanilla JS emitting the very same Markdown an author could have typed.</p>
+      </section>
+
+      <section id="coverage">
+        <h2><span class="secn">20</span>Test coverage — runner &amp; report</h2>
+        <p>The header's <em>Test coverage</em> button (✓) opens a full-screen graph of <strong>requirement nodes and test-case nodes coloured by status</strong> — pass (green), fail (red), partial (yellow), untested (blue). The status legend doubles as a per-status filter, and the view carries <em>Run tests</em> and <em>Export report</em> buttons.</p>
+        <p>The <strong>runner</strong> (<code>runner.js</code>) is a checklist grid: for each step it records an actual response, a pass/fail mark, and notes, plus run metadata (<em>at</em> / <em>by</em>, with the tester name remembered in <code>localStorage</code> under <code>wd-tester</code>). The latest result per test is stored in a hidden per-source <code>.webdoc-tests.json</code> sidecar (read/written via <code>GET</code>/<code>PUT /api/tests/&lt;source&gt;</code>), which is also what colours the requirement <em>Verified By</em> badges. <strong>Export</strong> (<code>report.js</code>) produces a single self-contained HTML report.</p>
+      </section>
+
+      <section id="diagrams">
+        <h2><span class="secn">21</span>Diagrams &amp; renderer plugins</h2>
+        <p>Rendering is extensible through a small <strong>renderer-plugin registry</strong> (<code>blocks.js</code> / <code>plugins.js</code>). <code>renderBlocks</code> runs as a <strong>post-sanitize</strong> pipeline stage — the same layering pattern as heading numbers and syntax highlighting — so a plugin only ever sees already-sanitized content. The shipped <code>config.json</code> enables one plugin, <code>"plugins":["mermaid"]</code>, so a default checkout renders <code>```mermaid</code> fenced blocks as diagrams (falling back to the plain code block if the library isn't present).</p>
+        <p>The mermaid facade resolves its library in order: an already-present <code>window.mermaid</code>, then an explicitly set <code>LIB_URL</code> (which wins when set), otherwise the local, git-ignored <code>app/thirdpartyrenderer/mermaid.min.js</code> — keeping the shipped tree free of a bundled third-party runtime. The rendered diagram is wrapped in the same pan/zoom viewport (<code>panzoom.js</code>) as the map, and its <code>&lt;svg&gt;</code> is scrubbed of scripts, <code>on*</code> handlers and <code>javascript:</code> URLs.</p>
       </section>
     </div>
-    <footer class="foot">Design overview for the Web Document Tool · phases 1–2 in progress · wireframes are indicative.</footer>
+    <footer class="foot">Design overview for the Web Document Tool · phases 1–2 shipped, 3–5 in progress · wireframes are indicative.</footer>
   </main>
 </div>
 

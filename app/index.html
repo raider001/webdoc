@@ -16,9 +16,12 @@
   })();
 </script>
 <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/editor.css">
+<link rel="stylesheet" href="/css/coverage.css">
 <link rel="stylesheet" href="/css/graph.css">
 <link rel="stylesheet" href="/css/highlight.css">
 <link rel="stylesheet" href="/css/requirements.css">
+<link rel="stylesheet" href="/css/blocks.css">
 </head>
 <body data-app-ready="0">
 <a class="skip" href="#content">Skip to content</a>
@@ -35,6 +38,8 @@
     <span class="visually-hidden">Search in current document</span>
     <input id="docSearch" type="search" placeholder="Find in page…" autocomplete="off">
   </label>
+  <button id="newDocBtn" class="icon-btn" aria-label="Create a new document" title="New document">＋</button>
+  <button id="covBtn" class="icon-btn" aria-pressed="false" aria-label="Toggle test coverage view" title="Test coverage">✓</button>
   <button id="graphBtn" class="icon-btn" aria-pressed="false" aria-label="Toggle map view" title="Map">◱</button>
   <button id="themeBtn" class="icon-btn" aria-pressed="false" aria-label="Switch theme" title="Day / night">◐</button>
 </header>
@@ -45,6 +50,7 @@
     <div id="tocList"></div>
   </aside>
   <main id="content" class="content-pane" tabindex="-1"></main>
+  <button id="editBtn" class="doc-edit-btn" aria-label="Edit this document" title="Edit this document">✎</button>
 </div>
 
 <footer class="app-footer">

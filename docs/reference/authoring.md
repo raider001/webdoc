@@ -48,7 +48,7 @@ The recognised fields:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `title` | string | The document's display name. Surfaced in the tree, the search index, the map node and the browser tab. |
-| `description` | string | A one-line summary. Rendered as a lede beneath the H1 and shown in search results. |
+| `description` | string | A one-line summary. Rendered as a lede beneath the H1. |
 | `assumes` | string[] | Prerequisite document ids. Drawn as **prerequisite** edges on the map. |
 | `next` | string[] | Recommended-next document ids. Drawn as **recommended-next** edges on the map. |
 
@@ -66,8 +66,9 @@ After the metadata comes exactly one `#` H1 whose text matches the `title`, then
 the body. Use `##` and `###` for sections and subsections.
 
 Do **not** write your own section numbers. WebDocs numbers every heading
-hierarchically after parsing — the first `##` becomes `1`, its first `###`
-becomes `1.1`, and so on down to `######`. Those same numbers are mirrored in the
+hierarchically after parsing — the single `#` H1 is `1`, its first `##` becomes
+`1.1`, that section's first `###` becomes `1.1.1`, and so on down to `######`.
+Those same numbers are mirrored in the
 on-this-page contents list, so a heading and its contents entry always agree. If
 you type numbers by hand you will end up with two sets that drift apart. See
 [Navigation](Docs/features/navigation) for how the contents list is built.
@@ -88,9 +89,11 @@ The languages with a dedicated highlighter are:
 - `bash` (and other shell)
 - `java`
 
-Any other language tag (or none) renders as a clean, un-tokenized code block, so
-you never lose content by tagging a language WebDocs does not yet colour. A
-tagged block looks like this in source:
+A fenced block with **no** language tag is left completely plain — untouched by
+the highlighter. A block tagged with a language WebDocs has no dedicated
+highlighter for still gets a generic fallback that colours only comments, strings
+and numbers. Either way you never lose content. A tagged block looks like this in
+source:
 
 ```text
 ```python
@@ -132,7 +135,7 @@ autolinks such as `<https://example.org>`.
 
 A requirement group is a Markdown table wrapped in a matched pair of metadata
 comments. Like the document header, the pair is extracted from the raw Markdown
-before parsing, then rendered back as a composed 4-column table. Author it as a
+before parsing, then rendered back as a composed 5-column table. Author it as a
 plain table with three columns — `requirement-no`, `description` and `trace-to`:
 
 ```text
@@ -146,12 +149,13 @@ plain table with three columns — `requirement-no`, `description` and `trace-to
 ```
 
 On render this becomes a table with the columns **Requirement | Description |
-Trace To | Trace From**:
+Trace To | Trace From | Verified By**:
 
-- **Requirement** is a composed id, `{component}_{group}_{no}`. The component
-  comes from the source folder's configuration (`WD` for the `Docs` source), the
-  group is the `requirement-group` name, and the number is `requirement-no`. Row
-  1 above becomes `WD_nav_1`.
+- **Requirement** is a composed id, `R_{COMPONENT}_{GROUP}_{NO}` — always
+  carrying the `R_` prefix and fully upper-cased. The component comes from the
+  source folder's configuration (`WD` for the `Docs` source), the group is the
+  `requirement-group` name, and the number is `requirement-no`. Row 1 above
+  becomes `R_WD_NAV_1`.
 - **Description** is your text, verbatim.
 - **Trace To** is what you authored in `trace-to`. It is a requirement
   reference, never free text and never a document id: use the shorthand `2`
@@ -161,6 +165,8 @@ Trace To | Trace From**:
   that defines the target requirement. An unresolved reference is flagged.
 - **Trace From** is calculated for you — it is the inverse of every other
   requirement whose `trace-to` points at this one — so you never author it.
+- **Verified By** is likewise calculated — it is the inverse of each test case
+  whose `verifies` names this requirement — so it is never authored either.
 
 Because trace-to and trace-from resolve to documents, they also feed the map's
 **requirement-trace** edges, giving you a cross-document view of how
@@ -168,6 +174,34 @@ requirements relate. For the concept and the map integration see
 [Requirements Traceability](Docs/features/requirements); for the top-level
 targets that functional requirements trace up to, see
 [System Requirements](Docs/requirements/system).
+
+## Test-case tables
+
+A test case is authored much like a requirement group — a matched pair of
+metadata comments, this time wrapping a table of steps. The start comment carries
+the test's `key`, its `name` and a `verifies` list of requirement references;
+each body row is one step, written as an **action** and its **expected
+response**:
+
+```text
+<!--meta start {"test":"nav-tree","name":"Folder tree renders","verifies":["nav_1"]}-->
+| action | expected response |
+| ------ | ------------------ |
+| Load a document set with two folders. | The tree shows both folders. |
+| Expand a folder. | Its child documents appear. |
+<!--meta end {"test":"nav-tree"}-->
+```
+
+You can also supply the steps inline as a `steps:[...]` array in the start
+comment instead of a body table. On render the pair becomes a figure with a
+numbered `# / Action / Expected response` step table. The test's id is composed
+as `T_{component}_{key}`, and unlike a requirement id the `key` is preserved
+exactly as authored — **not** upper-cased — so the example above renders as
+`T_WD_nav-tree`. Every requirement named in `verifies` gains a calculated
+**Verified By** link back to this test case.
+
+For running a test, recording results and the full coverage view, see
+[Test Coverage](Docs/features/test-coverage).
 
 ## Checklist
 
@@ -178,7 +212,7 @@ Before saving a new document, confirm:
 - No heading contains a hand-typed number.
 - Every code fence has a language tag.
 - Internal links use bare document ids; external links use full URLs.
-- Any requirement group is wrapped in a matched `meta start` / `meta end` pair.
+- Any requirement group or test case is wrapped in a matched `meta start` / `meta end` pair.
 
 With those in place the document is ready to be discovered. Next, see
 [Configuration](Docs/reference/config) to register the source folder it lives in.

@@ -15,7 +15,10 @@ When the library loads, WebDocs walks every document once and builds an in-memor
 index from two things:
 
 - **Titles** — the `title` field from each document's metadata header.
-- **Headings** — every heading the renderer would produce, at every level.
+- **Headings** — every ATX heading (a line beginning with one to six `#`
+  characters) found in the document's raw Markdown source. Setext/underline
+  headings, and any `#` lines inside fenced code or requirement/meta blocks, are
+  stripped before scanning and so are not indexed.
 
 That is the whole index. The body prose is intentionally *not* indexed. This is a
 design choice, not a limitation: titles and headings are the document's own
@@ -30,8 +33,10 @@ Open the drawer and type in the search box. As you type:
 1. The query is matched against indexed titles and headings.
 2. Matching documents are listed, each showing the specific headings that
    matched underneath it.
-3. Selecting a result opens that document — and, when a heading matched, takes
-   you to that heading rather than the top of the page.
+3. Selecting a result opens that document at the top of the page. The matched
+   headings are shown only as context in the result row — they are not jump
+   targets — so from there you use the in-page contents or find to reach the
+   section you want.
 
 Because results are grouped by document and annotated with the matched headings,
 you get useful context before you click: you can see *why* a document matched and

@@ -21,11 +21,14 @@ extensions layered on top:
 
 - **CommonMark 0.31.2** — headings, paragraphs, lists, block quotes, code
   (indented and fenced), thematic breaks, links, images, emphasis and HTML
-  blocks. Conformance sits at 99.5% of the official spec suite.
+  blocks. Conformance sits at 99.5% of the official spec suite, as measured by
+  the in-repo conformance harness (`app/dev/conformance-full.html`).
 - **Tables** — pipe tables with per-column alignment.
 - **Task lists** — `- [x]` / `- [ ]` checkboxes inside list items.
 - **Strikethrough** — `~~text~~`.
-- **Autolinks** — bare `<https://…>` URLs become clickable links.
+- **Autolinks** — the GFM extension auto-detects and links bare `https://…`
+  URLs, `www.`-prefixed URLs and bare email addresses without any surrounding
+  markup, on top of CommonMark's own `<https://…>` angle-bracket autolinks.
 
 For how the two-phase parser and the separate sanitizer actually work, see
 [the CommonMark engine](Docs/design/parser). The next stop after this page is

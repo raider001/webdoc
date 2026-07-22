@@ -1304,3 +1304,10 @@ export function renderMarkdown(src) {
   let html = renderTree(doc, refs);
   return html;
 }
+
+// Render INLINE markdown only (code spans, emphasis, links) — no block
+// constructs. Used for table-cell content such as requirement descriptions and
+// test-case action / expected-response steps, which are inline contexts.
+export function renderInline(src) {
+  return parseInlines(String(src == null ? '' : src), Object.create(null));
+}

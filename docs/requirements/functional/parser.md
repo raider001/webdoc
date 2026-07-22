@@ -10,7 +10,7 @@ and how faithfully it must implement the specification. Rows 1 through 3 trace
 up to `sys_1` (render authored Markdown as a browsable document); row 4 traces
 to `sys_6` (zero third-party runtime dependencies), because the engine is
 hand-written rather than pulled from a library. Each row resolves to an id of
-the form `WD_parse_{no}`.
+the form `R_WD_PARSE_{no}` (e.g. `R_WD_PARSE_1`).
 
 <!--meta start {"requirement-group":"parse"}-->
 | requirement-no | description | trace-to |

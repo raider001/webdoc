@@ -8,7 +8,7 @@ Functional requirements for moving through the document set — the `nav` group.
 Navigation spans three surfaces: the hamburger document tree (between documents),
 the on-this-page contents list (within a document), and hash-based deep-links
 that address any document or requirement. Every row traces up to `sys_3` (let a
-reader navigate the whole document set) and composes to `WD_nav_{no}`.
+reader navigate the whole document set) and composes to `R_WD_NAV_{no}`.
 
 <!--meta start {"requirement-group":"nav"}-->
 | requirement-no | description | trace-to |

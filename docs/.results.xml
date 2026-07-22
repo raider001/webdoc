@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample automated (xUnit / JUnit) results. A <testcase> is linked to a
+     requirement by its classname being the requirement id, or by a
+     <property name="requirement" value="..."/>. A <failure> marks a fail. -->
+<testsuites>
+  <testsuite name="WebDocs automated" tests="14" failures="2">
+    <testcase classname="R_WD_PARSE_1" name="parses the CommonMark 0.31.2 spec examples" time="0.4"/>
+    <testcase classname="R_WD_PARSE_2" name="renders GFM tables, task lists, strikethrough, autolinks" time="0.2"/>
+    <testcase classname="R_WD_PARSE_3" name="reaches 99.5% conformance against spec.json" time="1.1"/>
+    <testcase classname="R_WD_PARSE_4" name="ships no third-party parser" time="0.0"/>
+    <testcase classname="R_WD_SAFE_1" name="strips inline style / style elements / class" time="0.1"/>
+    <testcase classname="R_WD_SAFE_2" name="strips script elements and on* handlers" time="0.1"/>
+    <testcase classname="R_WD_SAFE_3" name="rejects javascript: and data: URLs" time="0.1">
+      <failure message="a javascript: URL survived in one attribute case">assert neutralised == true at sanitize.spec:88</failure>
+    </testcase>
+    <testcase name="highlights Python" time="0.1"><properties><property name="requirement" value="R_WD_HL_1"/></properties></testcase>
+    <testcase name="highlights Java" time="0.1"><properties><property name="requirement" value="R_WD_HL_5"/></properties></testcase>
+    <testcase classname="R_WD_NUM_1" name="numbers every heading hierarchically" time="0.1"/>
+    <testcase classname="R_WD_NUM_2" name="mirrors numbering in the table of contents" time="0.1"/>
+    <testcase classname="R_WD_NAV_3" name="deep-links to a document and requirement" time="0.2"/>
+    <testcase classname="R_WD_SEARCH_1" name="searches all documents by title" time="0.2">
+      <failure message="title match missed one document with a unicode title">expected 2 hits, got 1 at search.spec:41</failure>
+    </testcase>
+    <testcase classname="R_WD_SEARCH_2" name="searches all documents by heading" time="0.2"/>
+  </testsuite>
+</testsuites>

@@ -12,9 +12,12 @@ these rows, so the **Trace From** column below fills in automatically as the
 functional groups are authored. Because these are the roots of the traceability
 tree, their own **Trace To** column is left blank.
 
-Each row composes a stable identifier of the form `WD_sys_{no}` — `WD` is the
-component id configured for this documentation set, `sys` is the group, and the
-number is the row. For the mechanics of composition and inverse traceability see
+Each row composes a stable identifier of the form `R_WD_SYS_{no}` — the id
+carries an `R_` prefix and is fully uppercased, so `WD` is the component id
+configured for this documentation set, `sys` is the group, and the number is the
+row (row 1 becomes `R_WD_SYS_1`). Authored short refs like `sys_1` still work and
+resolve case-insensitively to that uppercase id. For the mechanics of composition
+and inverse traceability see
 [Requirements Traceability](Docs/features/requirements).
 
 <!--meta start {"requirement-group":"sys"}-->

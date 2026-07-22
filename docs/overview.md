@@ -1,5 +1,14 @@
 <!--meta
-{ "title": "WebDocs Overview", "description": "What WebDocs is: a zero-dependency reader that turns Markdown into a browsable, traceable documentation site.", "assumes": [], "next": ["Docs/design/architecture", "Docs/features/markdown"] }
+{
+  "title": "WebDocs Overview",
+  "description": "What WebDocs is: a zero-dependency reader that turns Markdown into a browsable, traceable documentation site.",
+  "assumes": [],
+  "next": [
+    "Docs/how-to",
+    "Docs/design/architecture",
+    "Docs/features/markdown"
+  ]
+}
 -->
 
 # WebDocs Overview
@@ -12,27 +21,33 @@ site — no build step, no bundler, and nothing to install beyond a Python
 interpreter you almost certainly already have.
 
 This document set *is* WebDocs documenting itself. Everything you read here was
-authored as Markdown, discovered from `config.json`, parsed and rendered in your
-browser by the same engine it describes.
+authored as Markdown, discovered by the browser from the server's `/site.json`
+manifest (generated from `config.json`, which lists content sources rather than
+individual documents) and the per-source JSON directory listings it walks, then
+parsed and rendered in your browser by the same engine it describes.
 
 ## The philosophy
 
 Four principles shape every part of the tool.
 
 - **Zero third-party runtime dependencies.** There is no framework, no Markdown
-  library, no syntax-highlighter package, and no CSS toolkit. The parser, the
-  sanitizer, the highlighters, the map, and the theming layer are all
-  hand-written vanilla JavaScript. The only development dependency is Playwright
-  (Python), used to run the test suite.
+library, no syntax-highlighter package, and no CSS toolkit. The parser, the
+sanitizer, the highlighters, the map, and the theming layer are all
+hand-written vanilla JavaScript. The only development dependency is Playwright
+(Python), used to run the test suite.
 - **Effectively static.** Documents are plain files. The optional server exists
-  only to enumerate them and hand them to the browser; it renders nothing. The
-  same content can be served by any static host.
+only to enumerate them and hand them to the browser; it renders nothing. The
+Markdown files themselves are static, but the reader relies on the bundled
+server for the `/site.json` manifest and the per-source JSON directory listings
+(and for the `PUT` requests behind in-app editing and saved test results), so a
+plain static host would need those listings pre-generated and still could not
+support editing.
 - **Everything renders in the browser.** A document travels from raw Markdown to
-  sanitized, numbered, highlighted HTML entirely on the client. The server never
-  transforms content.
+sanitized, numbered, highlighted HTML entirely on the client. The server never
+transforms content.
 - **Self-documenting.** Because the tool reads a folder of Markdown, the most
-  honest way to document it is to author that documentation *as* WebDocs
-  content — which is exactly what this site is.
+honest way to document it is to author that documentation *as* WebDocs
+content — which is exactly what this site is.
 
 ## The pillars
 
@@ -40,19 +55,27 @@ WebDocs is best understood as a handful of independent capabilities layered over
 a shared rendering pipeline.
 
 - **Rendering** — a from-scratch CommonMark 0.31.2 parser plus GitHub-flavored
-  extensions turns Markdown into HTML. See [Markdown & GFM](Docs/features/markdown).
+extensions turns Markdown into HTML, with a renderer-plugin stage that turns
+fenced blocks into diagrams (the default checkout ships mermaid enabled). See
+[Markdown & GFM](Docs/features/markdown) and [Diagrams](Docs/features/diagrams).
 - **Navigation** — a hamburger document tree between documents, an on-this-page
-  contents list within a document, and hash-routed deep links. See
-  [Navigation](Docs/features/navigation).
+contents list within a document, and hash-routed deep links. See
+[Navigation](Docs/features/navigation).
 - **The map** — a hand-rolled SVG graph of how documents and requirements relate,
-  with pan, zoom, search, and a minimap. See [The Map View](Docs/features/map).
+with pan, zoom, search, and a minimap. See [The Map View](Docs/features/map).
 - **Requirements** — metadata-wrapped tables that compose stable requirement ids
-  and trace to and from one another across documents. See
-  [Requirements Traceability](Docs/features/requirements).
+and trace to and from one another across documents. See
+[Requirements Traceability](Docs/features/requirements).
+- **Test coverage** — author test cases that verify requirements, run them
+in-browser against a checklist runner, and export a standalone coverage report.
+See [Test Coverage](Docs/features/test-coverage).
+- **Authoring** — a zero-dependency WYSIWYG block editor, opened from a
+new-document modal or the in-page edit button, that normalises back to Markdown
+and saves it to the server. See [Authoring](Docs/reference/authoring).
 - **Search** — an all-documents search over titles and headings, from the drawer.
-  See [Search](Docs/features/search).
+See [Search](Docs/features/search).
 - **Theming** — day and night themes built on CSS custom-property design tokens,
-  resolved before the first paint. See [Theming](Docs/design/theming).
+resolved before the first paint. See [Theming](Docs/design/theming).
 
 ## How a document becomes a page
 
@@ -65,6 +88,9 @@ and the finished fragment is injected into the page. The
 
 ## Where to go next
 
+If you just want to *use* WebDocs — read the set, search it, author and link
+documents, add diagrams, trace requirements, check coverage — the
+[How-To Guide](Docs/how-to) is the practical starting point: a recipe per job.
 If you want to know *what shipped when*, [the roadmap](Docs/roadmap) lays out the
 seven stages in which these capabilities were built. Otherwise, the
 [Architecture](Docs/design/architecture) is the natural next read, followed by

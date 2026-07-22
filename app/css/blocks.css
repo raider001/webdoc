@@ -1,0 +1,90 @@
+/* blocks.css - pluggable rendered blocks (diagrams) and their fallback.
+   Theme-aware via the shared design tokens; no per-plugin styling lives here. */
+
+.block-render {
+  margin: 1.2rem 0;
+}
+
+.block-render svg {
+  height: auto;
+}
+
+/* Inside the pan/zoom stage the diagram sizes to its own content so the stage
+   has a stable box to be transformed. */
+.block-render .mermaid-diagram {
+  display: block;
+  width: max-content;
+  max-width: none;
+}
+.block-render .mermaid-diagram svg {
+  display: block;
+}
+
+/* ---- Pan/zoom viewport (see panzoom.js) --------------------------------- */
+/* Fixed-height frame the reader pans, zooms and resizes; content is clipped to
+   the frame and moved with a CSS transform. */
+.pz-viewport {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  resize: vertical;              /* drag the bottom edge to make it taller */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;            /* touch drags pan instead of scrolling */
+}
+.pz-viewport.is-panning { cursor: grabbing; }
+.pz-viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pz-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.pz-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 2;
+}
+.pz-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pz-btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.pz-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Inert notice shown when a block could not be rendered (plugin/library absent
+   or the renderer errored). The author's source is kept beneath it. */
+.block-render-note {
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0.45rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+
+.block-render-failed pre {
+  text-align: left;
+}

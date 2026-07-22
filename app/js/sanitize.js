@@ -13,6 +13,7 @@ const ALLOWED_TAGS = new Set([
   'em', 'strong', 'del', 'ins', 'sub', 'sup', 'mark', 'b', 'i',
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
   'figure', 'figcaption', 'div',
+  'details', 'summary', // collapsible disclosure (open attr allowed below)
   'input' // only a disabled checkbox survives (task lists) - enforced below
 ]);
 
@@ -30,7 +31,8 @@ const ALLOWED_ATTRS = {
   img: new Set(['src', 'alt', 'title']),
   input: new Set(['type', 'checked', 'disabled']),
   td: new Set(['colspan', 'rowspan']),
-  th: new Set(['colspan', 'rowspan', 'scope'])
+  th: new Set(['colspan', 'rowspan', 'scope']),
+  details: new Set(['open'])
 };
 
 const SAFE_URL = /^(https?:|mailto:|tel:|\/|\.\/|\.\.\/|#)/i;

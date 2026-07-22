@@ -203,6 +203,42 @@ a:hover { text-decoration:underline; }
 .doc img { max-width:100%; height:auto; }
 .doc :target { scroll-margin-top:16px; }
 
+/* Collapsible disclosure (<details>/<summary>). */
+.doc details {
+  margin:14px 0; border:1px solid var(--border); border-radius:var(--radius);
+  background:var(--surface); overflow:hidden;
+}
+.doc details[open] { background:var(--surface); }
+.doc summary {
+  cursor:pointer; padding:10px 14px 10px 34px; position:relative;
+  font-weight:600; color:var(--text); list-style:none; user-select:none;
+  border-radius:var(--radius);
+}
+.doc summary::-webkit-details-marker { display:none; }
+.doc summary::marker { content:''; }
+.doc summary:hover { background:var(--surface-2); }
+.doc summary:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+/* Rotating chevron drawn from a border triangle. */
+.doc summary::before {
+  content:''; position:absolute; left:14px; top:50%;
+  width:0; height:0; border-style:solid; border-width:5px 0 5px 7px;
+  border-color:transparent transparent transparent var(--muted);
+  transform:translateY(-50%); transition:transform .15s ease;
+}
+.doc details[open] > summary::before { transform:translateY(-50%) rotate(90deg); }
+.doc details[open] > summary { border-bottom:1px solid var(--border); border-radius:var(--radius) var(--radius) 0 0; }
+/* Body: everything after the summary. */
+.doc details > summary ~ * { margin-left:14px; margin-right:14px; }
+.doc details > summary + * { margin-top:12px; }
+.doc details > :last-child { margin-bottom:12px; }
+
+/* External links (resolved by the renderer): a small outbound glyph. */
+.doc a[data-external]::after {
+  content:'↗'; font-size:.82em; margin-left:2px; color:var(--muted);
+  vertical-align:baseline; text-decoration:none;
+}
+.doc a.doc-link-broken { color:var(--recnext); text-decoration:underline dotted; cursor:help; }
+
 /* Interim renderer banner (removed once the full CommonMark engine lands). */
 .interim-banner {
   max-width:var(--content-max); margin:16px auto 0; padding:10px 14px;

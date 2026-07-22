@@ -64,11 +64,20 @@ def load_config(path):
             raise SystemExit(
                 f"config error: source '{name}' is missing a required 'component' name"
             )
-        sources.append({"name": name, "path": folder, "component": str(component).strip()})
+        # Optional per-source automated results (xUnit/JUnit). A path relative to
+        # the source folder (served under /docs/<name>/) or an absolute served URL.
+        sources.append({"name": name, "path": folder, "component": str(component).strip(),
+                        "testResults": src.get("testResults")})
+    # Renderer plugins are bare file stems loaded from app/thirdpartyrenderer/.
+    plugins = cfg.get("plugins", [])
+    if not isinstance(plugins, list):
+        raise SystemExit("config error: 'plugins' must be a list of plugin names")
     return {
         "siteTitle": cfg.get("siteTitle", "Documentation"),
         "defaultDoc": cfg.get("defaultDoc"),
         "theme": cfg.get("theme", "auto"),
+        "testResults": cfg.get("testResults"),
+        "plugins": [str(p) for p in plugins],
         "sources": sources,
     }
 
@@ -135,14 +144,27 @@ class DocHandler(BaseHTTPRequestHandler):
             entries.append({"name": n, "type": "dir" if is_dir else "file", "url": url})
         self._json(200, {"type": "dir", "source": name, "path": rel, "entries": entries})
 
+    def _res_url(self, s):
+        """Resolve a source's automated-results reference to a fetchable URL. A
+        relative path is served from the source mount; an absolute URL passes
+        through; falling back to a site-wide `testResults` if the source has none."""
+        tr = s.get("testResults") or self.config.get("testResults")
+        if not tr:
+            return None
+        if tr.startswith("/") or "://" in tr:
+            return tr
+        return "/docs/" + s["name"] + "/" + tr.lstrip("/")
+
     def _site_json(self):
         cfg = self.config
         self._json(200, {
             "siteTitle": cfg["siteTitle"],
             "defaultDoc": cfg["defaultDoc"],
             "theme": cfg["theme"],
+            "plugins": cfg.get("plugins", []),
             "sources": [
-                {"name": s["name"], "url": "/docs/" + s["name"] + "/", "component": s["component"]}
+                {"name": s["name"], "url": "/docs/" + s["name"] + "/",
+                 "component": s["component"], "testResults": self._res_url(s)}
                 for s in cfg["sources"]
             ],
         })
@@ -158,6 +180,12 @@ class DocHandler(BaseHTTPRequestHandler):
         path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
         if path == "/site.json":
             return self._site_json()
+        if path.startswith("/api/tests/"):
+            return self._tests_get(path[len("/api/tests/"):])
+        if path.startswith("/api/auto/"):
+            return self._auto_get(path[len("/api/auto/"):])
+        if path.startswith("/api/xml/"):
+            return self._xml_list(path[len("/api/xml/"):])
         if path.startswith("/docs/"):
             return self.route_docs(path[len("/docs/"):])
         if path in ("", "/"):
@@ -181,6 +209,102 @@ class DocHandler(BaseHTTPRequestHandler):
         if os.path.isdir(fspath):
             return self._listing(name, rel, fspath)
         return self._file(fspath)
+
+    # -- writing (authoring) ------------------------------------------------
+    # Per-source hidden sidecars INSIDE each source folder (dotfiles, omitted from
+    # listings): manual/run results, and automated-test connections + remembered
+    # xUnit URLs.
+    TESTS_FILE = ".webdoc-tests.json"
+    AUTO_FILE = ".webdoc-auto.json"
+
+    def _sidecar_path(self, name, filename):
+        src = self._source(name.strip("/"))
+        return os.path.join(src["path"], filename) if src else None
+
+    def _sidecar_get(self, name, filename):
+        fp = self._sidecar_path(name, filename)
+        if fp is None:
+            return self._json(404, {"error": "unknown source"})
+        try:
+            with open(fp, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            data = {}
+        return self._json(200, data)
+
+    def _sidecar_put(self, name, filename):
+        fp = self._sidecar_path(name, filename)
+        if fp is None:
+            return self._json(404, {"error": "unknown source"})
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = self.rfile.read(length) if length else b"{}"
+            obj = json.loads(body.decode("utf-8"))  # validate it's JSON
+            with open(fp, "w", encoding="utf-8") as fh:
+                json.dump(obj, fh, indent=2)
+        except (OSError, ValueError) as e:
+            return self._json(400, {"error": str(e)})
+        return self._json(200, {"ok": True})
+
+    def _tests_get(self, name):
+        return self._sidecar_get(name, self.TESTS_FILE)
+
+    def _tests_put(self, name):
+        return self._sidecar_put(name, self.TESTS_FILE)
+
+    def _auto_get(self, name):
+        return self._sidecar_get(name, self.AUTO_FILE)
+
+    def _auto_put(self, name):
+        return self._sidecar_put(name, self.AUTO_FILE)
+
+    # Every .xml file under a source folder (recursive), as served URLs, so the
+    # browser can scan them for xUnit test cases.
+    def _xml_list(self, name):
+        src = self._source(name.strip("/"))
+        if not src:
+            return self._json(404, {"error": "unknown source"})
+        out = []
+        for root, _dirs, files in os.walk(src["path"]):
+            for f in files:
+                if f.lower().endswith(".xml"):
+                    rel = os.path.relpath(os.path.join(root, f), src["path"]).replace("\\", "/")
+                    out.append("/docs/" + src["name"] + "/" + urllib.parse.quote(rel))
+        out.sort()
+        return self._json(200, out)
+
+    def do_PUT(self):
+        """Write a document (PUT /docs/<source>/<path>.md, raw Markdown body) or a
+        source's results sidecar (PUT /api/tests/<source>, JSON body)."""
+        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
+        if path.startswith("/api/tests/"):
+            return self._tests_put(path[len("/api/tests/"):])
+        if path.startswith("/api/auto/"):
+            return self._auto_put(path[len("/api/auto/"):])
+        if not path.startswith("/docs/"):
+            return self._json(405, {"error": "writes are only allowed under /docs/"})
+        rest = path[len("/docs/"):].strip("/")
+        name, _, rel = rest.partition("/")
+        src = self._source(name)
+        if not src:
+            return self._json(404, {"error": f"unknown source '{name}'"})
+        if not rel or not rel.lower().endswith(".md"):
+            return self._json(400, {"error": "path must be a .md file"})
+        fspath = safe_join(src["path"], rel)
+        if not fspath:
+            return self._json(400, {"error": "invalid path"})
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = self.rfile.read(length) if length else b""
+            existed = os.path.exists(fspath)
+            os.makedirs(os.path.dirname(fspath), exist_ok=True)
+            with open(fspath, "wb") as fh:
+                fh.write(body)
+        except (OSError, ValueError) as e:
+            return self._json(500, {"error": str(e)})
+        doc_id = name + "/" + rel[:-3]  # drop the .md
+        return self._json(200 if existed else 201,
+                          {"ok": True, "id": doc_id, "created": not existed})
 
     def log_message(self, fmt, *args):
         print("  %s - %s" % (self.address_string(), fmt % args))

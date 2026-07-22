@@ -1,5 +1,5 @@
 <!--meta
-{ "title": "Navigation", "description": "The document tree, the on-this-page contents with automatic numbering, and deep-linkable headings.", "assumes": ["Docs/overview"], "next": ["Docs/features/search"] }
+{ "title": "Navigation", "description": "The document tree, the on-this-page contents with automatic numbering, and headings that in-body links can anchor to.", "assumes": ["Docs/overview"], "next": ["Docs/features/search"] }
 -->
 
 # Navigation
@@ -61,10 +61,16 @@ the document id.
 
 Every document is addressable. The reader uses hash routing, so the current
 document is encoded in the URL as `#/<docId>` — for example
-`#/Docs/features/navigation` opens this page directly. That makes any view
-shareable: copy the address bar and the recipient lands exactly where you were.
-Individual headings are anchored too, so links can point at a specific section
-rather than the top of the page.
+`#/Docs/features/navigation` opens this page directly. That makes any document
+shareable: copy the address bar and the recipient opens the same page — always
+scrolled to the top, because loading a document resets the scroll position. The
+route encodes only the document (optionally with a `?req=`/`?test=` query), never
+a heading or where you had scrolled, so there is no URL that lands on a specific
+section.
+
+Headings still receive anchor ids, so an authored in-body link can point at one —
+for example `[text](Docs/features/map#some-heading)` jumps to that heading when
+clicked. That is an authoring convenience, not a shareable route position.
 
 Deep linking is what ties the three surfaces together: a search result, a map
 node, and a tree entry all ultimately resolve to the same `#/<docId>` route.

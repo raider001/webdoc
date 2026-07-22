@@ -1,0 +1,7 @@
+# Vendored third-party renderer libraries (bring-your-own).
+# These are NOT part of the zero-dependency core; each is fetched locally and
+# adapted by a facade in app/thirdpartyrenderer/. Keeping them out of the repo
+# preserves the "nothing but hand-written vanilla JS ships" guarantee for a
+# clean clone. To render diagrams locally, place the library here (e.g.
+# mermaid.min.js) and enable the plugin in config.json.
+app/thirdpartyrenderer/*.min.js

@@ -11,7 +11,7 @@ requirement-trace edges from requirement trace-to links, and page-link edges
 from in-body links. It supports pan, zoom, node search, a minimap, a legend with
 per-category toggles, and select-and-stay selection. Every row traces up to
 `sys_4` (visualise how documents and requirements relate) and composes to
-`WD_map_{no}`.
+`R_WD_MAP_{no}`.
 
 <!--meta start {"requirement-group":"map"}-->
 | requirement-no | description | trace-to |

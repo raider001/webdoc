@@ -6,11 +6,12 @@
 
 Functional requirements for the traceability feature itself — the `req` group.
 Requirements are authored as metadata-wrapped Markdown tables; each row composes
-a unique id from the component, group and number; authored `trace-to` links
+a unique, fully-uppercased id in the form `R_<COMPONENT>_<GROUP>_<NO>` from the
+component, group and number; authored `trace-to` links
 point at the target requirement's document; and the inverse `trace-from` links
 are calculated across the whole set. Every row traces up to `sys_5` (trace
 requirements to and from one another across documents) and composes to
-`WD_req_{no}`.
+`R_WD_REQ_{no}`.
 
 <!--meta start {"requirement-group":"req"}-->
 | requirement-no | description | trace-to |

@@ -331,13 +331,58 @@ export function createGraph(container, docs, options) {
   const traceEdges = Array.isArray(opts.traceEdges) ? opts.traceEdges : [];
   const pageLinks = Array.isArray(opts.pageLinks) ? opts.pageLinks : [];
   const externalNodes = Array.isArray(opts.externalNodes) ? opts.externalNodes : [];
+  const nodeStatus = opts.nodeStatus || null; // Map/obj id -> {status, pct} for the coverage view
+  const statusOf = (id) => nodeStatus ? (nodeStatus.get ? nodeStatus.get(id) : nodeStatus[id]) : null;
+  const nodeKind = opts.nodeKind || null;     // Map/obj id -> 'req' | 'test' (coverage view)
+  const kindOf = (id) => nodeKind ? (nodeKind.get ? nodeKind.get(id) : nodeKind[id]) : null;
+  // A test case is pass/fail/untested; a requirement shows its % passing.
+  function covLabel(st, kind) {
+    if (kind === 'test') return st.status === 'pass' ? 'Pass' : st.status === 'fail' ? 'Fail' : st.status === 'partial' ? 'Partial' : 'Untested';
+    return (st.pct === null || st.pct === undefined) ? 'untested' : (st.pct + '% passing');
+  }
 
   container.classList.add('graph-root');
   container.textContent = '';
 
   const model = buildModel(docs || []);
   const nodeList = Array.from(model.nodes.values());
-  const layout = layoutGraph(nodeList, model.edges);
+
+  // Uniform auto-sizing (opts.autoSize): measure every node's real content and
+  // pick ONE box size big enough for the largest, so nothing is clipped and all
+  // boxes match. Runs inside `container` so the live CSS (fonts, the coverage
+  // overlay's monospace titles and un-clamped text) is what gets measured.
+  function computeUniformNodeSize() {
+    const meas = document.createElement('div');
+    meas.style.cssText = 'position:absolute; visibility:hidden; left:-99999px; top:0; pointer-events:none;';
+    container.appendChild(meas);
+    try {
+      let titleW = 0;                                     // widest single-line title -> box width
+      for (const meta of model.nodes.values()) {
+        const t = document.createElement('div');
+        t.className = 'graph-node-title';
+        t.style.cssText = 'white-space:nowrap; display:inline-block;';
+        t.textContent = meta.title;
+        meas.appendChild(t); titleW = Math.max(titleW, t.offsetWidth); meas.removeChild(t);
+      }
+      const W = clamp(Math.ceil(titleW) + 34, LO.nodeW, opts.maxNodeW || 360);
+      let H = 0;                                          // tallest full body at that width -> box height
+      for (const meta of model.nodes.values()) {
+        const body = document.createElement('div');
+        body.className = 'graph-node-body';
+        body.style.cssText = 'width:' + W + 'px; height:auto; box-sizing:border-box;';
+        const t = document.createElement('div'); t.className = 'graph-node-title'; t.textContent = meta.title; body.appendChild(t);
+        const st = statusOf(meta.id);
+        if (st) { const c = document.createElement('div'); c.className = 'graph-node-cov'; c.textContent = covLabel(st, kindOf(meta.id)); body.appendChild(c); }
+        if (meta.missing) { const g = document.createElement('div'); g.className = 'graph-node-tag'; g.textContent = 'missing'; body.appendChild(g); }
+        else if (meta.desc) { const d = document.createElement('div'); d.className = 'graph-node-desc'; d.textContent = meta.desc.length > 110 ? meta.desc.slice(0, 110).trim() + '…' : meta.desc; body.appendChild(d); }
+        meas.appendChild(body); H = Math.max(H, body.offsetHeight); meas.removeChild(body);
+      }
+      return { nodeW: W, nodeH: clamp(Math.ceil(H) + 4, LO.nodeH, opts.maxNodeH || 240) };
+    } finally { container.removeChild(meas); }
+  }
+
+  const sizeOverride = opts.autoSize ? computeUniformNodeSize() : null;
+  const layout = layoutGraph(nodeList, model.edges, sizeOverride);
 
   // Position external-link nodes in a column to the right of the doc layout,
   // then extend the layout bounds so fit()/minimap frame them too.
@@ -352,22 +397,39 @@ export function createGraph(container, docs, options) {
         srcOf.get(pl.to).push(pl.from);
       }
     }
-    const stack = new Map(); // per-source stack counter so several externals don't overlap
+    const PAD = 16;
+    // An external box must never sit on a document node or another external box.
+    const hits = (x, y) => {
+      for (const [, n] of layout.nodes)
+        if (x < n.x + n.w + PAD && x + EXT_W + PAD > n.x && y < n.y + n.h + PAD && y + EXT_H + PAD > n.y) return true;
+      for (const [, p] of extPos)
+        if (x < p.x + p.w + PAD && x + EXT_W + PAD > p.x && y < p.y + p.h + PAD && y + EXT_H + PAD > p.y) return true;
+      return false;
+    };
+    // Nearest collision-free box position to a preferred anchor, searched in
+    // rings of increasing radius (any direction), kept in the positive quadrant.
+    const STEP = 20, MAXR = 120;
+    const nearestFree = (ax, ay) => {
+      if (ax >= 0 && ay >= 0 && !hits(ax, ay)) return { x: ax, y: ay };
+      for (let r = 1; r <= MAXR; r++) {
+        const rad = r * STEP, N = 12 + r * 4;
+        for (let i = 0; i < N; i++) {
+          const ang = (i / N) * Math.PI * 2;
+          const x = ax + Math.cos(ang) * rad, y = ay + Math.sin(ang) * rad;
+          if (x >= 0 && y >= 0 && !hits(x, y)) return { x: x, y: y };
+        }
+      }
+      return { x: Math.max(0, ax), y: ay + MAXR * STEP };
+    };
     for (const en of externalNodes) {
       let src = null;
       for (const s of (srcOf.get(en.id) || [])) { const p = layout.nodes.get(s); if (p) { src = p; break; } }
-      let x, y;
-      if (src) {
-        const key = src.x + ',' + src.y;
-        const n = stack.get(key) || 0; stack.set(key, n + 1);
-        x = src.x + src.w / 2 - EXT_W / 2;              // centred just below its source doc
-        y = src.y + src.h + DROP + n * (EXT_H + STACK_GAP);
-      } else {
-        x = 0; y = layout.height + 60;
-      }
-      extPos.set(en.id, { x: x, y: y, w: EXT_W, h: EXT_H });
-      layout.width = Math.max(layout.width, x + EXT_W);
-      layout.height = Math.max(layout.height, y + EXT_H);
+      const pos = src
+        ? nearestFree(src.x + src.w / 2 - EXT_W / 2, src.y + src.h + DROP) // prefer just below the source
+        : { x: 0, y: layout.height + 60 };
+      extPos.set(en.id, { x: pos.x, y: pos.y, w: EXT_W, h: EXT_H });
+      layout.width = Math.max(layout.width, pos.x + EXT_W);
+      layout.height = Math.max(layout.height, pos.y + EXT_H);
     }
   }
   function nodePos(id) { return layout.nodes.get(id) || extPos.get(id) || null; }
@@ -403,14 +465,22 @@ export function createGraph(container, docs, options) {
     const a = model.nodes.get(from), b = model.nodes.get(to);
     return (a && a.missing) || (b && b.missing);
   }
-  for (const e of layout.edges) {
+  // Draw prerequisite edges first so they always sit BELOW every other line
+  // (recommended-next here, plus the trace/page-link edges drawn further below).
+  const orderedEdges = layout.edges.slice().sort(
+    (a, b) => (a.type === 'prereq' ? 0 : 1) - (b.type === 'prereq' ? 0 : 1));
+  for (const e of orderedEdges) {
     const p = svg('path', {
       class: 'graph-edge graph-edge-' + e.type + (touchesMissing(e.from, e.to) ? ' graph-edge-tomissing' : ''),
       d: edgePath(e.points),
       'data-from': e.from, 'data-to': e.to, 'data-type': e.type
     });
     const url = 'url(#graph-arrow-' + e.type + ')';
-    if (e.head === 'start') p.setAttribute('marker-start', url);
+    // Prerequisite edges point AT the prerequisite (D -> P reads "D requires P"),
+    // so invert the arrowhead end for this type only.
+    let head = e.head;
+    if (e.type === 'prereq') head = (head === 'start') ? 'end' : 'start';
+    if (head === 'start') p.setAttribute('marker-start', url);
     else p.setAttribute('marker-end', url);
     edgesG.appendChild(p);
   }
@@ -477,6 +547,10 @@ export function createGraph(container, docs, options) {
     const cls = ['graph-node'];
     if (meta.missing) cls.push('is-missing');
     if (!meta.missing && id === currentId) cls.push('is-current');
+    const st = statusOf(id);
+    if (st) cls.push('graph-node-st-' + st.status);
+    const kind = kindOf(id);
+    if (kind) cls.push('graph-node-kind-' + kind);
 
     const g = svg('g', {
       class: cls.join(' '),
@@ -496,6 +570,12 @@ export function createGraph(container, docs, options) {
     t.className = 'graph-node-title';
     t.textContent = meta.title;
     body.appendChild(t);
+    if (st) {
+      const cov = document.createElement('div');
+      cov.className = 'graph-node-cov';
+      cov.textContent = covLabel(st, kind);
+      body.appendChild(cov);
+    }
     if (meta.missing) {
       const tag = document.createElement('div');
       tag.className = 'graph-node-tag';
@@ -584,12 +664,14 @@ export function createGraph(container, docs, options) {
     });
     return b;
   }
-  legend.appendChild(legendToggle('prereq', 'Prerequisite', 'hide-prereq'));
-  legend.appendChild(legendToggle('recnext', 'Recommended next', 'hide-recnext'));
-  if (traceEdges.length) legend.appendChild(legendToggle('trace', 'Requirement trace', 'hide-trace'));
-  if (pageLinks.length) legend.appendChild(legendToggle('pagelink', 'Page link', 'hide-pagelink'));
-  legend.appendChild(legendToggle('missing', 'Missing', 'hide-missing'));
-  container.appendChild(legend);
+  if (!opts.hideLegend) {
+    legend.appendChild(legendToggle('prereq', 'Prerequisite', 'hide-prereq'));
+    legend.appendChild(legendToggle('recnext', 'Recommended next', 'hide-recnext'));
+    if (traceEdges.length) legend.appendChild(legendToggle('trace', 'Requirement trace', 'hide-trace'));
+    if (pageLinks.length) legend.appendChild(legendToggle('pagelink', 'Page link', 'hide-pagelink'));
+    legend.appendChild(legendToggle('missing', 'Missing', 'hide-missing'));
+    container.appendChild(legend);
+  }
 
   // Minimap (small, best-effort; never allowed to break the main view).
   const mini = document.createElement('div');
