@@ -10,8 +10,12 @@ const LO = {
   iters: 8                 // barycenter ordering sweeps
 };
 
-// Pan/zoom limits.
-const MIN_K = 0.15, MAX_K = 3;
+// Pan/zoom limits. MIN_K is the interactive floor; FIT_MIN_K is a much smaller
+// floor used ONLY by fit(), so a huge (10k-50k node) layout can be framed in one
+// view instead of overflowing when the true fit scale is below MIN_K. fit() also
+// lowers the instance's live floor to the fitted scale, so you can always zoom
+// back out to the whole-graph overview.
+const MIN_K = 0.15, MAX_K = 3, FIT_MIN_K = 0.002;
 const DRAG_THRESHOLD = 5; // px of pointer travel before a press becomes a drag
 
 // Minimap box dimensions.
@@ -40,4 +44,4 @@ function edgePath(points) {
   return d;
 }
 
-export { SVGNS, LO, MIN_K, MAX_K, DRAG_THRESHOLD, MINI_W, MINI_H, MINI_PAD, svg, clamp, fmt, cssEscape, edgePath };
+export { SVGNS, LO, MIN_K, MAX_K, FIT_MIN_K, DRAG_THRESHOLD, MINI_W, MINI_H, MINI_PAD, svg, clamp, fmt, cssEscape, edgePath };

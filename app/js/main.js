@@ -5,7 +5,7 @@ import { renderMarkdown, INTERIM } from './commonmark.js';
 import { sanitizeToFragment } from './sanitize.js';
 import { numberHeadings, buildTOC } from './numbering.js';
 import { renderTree, markActive } from './tree.js';
-import { buildSearchIndex, searchDocs } from './search.js';
+import { searchDocs } from './search.js';
 import { createGraph } from './graph.js';
 import { openEditor, openNewDocModal, parseDoc, setLinkDocs, richText, confirmDialog } from './editor.js';
 import { loadResults, computeCoverage, computeTestStatus, testsFor, saveManual, manualTests, connectAutomated, disconnectAutomated, rememberAutoUrl, fetchXUnitCatalog } from './coverage.js';
@@ -15,7 +15,7 @@ import { documentLinks, resolveDocId as resolveDocIdShared } from './doclinks.js
 import { highlightWithin } from './highlighter.js';
 import { renderBlocks } from './blocks.js';
 import { loadPlugins } from './plugins.js';
-import { buildRequirementIndex, preprocessRequirements, renderRequirements, revealRequirement, revealTest, reqFromQuery, testFromQuery, requirementTraceEdges, requirementList, testList, setCoverageStatus, inlineMarkdown, blockMarkdown, resolveRequirementRef } from './requirements.js';
+import { buildRequirementIndex, prepareDocGroups, preprocessRequirements, renderRequirements, revealRequirement, revealTest, reqFromQuery, testFromQuery, requirementTraceEdges, requirementList, testList, setCoverageStatus, inlineMarkdown, blockMarkdown, resolveRequirementRef } from './requirements.js';
 import { state, el, combinedStatus, app } from './app-shell.js';
 import { setupCoverageView } from './coverage-view.js';
 
@@ -66,42 +66,53 @@ function setupDrawerSearch(drawer) {
   const input = el('treeSearch');
   const results = el('searchResults');
   const tree = el('treeList');
+  let seq = 0, ctrl = null, timer = null;
   input.addEventListener('input', () => {
     const q = input.value.trim();
+    if (timer) clearTimeout(timer);
+    if (ctrl) { try { ctrl.abort(); } catch (e) {} ctrl = null; }
     if (!q) { results.hidden = true; results.textContent = ''; tree.hidden = false; return; }
-    tree.hidden = true;
-    results.hidden = false;
-    results.textContent = '';
-    const hits = searchDocs(q, 50);
-    if (!hits.length) {
-      const p = document.createElement('p');
-      p.className = 'search-empty';
-      p.textContent = 'No documents match “' + q + '”.';
-      results.appendChild(p);
-      return;
-    }
-    for (const hit of hits) {
-      const a = document.createElement('a');
-      a.className = 'search-hit';
-      a.href = '#/' + hit.docId;
-      const t = document.createElement('span');
-      t.className = 'search-hit-title';
-      t.textContent = hit.title;
-      a.appendChild(t);
-      if (hit.headings.length) {
-        const sub = document.createElement('span');
-        sub.className = 'search-hit-sub';
-        sub.textContent = hit.headings.slice(0, 3).join(' · ');
-        a.appendChild(sub);
+    tree.hidden = true; results.hidden = false;
+    // Debounce keystrokes; AbortController cancels the in-flight request; a sequence
+    // guard drops out-of-order responses so results never flicker.
+    timer = setTimeout(async () => {
+      const mySeq = ++seq;
+      ctrl = new AbortController();
+      results.textContent = '';
+      const loading = document.createElement('p'); loading.className = 'search-empty'; loading.textContent = 'Searching…';
+      results.appendChild(loading);
+      let hits = [];
+      try { hits = await searchDocs(q, 50, ctrl.signal); } catch (e) { hits = []; }
+      if (mySeq !== seq) return;   // superseded by a newer keystroke
+      results.textContent = '';
+      if (!hits.length) {
+        const p = document.createElement('p'); p.className = 'search-empty';
+        p.textContent = 'No documents match “' + q + '”.';
+        results.appendChild(p); return;
       }
-      a.addEventListener('click', ev => {
-        if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
-        ev.preventDefault();
-        navigate(hit.docId);
-        drawer.close();
-      });
-      results.appendChild(a);
-    }
+      for (const hit of hits) {
+        const a = document.createElement('a');
+        a.className = 'search-hit';
+        a.href = '#/' + hit.docId;
+        const t = document.createElement('span');
+        t.className = 'search-hit-title';
+        t.textContent = hit.title;
+        a.appendChild(t);
+        if (hit.snippet) {
+          const sub = document.createElement('span');
+          sub.className = 'search-hit-sub';
+          sub.textContent = hit.snippet;
+          a.appendChild(sub);
+        }
+        a.addEventListener('click', ev => {
+          if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
+          ev.preventDefault();
+          navigate(hit.docId);
+          drawer.close();
+        });
+        results.appendChild(a);
+      }
+    }, 200);
   });
 }
 
@@ -141,7 +152,9 @@ function renderDoc(doc) {
   tocList.textContent = '';
   tocList.appendChild(buildTOC(toc, content));
 
-  // Requirement-group tables: post-sanitize, replace the reqgroup placeholders.
+  // Build THIS document's requirement/test blocks from its (loaded) body - enriched
+  // with the server-resolved trace-from / verified-by - then replace the placeholders.
+  prepareDocGroups(doc.body || '', doc.id, doc.source);
   renderRequirements(article, doc.id);
 
   // Resolve in-body links: internal doc-id refs -> hash routes, in-page anchors
@@ -249,24 +262,40 @@ function buildFootGroup(container, ids, caption, isNext) {
 
   const ul = document.createElement('ul');
   ul.className = 'foot-links';
+  // Lazy boot no longer preloads every doc, so we can't cheaply verify a target
+  // exists - link it with an id-derived title (a real title if it happens to be
+  // cached); a dead link just lands on the not-found view when clicked.
   for (const id of ids) {
     const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = '#/' + id;
     const target = state.byId.get(id);
-    if (target) {
-      const a = document.createElement('a');
-      a.href = '#/' + id;
-      a.textContent = target.title || id;
-      li.appendChild(a);
-    } else {
-      const span = document.createElement('span');
-      span.className = 'foot-missing';
-      span.title = 'Referenced document not found: ' + id;
-      span.textContent = '⚠ ' + id;
-      li.appendChild(span);
-    }
+    a.textContent = (target && target.title) || titleFromId(id);
+    li.appendChild(a);
     ul.appendChild(li);
   }
   container.appendChild(ul);
+}
+
+// A display title derived from a doc id's last segment (lazy footer/stub fallback).
+function titleFromId(id) {
+  const base = String(id).split('/').pop().replace(/[-_]+/g, ' ');
+  return base.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Build a doc stub {id, source, rel, url, name} from an id, matching catalog.makeDoc,
+// so route() can loadDoc it on demand (a 404 is the not-found signal).
+function docFromId(id) {
+  const slash = String(id).indexOf('/');
+  if (slash < 0) return null;
+  const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
+  const url = '/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/');
+  return { id: id, source: source, rel: rel, url: url, name: id.split('/').pop() + '.md' };
+}
+function getDoc(id) {
+  let d = state.byId.get(id);
+  if (!d && id) { d = docFromId(id); if (d) state.byId.set(id, d); }
+  return d;
 }
 
 let spyObserver = null;
@@ -343,9 +372,42 @@ let graphApi = null;
 let docMapStage = null;
 const docMapState = { editMode: false, connector: 'recnext', mapMode: 'all', transform: null, focusMode: false, focusId: null }; // persisted across rebuilds (transform = last pan/zoom; focusId = radial-focus centre)
 
+// The map's data now comes from the server's SQLite index (GET /api/index/graph),
+// not from scanning every loaded doc body. Fetched once per open and cached;
+// invalidated after an edit/create/delete (which updates the server index).
+let graphModel = null;
+function invalidateGraphModel() { graphModel = null; }
+async function fetchGraphModel() {
+  const empty = { docs: [], traceEdges: [], pageLinks: [], externalNodes: [] };
+  let g;
+  try { const res = await fetch('/api/index/graph', { cache: 'no-cache' }); if (!res.ok) return empty; g = await res.json(); }
+  catch (e) { return empty; }
+  const nodes = g.nodes || [];
+  // Rebuild the docs[] that buildModel expects (assumes/next drive the hierarchy).
+  const docs = nodes.map(n => ({ id: n[0], title: n[1], description: n[2] || '', assumes: [], next: [] }));
+  for (const e of g.edges || []) {
+    const f = e[0], t = e[1];
+    if (f < 0 || t < 0) continue;
+    if (e[2] === 0) docs[t].assumes.push(docs[f].id);   // prereq [P,D,0]: D assumes P
+    else docs[f].next.push(docs[t].id);                 // recnext [D,S,1]: D.next = S
+  }
+  const externals = g.externals || [];
+  const externalNodes = externals.map(u => ({ id: 'ext:' + u, url: u }));
+  const traceEdges = (g.traces || []).filter(e => e[0] >= 0 && e[1] >= 0).map(e => ({ from: nodes[e[0]][0], to: nodes[e[1]][0] }));
+  const pageLinks = [];
+  for (const e of g.pageLinks || []) {
+    const f = e[0]; if (f < 0) continue;
+    if (e[2] >= 0) pageLinks.push({ from: nodes[f][0], to: 'ext:' + externals[e[2]] });
+    else if (e[1] >= 0) pageLinks.push({ from: nodes[f][0], to: nodes[e[1]][0] });
+  }
+  return { docs: docs, traceEdges: traceEdges, pageLinks: pageLinks, externalNodes: externalNodes };
+}
+async function ensureGraphModel() { if (!graphModel) graphModel = await fetchGraphModel(); return graphModel; }
+
 // (Re)build the document map. `keepView` restores the current pan/zoom (used
-// after an edit-connections change so the view doesn't jump).
-function buildDocGraph(keepView, animate, refit) {
+// after an edit-connections change so the view doesn't jump). Async: it fetches
+// the server graph model (cached) before laying out.
+async function buildDocGraph(keepView, animate, refit) {
   // Restore the map's last pan/zoom (persisted in docMapState.transform) so it
   // survives close/reopen, switching between views, and tree-update rebuilds -
   // EXCEPT on a focus change (refit), where the layout differs enough that we fit
@@ -358,9 +420,8 @@ function buildDocGraph(keepView, animate, refit) {
     if (animate && graphApi.getNodePositions) animateFrom = graphApi.getNodePositions();
     graphApi.destroy();
   }
+  const model = await ensureGraphModel();
   const focused = !!(docMapState.focusMode && docMapState.focusId);
-  const traces = requirementTraceEdges();
-  const links = documentLinks(state.docs, traces);
   // "Map by" mode picks which connection TYPE shapes the tree layout. It never
   // hides edges - every connection is still drawn; the legend toggles own visibility.
   const mode = docMapState.mapMode || 'all';
@@ -369,11 +430,11 @@ function buildDocGraph(keepView, animate, refit) {
     { value: 'recnext', label: 'Recommended next', swatch: 'recnext' },
     { value: 'prereq', label: 'Prerequisite', swatch: 'prereq' }
   ];
-  graphApi = createGraph(docMapStage, state.docs, {
+  graphApi = createGraph(docMapStage, model.docs, {
     currentId: focused ? docMapState.focusId : (state.current && state.current.id),
-    traceEdges: traces,
-    pageLinks: links.pageLinks,
-    externalNodes: links.externalNodes,
+    traceEdges: model.traceEdges,
+    pageLinks: model.pageLinks,
+    externalNodes: model.externalNodes,
     initialTransform: initialTransform,
     animateFrom: animateFrom,
     mapModes: mapModes,
@@ -419,11 +480,11 @@ function setupGraphButton() {
   document.body.appendChild(overlay);
   docMapStage = stage;
 
-  const open = () => {
+  const open = async () => {
     if (app.closeCoverageView) app.closeCoverageView();   // only one overlay view at a time
     overlay.hidden = false;
     btn.setAttribute('aria-pressed', 'true');
-    buildDocGraph(false);
+    await buildDocGraph(false);
     el('live').textContent = 'Opened the document map. Click a document to select it; double-click to open it. Escape closes.';
   };
   const close = () => {
@@ -521,21 +582,24 @@ async function saveDoc(id, md, wasNew, status) {
   } catch (e) { status.textContent = 'Save failed: ' + e.message; return; }
   if (!res.ok) { status.textContent = 'Save failed (' + res.status + ')'; return; }
   status.textContent = 'Saved.';
+  const cached = state.byId.get(id); if (cached) cached._loaded = false;   // force a fresh reload of the new body
   await refreshCatalog();
+  if (wasNew) await renderTree(el('treeList'), tid => { navigate(tid); if (appDrawer) appDrawer.close(); });   // new file -> tree structure changed
   exitEdit();
   navigate(id);
 }
 
+// After a write the SERVER index updates itself (serve.py do_PUT/do_DELETE hooks),
+// so the client only INVALIDATES caches and reloads what's affected - never re-walks
+// or re-loads the corpus (the old O(N)-on-every-save trap). Tree re-rendering happens
+// only at the specific create/delete sites, since a plain edit changes no structure.
 async function refreshCatalog() {
-  state.docs = await discover(state.site.sources || []);
-  state.byId = new Map();
-  await Promise.all(state.docs.map(d => loadDoc(d).catch(() => d)));
-  state.docs.forEach(d => state.byId.set(d.id, d));
-  // Re-point state.current at the fresh doc object (or null if it was removed).
-  if (state.current) state.current = state.byId.get(state.current.id) || null;
-  await buildRequirementIndex(state.docs, state.site.sources);
-  buildSearchIndex(state.docs);
-  renderTree(el('treeList'), state.docs, (docId) => { navigate(docId); if (appDrawer) appDrawer.close(); });
+  invalidateGraphModel();
+  await buildRequirementIndex(null, state.site.sources);   // refresh the global req index (cheap, server-side)
+  if (state.current) {
+    state.current._loaded = false;                         // its body may have changed on disk
+    try { await loadDoc(state.current); } catch (e) { /* deleted; caller navigates away */ }
+  }
 }
 
 // ---- Delete a document (CRUD) ---------------------------------------------
@@ -555,9 +619,9 @@ async function deleteDocRequest(id) {
 // Confirm, delete, refresh the catalog, then move off the deleted document.
 // `rebuildMap` re-renders an open map so the deleted node disappears in place.
 async function deleteDocFlow(id, opts) {
-  if (!id || !state.byId.has(id)) return;
-  const doc = state.byId.get(id);
-  const title = (doc && doc.title) || id;
+  if (!id) return;
+  const doc = getDoc(id);
+  const title = (doc && doc.title) || titleFromId(id);
   const confirmed = await confirmDialog({
     title: 'Delete this document?',
     message: '“' + title + '” (' + id + '.md) will be permanently deleted from disk. This can’t be undone.',
@@ -571,12 +635,14 @@ async function deleteDocFlow(id, opts) {
     await confirmDialog({ title: 'Delete failed', message: r.error, confirmLabel: 'OK', cancelLabel: null });
     return;
   }
+  state.byId.delete(id);
   await refreshCatalog();
+  await renderTree(el('treeList'), tid => { navigate(tid); if (appDrawer) appDrawer.close(); });   // structure changed
   el('live').textContent = 'Deleted “' + title + '”.';
   // If the reading view was showing the deleted doc, move it to a surviving one.
   if (wasCurrent) {
-    const next = state.byId.has(defaultId()) ? defaultId() : (state.docs[0] && state.docs[0].id);
-    if (next) navigate(next); else showError('No documents left.');
+    const next = defaultId();
+    if (next && next !== id) navigate(next); else showError('No documents left.');
   }
   // Refresh an open map in place so the deleted node is gone.
   if (opts && opts.rebuildMap && !el('graphOverlay').hidden) buildDocGraph(false);
@@ -681,7 +747,7 @@ async function route() {
   const q = raw.indexOf('?');                      // split off ?req=<ID>
   const id = decodeURIComponent(q === -1 ? raw : raw.slice(0, q));
   const query = q === -1 ? '' : raw.slice(q + 1);
-  const doc = state.byId.get(id) || state.byId.get(defaultId());
+  const doc = getDoc(id) || getDoc(defaultId());   // lazy: id -> stub -> loadDoc on demand
   if (!doc) return showError('No documents found.');
   try {
     await loadDoc(doc);
@@ -697,6 +763,7 @@ async function route() {
 }
 function defaultId() {
   return (state.site && state.site.defaultDoc) || (state.docs[0] && state.docs[0].id);
+  // state.docs is empty under lazy boot; a configured defaultDoc is expected.
 }
 function showError(msg) {
   const content = el('content');
@@ -749,20 +816,13 @@ async function boot() {
   // missing plugin or absent library is skipped, never blocking boot.
   await loadPlugins(state.site.plugins);
 
-  state.docs = await discover(state.site.sources || []);
-  // Load metadata for every doc once, so the tree, footer and search have titles.
-  await Promise.all(state.docs.map(d => loadDoc(d).catch(() => d)));
-  state.docs.forEach(d => state.byId.set(d.id, d));
-
-  // Build the global requirement trace index (composed ids + calculated trace-from)
-  // from every loaded doc body. Component ids come from the per-source config.
-  await buildRequirementIndex(state.docs, state.site.sources);
-
-  // All-documents search index (titles + headings).
-  buildSearchIndex(state.docs);
-
-  // Feed the link-popover URL autocomplete (used in the editor and coverage WYSIWYG).
-  setLinkDocs(state.docs.map(d => ({ id: d.id, title: d.title || d.id })));
+  // LAZY boot: do NOT discover + load every document body (the old ceiling). The
+  // global requirement/test index comes from the server's SQLite index; individual
+  // documents load on demand when viewed; the tree, all-docs search and the map are
+  // all server-backed. Boot cost is now flat regardless of corpus size.
+  state.docs = [];
+  await buildRequirementIndex(null, state.site.sources);
+  setLinkDocs([]);   // editor link autocomplete over 50k docs -> server-backed suggestions is a follow-up
 
   // Test-coverage status, so requirement badges in the tables colour by pass/fail.
   try {
@@ -770,7 +830,7 @@ async function boot() {
     setCoverageStatus(combinedStatus(requirementList(), testList(), cov));
   } catch (e) { /* no results -> badges stay neutral */ }
 
-  renderTree(el('treeList'), state.docs, id => { navigate(id); appDrawer.close(); });
+  await renderTree(el('treeList'), id => { navigate(id); appDrawer.close(); });
   setupDrawerSearch(appDrawer);
 
   window.addEventListener('hashchange', route);

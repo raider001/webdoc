@@ -164,10 +164,9 @@ function extractReqGroup(meta, table, doc, component) {
       traceTo: splitRefs(pick(row, ['trace-to', 'traceto', 'trace'])),
       traceFrom: [], verifiedBy: []   // verifiedBy is CALCULATED from tests' `verifies`
     };
-    if (component && group) {
-      if (index.has(id)) console.warn('[requirements] duplicate requirement id:', id);
-      index.set(id, rec);
-    }
+    // NOTE: the global index comes from the server (buildRequirementIndex); per-doc
+    // extraction only builds block structure for rendering, so it does NOT populate
+    // the global index here (prepareDocGroups enriches from it instead).
     g.rows.push(rec);
   }
   return g;
@@ -205,14 +204,15 @@ function extractTestCase(meta, table, doc, component) {
     name: (meta && meta.name) || key || id,
     steps: steps, verifiesRaw: verifiesRaw, verifies: []
   };
-  if (component && key) {
-    if (testIndex.has(id)) console.warn('[requirements] duplicate test id:', id);
-    testIndex.set(id, rec);
-  }
+  // Global test index comes from the server (see extractReqGroup note).
   return { kind: 'test', rec: rec, error: error };
 }
 
-// Build the global indexes across ALL documents, then the inverse links.
+// Build the GLOBAL requirement/test index from the server's SQLite index (composed
+// ids + resolved trace-from / verified-by / verifies). This used to scan every doc
+// body at boot - the wall that capped the corpus. Now the server computes it and the
+// browser fetches a compact list; per-document block STRUCTURE (for the in-document
+// tables) is parsed on demand from the displayed doc only (prepareDocGroups).
 export async function buildRequirementIndex(docs, sources) {
   index.clear();
   testIndex.clear();
@@ -220,31 +220,46 @@ export async function buildRequirementIndex(docs, sources) {
   componentBySource = {};
   for (const s of sources || []) componentBySource[s.name] = s.component;
 
-  for (const doc of docs) {
-    if (!doc._loaded) { try { await loadDoc(doc); } catch (e) { continue; } }
-    const component = componentBySource[doc.source];
-    const blocks = extractGroups(doc.body || '', doc, component);
-    if (blocks.length) groupsByDoc.set(doc.id, blocks);
+  let data = null;
+  try {
+    const res = await fetch('/api/index/coverage', { cache: 'no-cache' });
+    if (res.ok) data = await res.json();
+  } catch (e) { /* index unavailable -> empty (badges/map stay neutral) */ }
+  if (!data) return;
+  for (const r of data.requirements || []) {
+    index.set(r.id, {
+      id: r.id, docId: r.docId, component: r.component, group: r.group, no: r.no,
+      description: r.description || '', traceTo: (r.traceTo || []).slice(),
+      traceFrom: (r.traceFrom || []).slice(), verifiedBy: (r.verifiedBy || []).slice()
+    });
   }
+  for (const t of data.tests || []) {
+    testIndex.set(t.id, {
+      id: t.id, docId: t.docId, component: t.component, key: t.key, name: t.name || t.id,
+      steps: t.steps || [], verifiesRaw: (t.verifies || []).slice(), verifies: (t.verifies || []).slice()
+    });
+  }
+}
 
-  // Requirement Trace From = inverse of every resolvable Trace To.
-  for (const rec of index.values()) {
-    for (const raw of rec.traceTo) {
-      const target = resolveReqRef(raw, rec);
-      if (target && index.has(target)) index.get(target).traceFrom.push(rec.id);
-    }
-  }
-  // A test Verifies requirements (authored on the test). The requirement's
-  // Verified By is the calculated inverse.
-  for (const rec of testIndex.values()) {
-    for (const raw of rec.verifiesRaw) {
-      const target = resolveReqRef(raw, { component: rec.component });
-      if (target && index.has(target)) {
-        if (rec.verifies.indexOf(target) === -1) rec.verifies.push(target);
-        index.get(target).verifiedBy.push(rec.id);
+// Parse the CURRENT document's requirement/test blocks from its (already-loaded)
+// body and stash them for renderRequirements, enriched with the global trace-from /
+// verified-by / verifies resolved by the server. Only the displayed doc is parsed.
+export function prepareDocGroups(body, docId, source) {
+  const component = componentBySource[source];
+  const blocks = extractGroups(String(body || ''), { id: docId, source: source }, component);
+  for (const b of blocks) {
+    if (b.kind === 'req') {
+      for (const rec of b.rows) {
+        const g = index.get(rec.id);
+        if (g) { rec.traceFrom = g.traceFrom || []; rec.verifiedBy = g.verifiedBy || []; }
       }
+    } else if (b.kind === 'test' && b.rec) {
+      const g = testIndex.get(b.rec.id);
+      if (g) b.rec.verifies = (g.verifies || []).slice();
     }
   }
+  groupsByDoc.set(docId, blocks);
+  return blocks;
 }
 
 // Every known requirement (for the coverage rollup and the editor picker).

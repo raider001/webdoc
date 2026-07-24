@@ -25,16 +25,9 @@ export function setupCoverageView() {
   // (and any edges that touch a hidden node), like the map's category legend.
   const statusOff = new Set();
   function applyStatusFilter() {
-    const hidden = new Set();
-    stage.querySelectorAll('.graph-node[data-node-id]').forEach(n => {
-      const off = [...statusOff].some(s => n.classList.contains('graph-node-st-' + s));
-      n.style.display = off ? 'none' : '';
-      if (off) hidden.add(n.getAttribute('data-node-id'));
-    });
-    stage.querySelectorAll('.graph-edge').forEach(e => {
-      const f = e.getAttribute('data-from'), t = e.getAttribute('data-to');
-      e.style.display = (hidden.has(f) || hidden.has(t)) ? 'none' : '';
-    });
+    // Canvas draw-state (was per-node DOM display toggles): the renderer culls
+    // hidden-status nodes and any edge touching one.
+    if (covApi && covApi.setStatusFilter) covApi.setStatusFilter(statusOff);
   }
   const legend = document.createElement('div');
   legend.className = 'cov-legend';
@@ -168,19 +161,7 @@ export function setupCoverageView() {
   function recolor() {
     const status = combinedStatus(requirementList(), testList(), results);
     setCoverageStatus(status); // keep the in-document table badges (requirement + test) in sync too
-    overlay.querySelectorAll('.graph-node[data-node-id]').forEach(node => {
-      const nid = node.getAttribute('data-node-id');
-      const s = status.get(nid);
-      [...node.classList].filter(c => c.indexOf('graph-node-st-') === 0).forEach(c => node.classList.remove(c));
-      if (s) node.classList.add('graph-node-st-' + s.status);
-      const cov = node.querySelector('.graph-node-cov');
-      if (cov && s) {
-        const isTest = node.classList.contains('graph-node-kind-test');
-        cov.textContent = isTest
-          ? (s.status === 'pass' ? 'Pass' : s.status === 'fail' ? 'Fail' : s.status === 'partial' ? 'Partial' : 'Untested')
-          : ((s.pct === null || s.pct === undefined) ? 'untested' : (s.pct + '% passing'));
-      }
-    });
+    if (covApi && covApi.setStatus) covApi.setStatus(status);   // repaint node colours on the canvas
     applyStatusFilter();   // a node's status may have changed; re-apply the legend filter
   }
 

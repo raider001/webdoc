@@ -15,7 +15,7 @@
 //   - a "next"    entry S on doc D => recommended-next edge D -> S (dashed, --recnext)
 // ---------------------------------------------------------------------------
 import { buildModel, layoutGraph, focusLayout } from './graph/layout.js';
-import { computeNodeSize, positionExternal, renderScene } from './graph/render.js';
+import { computeNodeSize, positionExternal, renderScene, startTween } from './graph/render.js';
 import { attachView } from './graph/view.js';
 import { buildChrome } from './graph/chrome.js';
 import { wireInteractions } from './graph/interactions.js';
@@ -43,8 +43,8 @@ export function createGraph(container, docs, options) {
   g.traceEdges = Array.isArray(opts.traceEdges) ? opts.traceEdges : [];
   g.pageLinks = Array.isArray(opts.pageLinks) ? opts.pageLinks : [];
   g.externalNodes = Array.isArray(opts.externalNodes) ? opts.externalNodes : [];
-  const nodeStatus = opts.nodeStatus || null; // Map/obj id -> {status, pct} for the coverage view
-  g.statusOf = (id) => nodeStatus ? (nodeStatus.get ? nodeStatus.get(id) : nodeStatus[id]) : null;
+  g.nodeStatus = opts.nodeStatus || null; // Map/obj id -> {status, pct} for the coverage view (mutable via setStatus)
+  g.statusOf = (id) => g.nodeStatus ? (g.nodeStatus.get ? g.nodeStatus.get(id) : g.nodeStatus[id]) : null;
   const nodeKind = opts.nodeKind || null;     // Map/obj id -> 'req' | 'test' (coverage view)
   g.kindOf = (id) => nodeKind ? (nodeKind.get ? nodeKind.get(id) : nodeKind[id]) : null;
   // Edit-connections mode (enabled when connect/disconnect callbacks are given).
@@ -71,7 +71,6 @@ export function createGraph(container, docs, options) {
   g.miniScale = 1; g.miniOX = 0; g.miniOY = 0;
   g.editMode = false; g.activeConnector = 'recnext';
   g.pendingSource = null; g.selectedEdge = null;
-  g.editEdgeEls = new Map();                         // 'from|type|to' -> visible edge path
   g.flashTimer = null; g.ro = null; g.fitted = false;
 
   container.classList.add('graph-root');
@@ -104,15 +103,31 @@ export function createGraph(container, docs, options) {
   buildChrome(g);        // controls/legend/search/minimap DOM + edit-mode machine
   wireInteractions(g);   // pointer/wheel/keyboard + init fit/flash + g.destroy
 
-  // Fancy re-layout: given the previous node positions, FLIP-animate each node from
-  // where it was to where it landed (mode switch / edit rebuild re-arranges live).
+  // Fancy re-layout: given the previous node positions, tween each node from where
+  // it was to where it landed (mode switch / edit rebuild re-arranges live).
   if (opts.animateFrom instanceof Map && opts.animateFrom.size) animateRelayout(g, opts.animateFrom);
+
+  // Test/automation hook: canvas has no per-node DOM for e2e (pytest-playwright) to
+  // click, so expose a hit-test + positions. `nodeAt` takes CLIENT (screen) pixels.
+  window.__graph = {
+    nodeAt: function (clientX, clientY) { const r = g.svgEl.getBoundingClientRect(); return g.nodeAtWorld((clientX - r.left - g.tx) / g.k, (clientY - r.top - g.ty) / g.k); },
+    hitTest: function (clientX, clientY) { return window.__graph.nodeAt(clientX, clientY); },
+    nodePositions: function () { const m = {}; g.layout.nodes.forEach((n, id) => { m[id] = { x: n.x, y: n.y, w: n.w, h: n.h, cx: n.cx, cy: n.cy }; }); return m; },
+    center: function (id) { const r = g.svgEl.getBoundingClientRect(); const n = g.layout.nodes.get(id) || (g.extPos && g.extPos.get(id)); return n ? { x: r.left + (n.cx != null ? n.cx : n.x + n.w / 2) * g.k + g.tx, y: r.top + (n.cy != null ? n.cy : n.y + n.h / 2) * g.k + g.ty } : null; },
+    transform: function () { return { tx: g.tx, ty: g.ty, k: g.k }; },
+    setTransform: function (t) { if (t) { if (isFinite(t.tx)) g.tx = t.tx; if (isFinite(t.ty)) g.ty = t.ty; if (isFinite(t.k)) g.k = t.k; g.applyTransform(); } },
+    redraw: function () { if (g.drawNow) g.drawNow(); },
+    count: function () { return g.model.nodes.size; }
+  };
 
   return {
     destroy: g.destroy, focus: g.focus, fit: g.fit, search: g.search, setCurrent: g.setCurrent,
     setEditMode: g.setEditMode, setConnector: g.setConnector,
     getTransform: function () { return { tx: g.tx, ty: g.ty, k: g.k }; },
     getEditState: function () { return { editMode: g.editMode, connector: g.activeConnector }; },
+    // Coverage view: swap the whole status map (recolor) / hide statuses (legend filter).
+    setStatus: function (m) { g.nodeStatus = m; g.requestDraw(); },
+    setStatusFilter: function (hidden) { g.hiddenStatuses = new Set(hidden || []); g.requestDraw(); },
     // World-space position of every node (for animating the next re-layout).
     getNodePositions: function () {
       const m = new Map();
@@ -123,32 +138,7 @@ export function createGraph(container, docs, options) {
   };
 }
 
-// FLIP: each node's transform ATTRIBUTE is already its final spot; we override with
-// a CSS transform back to the OLD spot, force a reflow to commit it, then set the
-// NEW spot WITH a transition so it slides in. Done synchronously (no rAF, which is
-// paused when the pane isn't compositing) and a setTimeout always clears the inline
-// styles afterwards, so nodes never get stuck at the old position. Edges (a
-// different set each layout) stay hidden while the nodes move and fade in only
-// once they've settled.
-function animateRelayout(g, from) {
-  const dur = 650;
-  const pairs = [];
-  g.nodesG.querySelectorAll('.graph-node[data-node-id]').forEach(el => {
-    const id = el.getAttribute('data-node-id');
-    const o = from.get(id), n = g.layout.nodes.get(id) || (g.extPos && g.extPos.get(id));
-    if (o && n && (Math.abs(o.x - n.x) > 0.5 || Math.abs(o.y - n.y) > 0.5)) pairs.push({ el, o, n });
-  });
-  if (!pairs.length) return;
-  for (const p of pairs) { p.el.style.transition = 'none'; p.el.style.transform = 'translate(' + p.o.x + 'px,' + p.o.y + 'px)'; }
-  g.edgesG.style.transition = 'none'; g.edgesG.style.opacity = '0';
-  void g.svgEl.getBoundingClientRect();          // commit the "old position" as the transition start
-  for (const p of pairs) { p.el.style.transition = 'transform ' + dur + 'ms cubic-bezier(.4,0,.2,1)'; p.el.style.transform = 'translate(' + p.n.x + 'px,' + p.n.y + 'px)'; }
-  // Fade the edges (lines) back in ONLY after the nodes have finished moving, so a
-  // line never stretches between a settled node and one still travelling.
-  const edgeFade = 260;
-  setTimeout(() => { g.edgesG.style.transition = 'opacity ' + edgeFade + 'ms ease'; g.edgesG.style.opacity = '1'; }, dur);
-  setTimeout(() => {
-    for (const p of pairs) { p.el.style.transition = ''; p.el.style.transform = ''; }
-    g.edgesG.style.transition = ''; g.edgesG.style.opacity = '';
-  }, dur + edgeFade + 120);
-}
+// Relayout animation: on canvas there are no per-node DOM transitions, so hand the
+// previous positions to the renderer's time-based tween (interpolated in the rAF
+// draw loop; see startTween in graph/render.js).
+function animateRelayout(g, from) { startTween(g, from); }

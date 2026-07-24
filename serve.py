@@ -13,9 +13,11 @@ Usage:
     python serve.py --config other.json
 """
 import argparse
+import gzip
 import json
 import mimetypes
 import os
+import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -78,6 +80,7 @@ def load_config(path):
         "theme": cfg.get("theme", "auto"),
         "testResults": cfg.get("testResults"),
         "plugins": [str(p) for p in plugins],
+        "indexBody": bool(cfg.get("indexBody", False)),
         "sources": sources,
     }
 
@@ -96,6 +99,7 @@ def safe_join(root, rel):
 class DocHandler(BaseHTTPRequestHandler):
     server_version = "WebDocTool/0.1"
     config = None  # attached to the class before serving
+    index = None   # webdoc_index.Index, attached before serving (None if disabled)
 
     # -- response helpers ---------------------------------------------------
     def _send(self, status, body, ctype="application/octet-stream"):
@@ -104,13 +108,50 @@ class DocHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
     def _json(self, status, obj):
-        self._send(status, json.dumps(obj), "application/json; charset=utf-8")
+        body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+        # gzip large index payloads (the whole-graph payload is multi-MB at scale)
+        # when the client accepts it - stdlib gzip, no dependency.
+        if len(body) > 1400 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            body = gzip.compress(body, 5)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return
+        self._send(status, body, "application/json; charset=utf-8")
+
+    def _index_route(self, rest):
+        idx = self.index
+        if idx is None:
+            return self._json(503, {"error": "index disabled"})
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        first = rest.strip("/").split("/", 1)[0]
+        if first == "status":
+            return self._json(200, idx.status())
+        if idx.state != "ready":
+            return self._json(503, {"error": "index building", "status": idx.status()})
+        if first == "search":
+            q = (qs.get("q") or [""])[0]
+            limit = int((qs.get("limit") or ["50"])[0] or 50)
+            offset = int((qs.get("offset") or ["0"])[0] or 0)
+            return self._json(200, {"results": idx.search(q, limit, offset)})
+        if first == "tree":
+            return self._json(200, idx.tree((qs.get("path") or [""])[0]))
+        if first == "graph":
+            return self._json(200, idx.graph())
+        if first == "coverage":
+            return self._json(200, idx.coverage())
+        return self._json(404, {"error": "unknown index endpoint"})
 
     def _file(self, fspath):
         try:
@@ -180,6 +221,8 @@ class DocHandler(BaseHTTPRequestHandler):
         path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
         if path == "/site.json":
             return self._site_json()
+        if path.startswith("/api/index/"):
+            return self._index_route(path[len("/api/index/"):])
         if path.startswith("/api/tests/"):
             return self._tests_get(path[len("/api/tests/"):])
         if path.startswith("/api/auto/"):
@@ -302,9 +345,55 @@ class DocHandler(BaseHTTPRequestHandler):
                 fh.write(body)
         except (OSError, ValueError) as e:
             return self._json(500, {"error": str(e)})
+        if self.index:   # keep the index in step with the write (incremental, cheap)
+            try:
+                self.index.update_doc(name, rel, body.decode("utf-8", "replace"))
+            except Exception as e:
+                print("  ! index update failed:", e)
         doc_id = name + "/" + rel[:-3]  # drop the .md
         return self._json(200 if existed else 201,
                           {"ok": True, "id": doc_id, "created": not existed})
+
+    def do_DELETE(self):
+        """Delete a document: DELETE /docs/<source>/<path>.md. Removes the .md
+        file and prunes any parent folders it leaves empty (never the source
+        root). This is how the in-app CRUD "delete document" action removes a doc."""
+        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
+        if not path.startswith("/docs/"):
+            return self._json(405, {"error": "deletes are only allowed under /docs/"})
+        rest = path[len("/docs/"):].strip("/")
+        name, _, rel = rest.partition("/")
+        src = self._source(name)
+        if not src:
+            return self._json(404, {"error": f"unknown source '{name}'"})
+        if not rel or not rel.lower().endswith(".md"):
+            return self._json(400, {"error": "path must be a .md file"})
+        fspath = safe_join(src["path"], rel)
+        if not fspath:
+            return self._json(400, {"error": "invalid path"})
+        if not os.path.isfile(fspath):
+            return self._json(404, {"error": "not found"})
+        try:
+            os.remove(fspath)
+            # Prune now-empty parent directories up to (but never including) the
+            # source root, so deleting the last doc in a folder doesn't leave an
+            # empty branch in the tree.
+            root_abs = os.path.abspath(src["path"])
+            d = os.path.dirname(os.path.abspath(fspath))
+            while d != root_abs and d.startswith(root_abs + os.sep):
+                if os.listdir(d):
+                    break
+                os.rmdir(d)
+                d = os.path.dirname(d)
+        except OSError as e:
+            return self._json(500, {"error": str(e)})
+        if self.index:
+            try:
+                self.index.delete_doc(name, rel)
+            except Exception as e:
+                print("  ! index delete failed:", e)
+        doc_id = name + "/" + rel[:-3]  # drop the .md
+        return self._json(200, {"ok": True, "id": doc_id, "deleted": True})
 
     def log_message(self, fmt, *args):
         print("  %s - %s" % (self.address_string(), fmt % args))
@@ -319,6 +408,20 @@ def main():
 
     cfg = load_config(args.config)
     DocHandler.config = cfg
+
+    # Build the SQLite index in the BACKGROUND so serving starts immediately; the
+    # client polls /api/index/status. Optional + fault-tolerant: if it can't start,
+    # the server still serves files (the client can fall back to client-side discovery).
+    try:
+        from webdoc_index import Index
+        idx = Index(HERE, cfg["sources"], index_body=cfg.get("indexBody", False))
+        DocHandler.index = idx
+        threading.Thread(target=idx.reconcile, daemon=True).start()
+        print("  index: sqlite (.webdoc-index/), building in background"
+              + ("  [+full-text body]" if cfg.get("indexBody") else ""))
+    except Exception as e:
+        DocHandler.index = None
+        print(f"  ! index disabled ({e})")
 
     httpd = ThreadingHTTPServer((args.host, args.port), DocHandler)
     print(f"Web Document Tool  -  http://{args.host}:{args.port}")

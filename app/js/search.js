@@ -1,55 +1,25 @@
-// search.js - all-documents search over document titles + headings.
+// search.js - all-documents search, now a thin client over the server's SQLite
+// FTS5 index (GET /api/index/search). The old build-an-in-memory-index-from-every-
+// body approach couldn't scale past a few thousand docs (it required loading every
+// body at boot); full-text ranking now lives in the server and the browser only
+// fetches the top matches. Ranked title-first by bm25 on the server.
 // ---------------------------------------------------------------------------
-// Light by design: it indexes each document's title and its ATX headings (not
-// full body text), built once at boot from the already-loaded doc bodies. No
-// third-party dependency; a plain substring match, ranked title-first.
-// ---------------------------------------------------------------------------
 
-const idx = []; // [{ docId, title, titleLC, headings:[{text, lc}] }]
-
-// Pull ATX headings from a body, skipping code fences and requirement blocks.
-function extractHeadings(body) {
-  let s = String(body || '');
-  s = s.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, ''); // fenced code
-  s = s.replace(/<!--\s*meta\s+start[\s\S]*?<!--\s*meta\s+end\b[\s\S]*?-->/gi, ''); // requirement groups
-  const heads = [];
-  const re = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/gm;
-  let m;
-  while ((m = re.exec(s)) !== null) {
-    const text = m[1].replace(/[*_`~]/g, '').trim(); // strip simple inline markdown
-    if (text) heads.push(text);
-  }
-  return heads;
-}
-
-export function buildSearchIndex(docs) {
-  idx.length = 0;
-  for (const doc of docs || []) {
-    const title = doc.title || doc.id;
-    idx.push({
-      docId: doc.id,
-      title: title,
-      titleLC: title.toLowerCase(),
-      headings: extractHeadings(doc.body).map(h => ({ text: h, lc: h.toLowerCase() }))
-    });
-  }
-}
-
-// Returns [{ docId, title, titleHit, headings:[text], score }], ranked title-first.
-export function searchDocs(query, limit) {
-  const q = String(query || '').trim().toLowerCase();
+// Returns a promise of [{ docId, title, snippet }]. `signal` (optional) is an
+// AbortController signal so the caller can cancel an in-flight request on the next
+// keystroke. A failed/aborted request resolves to [] (the caller shows empty state).
+export async function searchDocs(query, limit, signal) {
+  const q = String(query || '').trim();
   if (!q) return [];
-  const results = [];
-  for (const e of idx) {
-    const titleHit = e.titleLC.indexOf(q) !== -1;
-    const headingHits = e.headings.filter(h => h.lc.indexOf(q) !== -1).map(h => h.text);
-    if (titleHit || headingHits.length) {
-      results.push({
-        docId: e.docId, title: e.title, titleHit: titleHit,
-        headings: headingHits, score: (titleHit ? 100 : 0) + headingHits.length
-      });
-    }
+  let res;
+  try {
+    res = await fetch('/api/index/search?q=' + encodeURIComponent(q) + '&limit=' + (limit || 50),
+      { cache: 'no-cache', signal: signal });
+  } catch (e) {
+    return [];   // aborted or network error
   }
-  results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
-  return limit ? results.slice(0, limit) : results;
+  if (!res.ok) return [];
+  let data;
+  try { data = await res.json(); } catch (e) { return []; }
+  return (data.results || []).map(r => ({ docId: r.id, title: r.title, snippet: r.snippet || '' }));
 }

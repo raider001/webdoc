@@ -57,9 +57,11 @@ export function buildChrome(g) {
     b.appendChild(document.createTextNode(label));
     b.addEventListener('click', function () {
       if (g.editMode && (swatchCls === 'prereq' || swatchCls === 'recnext')) { g.setConnector(swatchCls); return; }
-      const hidden = g.viewport.classList.toggle(hideCls);
+      g.vis[swatchCls] = !g.vis[swatchCls];      // canvas draw-state (was a viewport CSS class)
+      const hidden = !g.vis[swatchCls];
       b.setAttribute('aria-pressed', hidden ? 'false' : 'true');
       b.classList.toggle('is-off', hidden);
+      g.requestDraw();
     });
     legendBtns[swatchCls] = b;
     return b;
@@ -128,27 +130,14 @@ export function buildChrome(g) {
     });
     g.updateHint();
   };
-  g.markSource = function (id) {
-    g.nodesG.querySelectorAll('.is-connect-source').forEach(x => x.classList.remove('is-connect-source'));
-    const gEl = g.nodesG.querySelector('[data-node-id="' + cssEscape(id) + '"]');
-    if (gEl) gEl.classList.add('is-connect-source');
-    g.pendingSource = id;
-  };
-  g.clearPending = function () {
-    g.pendingSource = null;
-    g.nodesG.querySelectorAll('.is-connect-source').forEach(x => x.classList.remove('is-connect-source'));
-  };
-  g.clearSelectedEdge = function () {
-    if (g.selectedEdge && g.selectedEdge.el) g.selectedEdge.el.classList.remove('is-selected');
-    g.selectedEdge = null;
-  };
+  // Edit-mode selection is canvas draw-state now (no per-node/-edge DOM to class).
+  g.markSource = function (id) { g.pendingSource = id; g.requestDraw(); };
+  g.clearPending = function () { g.pendingSource = null; g.requestDraw(); };
+  g.clearSelectedEdge = function () { g.selectedEdge = null; g.requestDraw(); };
   g.selectEdge = function (from, to, type) {
-    g.clearSelectedEdge(); g.clearPending();
-    const el = g.editEdgeEls.get(from + '|' + type + '|' + to);
-    if (!el) return;
-    el.classList.add('is-selected');
-    g.selectedEdge = { from: from, to: to, type: type, el: el };
-    g.updateHint();
+    g.clearPending();
+    g.selectedEdge = { from: from, to: to, type: type };
+    g.updateHint(); g.requestDraw();
   };
   g.updateHint = function () {
     if (!g.hintEl) return;
@@ -173,22 +162,27 @@ export function buildChrome(g) {
     container.classList.toggle('is-editing', g.editMode);
     if (g.editBtn) { g.editBtn.classList.toggle('is-on', g.editMode); g.editBtn.setAttribute('aria-pressed', g.editMode ? 'true' : 'false'); }
     ['prereq', 'recnext'].forEach(k => { const b = legendBtns[k]; if (b) b.classList.toggle('is-connector', g.editMode); });
-    if (g.editMode) { g.viewport.classList.add('hide-pagelink'); g.setConnector(g.activeConnector); }
-    else { ['prereq', 'recnext'].forEach(k => { const b = legendBtns[k]; if (b) b.classList.remove('is-connector-active'); }); }
+    if (g.editMode) {
+      g.vis.pagelink = false;   // page links are inert while editing (was viewport.hide-pagelink)
+      if (legendBtns.pagelink) { legendBtns.pagelink.setAttribute('aria-pressed', 'false'); legendBtns.pagelink.classList.add('is-off'); }
+      g.setConnector(g.activeConnector);
+    } else {
+      g.vis.pagelink = true;
+      if (legendBtns.pagelink) { legendBtns.pagelink.setAttribute('aria-pressed', 'true'); legendBtns.pagelink.classList.remove('is-off'); }
+      ['prereq', 'recnext'].forEach(k => { const b = legendBtns[k]; if (b) b.classList.remove('is-connector-active'); });
+    }
+    g.requestDraw();
     g.updateHint();
   };
 
   // ---- Minimap (small, best-effort; never allowed to break the main view) ----
   const mini = document.createElement('div');
   mini.className = 'graph-minimap';
-  const miniSvg = svg('svg', { class: 'graph-minimap-svg' });
-  const miniNodes = svg('g');
-  const miniView = svg('rect', { class: 'graph-minimap-view' });
-  miniSvg.appendChild(miniNodes);
-  miniSvg.appendChild(miniView);
-  mini.appendChild(miniSvg);
+  const miniCanvas = document.createElement('canvas');
+  miniCanvas.className = 'graph-minimap-svg';   // reuse the 100% x 100% sizing rule
+  mini.appendChild(miniCanvas);
   container.appendChild(mini);
-  g.miniSvg = miniSvg; g.miniNodes = miniNodes; g.miniView = miniView;
+  g.miniCanvas = miniCanvas; g.miniCtx = miniCanvas.getContext('2d');
 
   // ---- Empty state ----
   if (g.model.nodes.size === 0) {
