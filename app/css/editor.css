@@ -11,6 +11,10 @@
 .doc-edit-btn:hover { background: var(--surface-2); }
 body.is-editing .doc-edit-btn { display: none; }
 
+/* Floating "delete this document" button, stacked just below the edit pencil. */
+.doc-delete-btn { top: 56px; }
+.doc-delete-btn:hover { background: #dc2626; color: #fff; border-color: #dc2626; }
+
 /* Edit mode hides the normal reading view; the editor fills the body area. */
 body.is-editing #toc,
 body.is-editing #content,
@@ -32,6 +36,12 @@ body.is-editing .app-footer { display: none; }
 .btn:hover { background: var(--surface-2); }
 .btn-primary { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
 .btn-primary:hover { background: var(--accent-hover); }
+.btn-danger { background: #dc2626; color: #fff; border-color: #dc2626; }
+.btn-danger:hover { background: #b91c1c; border-color: #b91c1c; }
+
+/* Confirm / alert dialog (built on the shared .modal). */
+.modal-confirm { max-width: 440px; }
+.modal-msg { margin: 6px 0 4px; color: var(--muted); line-height: 1.5; font-size: 13.5px; }
 
 /* Blocks */
 .blk { position: relative; display: flex; gap: 6px; margin: 3px 0; }

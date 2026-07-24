@@ -178,6 +178,7 @@
       <li><a href="#editor"><span class="n">19</span>Authoring — the block editor</a></li>
       <li><a href="#coverage"><span class="n">20</span>Test coverage — runner &amp; report</a></li>
       <li><a href="#diagrams"><span class="n">21</span>Diagrams &amp; renderer plugins</a></li>
+      <li><a href="#perf"><span class="n">22</span>Performance &amp; scale</a></li>
     </ol>
   </nav>
 
@@ -236,12 +237,13 @@ Python built-in HTTP server  (serve.py, stdlib only — NO build step)
         <p>The site runs behind Python's built-in HTTP server (<code>serve.py</code>, stdlib only — still zero third-party). There is <strong>no build step</strong>: the server serves files and answers directory listings; the browser discovers documents, fetches each one, strips its JSON metadata, and renders it. A single <code>config.json</code> can list <strong>several source folders</strong>, which the server mounts side by side and the app aggregates into one library.</p>
         <table class="tbl">
           <tr><th>Responsibility</th><th>Where it runs</th></tr>
-          <tr><td>Serve <code>app/</code> + each configured source folder as static files; return directory listings as JSON</td><td><code>serve.py</code> — does <strong>no</strong> Markdown/metadata parsing</td></tr>
-          <tr><td>Discover <code>.md</code> files, read JSON metadata, render Markdown, build tree / graph / search</td><td>The browser, client-side (per D1 &amp; D4)</td></tr>
+          <tr><td>Serve <code>app/</code> + each configured source folder as static files; return directory listings as JSON; <strong>build + serve a SQLite index</strong> (metadata, headings, links, requirement/test blocks, full-text)</td><td><code>serve.py</code> + <code>webdoc_index.py</code> — <strong>extracts metadata</strong> for the index (stdlib <code>sqlite3</code>); still does <strong>no Markdown rendering</strong></td></tr>
+          <tr><td>Render Markdown, sanitize, number headings; drive the tree / map / search / traceability from the index; load a document body on demand</td><td>The browser, client-side (per D1 &amp; D4)</td></tr>
         </table>
         <div class="callout">
           <div class="h">Consequence of "no build step, served"</div>
-          <p>Because everything is fetched over HTTP, the app uses ES modules and normal <code>fetch()</code> — the <code>file://</code> restrictions that would have forced a build step and classic scripts simply don't apply. The trade-off: the browser fetches each document once on load to populate the tree, graph, and all-documents search (comfortable for tens–hundreds of docs). The server stays a dumb, config-driven file server.</p>
+          <p>Because everything is fetched over HTTP, the app uses ES modules and normal <code>fetch()</code> — the <code>file://</code> restrictions that would have forced a build step and classic scripts simply don't apply.</p>
+          <p><strong>Scaling update.</strong> The original model fetched <em>every</em> document once on load to populate the tree, graph, and search — comfortable for hundreds of docs, a wall at a few thousand. The server now maintains a <strong>SQLite index</strong> (still stdlib-only, still no build step — <code>sqlite3</code> with FTS5 ships with Python; see §22) that extracts lightweight metadata, headings, in-body links, and requirement/test blocks. The browser boots <strong>lazily</strong>: it loads only the document being viewed and pulls search, the tree, the map, and traceability from the index on demand. This lifts the tool from a few-thousand-document ceiling to <strong>tens of thousands of files</strong> (validated at 50,000). The server is no longer a <em>dumb</em> file server — but it stays a stdlib-only, config-driven one, and the Markdown engine is still a pure client-side <code>string → HTML</code> function.</p>
         </div>
       </section>
 
@@ -260,8 +262,8 @@ Python built-in HTTP server  (serve.py, stdlib only — NO build step)
 │  ├─ css/app.css
 │  └─ js/
 │     ├─ main.js             # boot: read config, discover, route, render (routing lives here)
-│     ├─ commonmark.js       # hand-written CommonMark parser + GFM (the ACTIVE engine)
-│     ├─ markdown.js         # legacy first-cut parser — kept on disk, imported by nothing
+│     ├─ commonmark.js       # CommonMark 0.31.2 + GFM engine — public entry (renderMarkdown/renderInline)
+│     ├─ md/                 # engine internals: text, scan, blocks, inline, render, tables
 │     ├─ catalog.js          # client-side discovery: fetch listings, build the doc catalog
 │     ├─ sanitize.js         # allowlist sanitizer (styling rejected)
 │     ├─ numbering.js        # heading numbers + TOC
@@ -750,6 +752,41 @@ pytest</code></pre>
         <h2><span class="secn">21</span>Diagrams &amp; renderer plugins</h2>
         <p>Rendering is extensible through a small <strong>renderer-plugin registry</strong> (<code>blocks.js</code> / <code>plugins.js</code>). <code>renderBlocks</code> runs as a <strong>post-sanitize</strong> pipeline stage — the same layering pattern as heading numbers and syntax highlighting — so a plugin only ever sees already-sanitized content. The shipped <code>config.json</code> enables one plugin, <code>"plugins":["mermaid"]</code>, so a default checkout renders <code>```mermaid</code> fenced blocks as diagrams (falling back to the plain code block if the library isn't present).</p>
         <p>The mermaid facade resolves its library in order: an already-present <code>window.mermaid</code>, then an explicitly set <code>LIB_URL</code> (which wins when set), otherwise the local, git-ignored <code>app/thirdpartyrenderer/mermaid.min.js</code> — keeping the shipped tree free of a bundled third-party runtime. The rendered diagram is wrapped in the same pan/zoom viewport (<code>panzoom.js</code>) as the map, and its <code>&lt;svg&gt;</code> is scrubbed of scripts, <code>on*</code> handlers and <code>javascript:</code> URLs.</p>
+      </section>
+
+      <section id="perf">
+        <h2><span class="secn">22</span>Performance &amp; scale</h2>
+        <p>The tool was re-architected to support <strong>tens of thousands of documents</strong>. The original design loaded <em>every</em> document body into the browser at boot and indexed everything client-side (search, map links, requirement/test traceability) — comfortable for hundreds of docs, but three hard ceilings appeared in the low thousands: boot memory, the graph views (one SVG node each), and the coverage view's per-node layout reflow. Two changes removed them, both inside the zero-third-party / no-Node / no-build-step constraints:</p>
+        <ol>
+          <li><strong>Server-side index (§3).</strong> <code>serve.py</code> + <code>webdoc_index.py</code> build a <strong>SQLite (FTS5)</strong> index of metadata, headings, in-body links and requirement/test blocks. <code>sqlite3</code> is in the Python standard library, so this adds no dependency and no build step (indexing runs in a background thread at startup; incremental on writes and warm restarts). The browser boots <strong>lazily</strong> — only the viewed document is fetched; search, tree, map and traceability come from the index on demand.</li>
+          <li><strong>Canvas graph rendering.</strong> The map and coverage views render on a single <code>&lt;canvas&gt;</code> with a uniform-grid spatial index, viewport culling, and three <strong>levels of detail</strong> (dots when zoomed out → boxes → full labels up close). Only what's on screen is drawn, so a frame costs the same at 500 or 50,000 nodes. Node/edge <strong>DOM elements stay constant</strong> (was 14k–90k). The whole graph is still rendered (a navigable "constellation"); it simply becomes a density map when zoomed out, since 50k legible labels at once is physically impossible.</li>
+        </ol>
+
+        <div class="callout">
+          <div class="h">Measured — 50,000-file corpus (local, one commodity machine)</div>
+          <table class="tbl">
+            <tr><th>Operation</th><th>Result</th><th>Notes</th></tr>
+            <tr><td>Boot → interactive</td><td><strong>~0.33 s</strong></td><td>Flat vs. corpus size (lazy). Was multi-second + full-corpus load.</td></tr>
+            <tr><td>Browser memory after boot</td><td><strong>~8 MB</strong></td><td>Was ~750 MB (every body resident).</td></tr>
+            <tr><td>All-documents search</td><td><strong>20–70 ms</strong></td><td>Server FTS5; ranked. Scales to millions of rows.</td></tr>
+            <tr><td>Open a document</td><td>1–5 ms</td><td>Independent of corpus size (one lazy fetch + render).</td></tr>
+            <tr><td>Document map — open</td><td>~1.0 s</td><td>One-time: layout of 50k nodes + first fit frame + 1.5 MB gzipped payload.</td></tr>
+            <tr><td>Document map — pan/zoom frame</td><td><strong>~0.3 ms</strong> (~60 fps+)</td><td>Culled + LOD; flat vs. corpus size.</td></tr>
+            <tr><td>Test-coverage data</td><td>~30 ms</td><td>Resolved requirements + tests from the index.</td></tr>
+            <tr><td>Tree expand (per folder)</td><td>15–60 ms</td><td>Lazy, one level at a time; DOM holds only expanded paths.</td></tr>
+            <tr><td>Cold index build (once)</td><td>~18 s</td><td>Background thread; serving starts immediately. Warm restart ≈ instant (mtime cache).</td></tr>
+          </table>
+        </div>
+
+        <h3>Supported limits</h3>
+        <p><em>Comfortable</em> = smooth, sub-second interactions with no hitches. <em>Absolute maximum</em> = still functional, but with noticeable one-time costs (a multi-second map open, a longer initial index build, higher memory). Search and reading scale far past the map, because they never hold the whole corpus at once.</p>
+        <table class="tbl">
+          <tr><th>Capability</th><th>Comfortable</th><th>Absolute maximum</th><th>What binds it at the maximum</th></tr>
+          <tr><td><strong>Search &amp; read</strong> (all-docs search, open/render a document, tree)</td><td><strong>~50,000 files</strong></td><td><strong>~200,000–500,000 files</strong></td><td>One-time cold index build (~2–3k files/s) and index disk size. FTS5 search itself scales to millions; boot and per-document cost stay flat.</td></tr>
+          <tr><td><strong>Document map</strong> (whole-graph, canvas)</td><td><strong>~50,000 nodes</strong></td><td><strong>~100,000–150,000 nodes</strong></td><td>Browser heap for the in-memory layout + edges (~190 MB at 50k) and the one-time open frame (layout + payload). Interactive frames stay flat. Visual readability is a "constellation" well before this.</td></tr>
+          <tr><td><strong>Test traceability</strong> (coverage view)</td><td><strong>~50,000 req+test nodes</strong></td><td><strong>~100,000 nodes</strong></td><td>Same canvas engine as the map; measured in requirement + test count, which is a multiple of document count (depends on requirements authored per doc).</td></tr>
+        </table>
+        <p>Roughly two orders of magnitude beyond the pre-change ceilings (which were ~1–2k map nodes and ~1.5–2k traceability nodes). Knobs to push further: <code>"indexBody": true</code> in <code>config.json</code> adds full-text body search (at an index-size cost); the whole-graph payload is integer-indexed and gzipped; and computed layouts are memoized so re-opening the map is instant.</p>
       </section>
     </div>
     <footer class="foot">Design overview for the Web Document Tool · phases 1–2 shipped; the CommonMark engine, graph, requirements, editor, coverage and diagrams in progress · wireframes are indicative.</footer>
