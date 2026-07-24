@@ -4,11 +4,15 @@
 .app-body { position: relative; }
 .doc-edit-btn {
   position: absolute; top: 12px; right: 24px; z-index: 6;
-  width: 36px; height: 36px; border-radius: 8px;
-  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
   cursor: pointer; font-size: 16px; line-height: 1;
+  transition: background var(--dur), border-color var(--dur), color var(--dur), box-shadow var(--dur), transform var(--dur);
 }
-.doc-edit-btn:hover { background: var(--surface-2); }
+.doc-edit-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.doc-edit-btn:active { transform: translateY(0); box-shadow: none; }
+.doc-edit-btn .ico { display: block; }
 body.is-editing .doc-edit-btn { display: none; }
 
 /* Floating "delete this document" button, stacked just below the edit pencil. */
@@ -32,12 +36,13 @@ body.is-editing .app-footer { display: none; }
 .editor-blocks { max-width: 760px; margin: 0 auto; }
 .editor-meta { overflow: auto; border-left: 1px solid var(--border); background: var(--surface); padding: 20px 20px; }
 
-.btn { height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; font-size: 13px; }
-.btn:hover { background: var(--surface-2); }
-.btn-primary { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
-.btn-primary:hover { background: var(--accent-hover); }
+.btn { height: 32px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; font-size: 13px; transition: background var(--dur), border-color var(--dur), box-shadow var(--dur), transform var(--dur), filter var(--dur); }
+.btn:hover { background: var(--surface-2); border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.btn:active { transform: translateY(0); box-shadow: none; }
+.btn-primary { background: var(--accent-grad); color: #fff; border-color: transparent; box-shadow: 0 3px 12px -3px var(--accent); }
+.btn-primary:hover { filter: brightness(1.07); background: var(--accent-grad); border-color: transparent; }
 .btn-danger { background: #dc2626; color: #fff; border-color: #dc2626; }
-.btn-danger:hover { background: #b91c1c; border-color: #b91c1c; }
+.btn-danger:hover { filter: brightness(1.06); background: #dc2626; border-color: #dc2626; }
 
 /* Confirm / alert dialog (built on the shared .modal). */
 .modal-confirm { max-width: 440px; }
