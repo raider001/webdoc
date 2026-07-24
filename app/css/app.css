@@ -269,6 +269,30 @@ a:hover { text-decoration:underline; }
   .doc { padding:8px 16px 0; }
 }
 
+/* ---- First-run index build overlay (cold start only) ---------------------- */
+/* Shown while the server builds its SQLite index for the first time on a large
+   corpus. Warm restarts are near-instant, so this never appears then. */
+.index-loading {
+  position:fixed; inset:0; z-index:55;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--bg); padding:24px;
+}
+.index-loading-card {
+  width:min(440px, 88vw); padding:26px 30px 22px;
+  background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  box-shadow:var(--shadow); text-align:center;
+}
+.index-loading-brand { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); margin-bottom:10px; }
+.index-loading-title { font-size:15.5px; font-weight:600; color:var(--text); margin-bottom:18px; }
+.index-progress { height:8px; border-radius:6px; background:var(--surface-2); overflow:hidden; }
+.index-progress-fill { height:100%; width:0; border-radius:6px; background:var(--accent); transition:width .3s ease; }
+.index-progress.is-indeterminate .index-progress-fill {
+  width:38%; animation:index-slide 1.15s cubic-bezier(.4,0,.2,1) infinite;
+}
+@keyframes index-slide { 0%{margin-left:-40%} 100%{margin-left:102%} }
+.index-loading-stat { margin-top:14px; font-size:13.5px; color:var(--text); font-variant-numeric:tabular-nums; }
+.index-loading-note { margin-top:6px; font-size:12px; color:var(--muted); line-height:1.4; }
+
 @media (prefers-reduced-motion:reduce) {
   * , *::before, *::after { transition-duration:.001ms !important; animation-duration:.001ms !important; }
   html { scroll-behavior:auto; }

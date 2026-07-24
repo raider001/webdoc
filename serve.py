@@ -81,6 +81,7 @@ def load_config(path):
         "testResults": cfg.get("testResults"),
         "plugins": [str(p) for p in plugins],
         "indexBody": bool(cfg.get("indexBody", False)),
+        "indexDir": cfg.get("indexDir"),
         "sources": sources,
     }
 
@@ -147,6 +148,8 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._json(200, {"results": idx.search(q, limit, offset)})
         if first == "tree":
             return self._json(200, idx.tree((qs.get("path") or [""])[0]))
+        if first == "resolve":   # batch-resolve in-body link targets -> doc ids
+            return self._json(200, {"resolved": idx.resolve((qs.get("base") or [""])[0], qs.get("p") or [])})
         if first == "graph":
             return self._json(200, idx.graph())
         if first == "coverage":
@@ -414,7 +417,7 @@ def main():
     # the server still serves files (the client can fall back to client-side discovery).
     try:
         from webdoc_index import Index
-        idx = Index(HERE, cfg["sources"], index_body=cfg.get("indexBody", False))
+        idx = Index(HERE, cfg["sources"], index_body=cfg.get("indexBody", False), index_dir=cfg.get("indexDir"))
         DocHandler.index = idx
         threading.Thread(target=idx.reconcile, daemon=True).start()
         print("  index: sqlite (.webdoc-index/), building in background"

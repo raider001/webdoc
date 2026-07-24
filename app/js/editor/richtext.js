@@ -157,8 +157,10 @@ function normalizeUrl(v) {
 /* ---- link popover (Text + URL, Apply / Unlink / Cancel) - replaces window.prompt.
    o: { rect, text, url, canText, onApply(text,url), onRemove|null } ---- */
 let linkPop = null, linkOff = null;
-let linkDocs = [];   // documents offered by the URL autocomplete: [{ id, title }]
+let linkDocs = [];   // static fallback list for the URL autocomplete: [{ id, title }]
 export function setLinkDocs(docs) { linkDocs = Array.isArray(docs) ? docs : []; }
+let linkSearch = null;   // async (query) -> [{id,title}]: server-backed suggestions (scales past a client list)
+export function setLinkSearch(fn) { linkSearch = (typeof fn === 'function') ? fn : null; }
 function closeLinkPop() {
   if (linkOff) { document.removeEventListener('mousedown', linkOff); linkOff = null; } // no leaked global listener
   if (linkPop) { linkPop.remove(); linkPop = null; }
@@ -204,15 +206,12 @@ function openLinkPopover(o) {
   // URL autocomplete: suggest internal documents by title / id. Selecting one
   // inserts its doc id (the reading view resolves it to a route). Typing a real
   // URL (scheme, /, #) suppresses the list, so external links still work freely.
-  let acItems = [], acActive = -1, acDrop = null;
+  let acItems = [], acActive = -1, acDrop = null, acSeq = 0, acTimer = null;
   function looksExternal(v) { return /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(v); }
-  function closeUrlAc() { if (acDrop) { acDrop.remove(); acDrop = null; } acItems = []; acActive = -1; }
+  function closeUrlAc() { if (acTimer) { clearTimeout(acTimer); acTimer = null; } if (acDrop) { acDrop.remove(); acDrop = null; } acItems = []; acActive = -1; }
   function pickDoc(d) { uIn.value = d.id; if (o.canText && !tIn.disabled && !tIn.value) tIn.value = d.title || d.id; pop.classList.remove('link-pop-err'); closeUrlAc(); uIn.focus(); }
-  function openUrlAc() {
-    const q = uIn.value.trim().toLowerCase();
-    if (looksExternal(uIn.value.trim())) { closeUrlAc(); return; }
-    acItems = linkDocs.filter(d => !q || (d.id && d.id.toLowerCase().includes(q)) || (d.title && d.title.toLowerCase().includes(q))).slice(0, 8);
-    if (!acItems.length) { closeUrlAc(); return; }
+  function renderUrlAc() {
+    if (!acItems.length) { if (acDrop) { acDrop.remove(); acDrop = null; } return; }
     if (acActive >= acItems.length) acActive = acItems.length - 1;
     if (!acDrop) { acDrop = document.createElement('div'); acDrop.className = 'ac-drop link-ac'; document.body.appendChild(acDrop); }
     acDrop.textContent = '';
@@ -229,12 +228,33 @@ function openLinkPopover(o) {
     acDrop.style.top = (window.scrollY + rc.bottom + 3) + 'px';
     acDrop.style.minWidth = Math.max(220, rc.width) + 'px';
   }
+  function openUrlAc() {
+    const raw = uIn.value.trim();
+    if (looksExternal(raw)) { closeUrlAc(); return; }
+    if (linkSearch) {
+      // Server-backed: query the index as you type (debounced; a sequence guard drops
+      // out-of-order responses). Scales past any client-held document list.
+      if (acTimer) clearTimeout(acTimer);
+      acTimer = setTimeout(async () => {
+        const mySeq = ++acSeq;
+        let items = [];
+        try { items = await linkSearch(raw); } catch (e) { items = []; }
+        if (mySeq !== acSeq) return;
+        acItems = (items || []).slice(0, 8);
+        renderUrlAc();
+      }, 160);
+    } else {
+      const q = raw.toLowerCase();
+      acItems = linkDocs.filter(d => !q || (d.id && d.id.toLowerCase().includes(q)) || (d.title && d.title.toLowerCase().includes(q))).slice(0, 8);
+      renderUrlAc();
+    }
+  }
   uIn.addEventListener('input', () => { pop.classList.remove('link-pop-err'); acActive = -1; openUrlAc(); });
   uIn.addEventListener('focus', openUrlAc);
   uIn.addEventListener('keydown', e => {
     if (acDrop && acItems.length) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); acActive = Math.min(acItems.length - 1, acActive + 1); openUrlAc(); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); acActive = Math.max(0, acActive - 1); openUrlAc(); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); acActive = Math.min(acItems.length - 1, acActive + 1); renderUrlAc(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); acActive = Math.max(0, acActive - 1); renderUrlAc(); return; }
       if (e.key === 'Enter' && acActive >= 0) { e.preventDefault(); pickDoc(acItems[acActive]); return; }
       if (e.key === 'Escape') { e.preventDefault(); closeUrlAc(); return; }
     }

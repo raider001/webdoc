@@ -7,13 +7,15 @@ import { numberHeadings, buildTOC } from './numbering.js';
 import { renderTree, markActive } from './tree.js';
 import { searchDocs } from './search.js';
 import { createGraph } from './graph.js';
-import { openEditor, openNewDocModal, parseDoc, setLinkDocs, richText, confirmDialog } from './editor.js';
+import { openEditor, openNewDocModal, parseDoc, setLinkDocs, setLinkSearch, richText, confirmDialog } from './editor.js';
 import { loadResults, computeCoverage, computeTestStatus, testsFor, saveManual, manualTests, connectAutomated, disconnectAutomated, rememberAutoUrl, fetchXUnitCatalog } from './coverage.js';
 import { generateReportHtml } from './report.js';
 import { openRunner } from './runner.js';
-import { documentLinks, resolveDocId as resolveDocIdShared } from './doclinks.js';
 import { highlightWithin } from './highlighter.js';
 import { renderBlocks } from './blocks.js';
+// (doclinks' documentLinks/resolveDocId are no longer used here - link data + resolution
+// are server-backed now: the map comes from /api/index/graph and in-body links resolve
+// via /api/index/resolve. See fetchGraphModel and resolveLinks.)
 import { loadPlugins } from './plugins.js';
 import { buildRequirementIndex, prepareDocGroups, preprocessRequirements, renderRequirements, revealRequirement, revealTest, reqFromQuery, testFromQuery, requirementTraceEdges, requirementList, testList, setCoverageStatus, inlineMarkdown, blockMarkdown, resolveRequirementRef } from './requirements.js';
 import { state, el, combinedStatus, app } from './app-shell.js';
@@ -188,11 +190,24 @@ function renderDoc(doc) {
 // links after render: doc-id refs become #/ routes, in-page anchors scroll
 // smoothly (without clobbering the router hash), and real URLs open externally.
 function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/([^\w-])/g, '\\$1'); }
-// Resolve an in-body ref (relative ./ ../, .md, or a full doc id) to a doc id.
-// Delegates to the shared resolver in doclinks.js so the reader and the map's
-// link classifier never disagree.
-function resolveDocId(path, baseId) { return resolveDocIdShared(path, baseId, state.byId); }
-function resolveLinks(article, baseId) {
+// Batch-resolve in-body link targets to doc ids via the server index. Lazy boot no
+// longer holds every id client-side, so resolution (relative ./ ../, .md, full id,
+// last-segment fallback, case-insensitive) is done server-side, authoritatively,
+// against the whole corpus. Returns { cleanPath: resolvedId | null }.
+async function resolveDocPaths(baseId, paths) {
+  if (!paths.length) return {};
+  const qs = 'base=' + encodeURIComponent(baseId || '') + paths.map(p => '&p=' + encodeURIComponent(p)).join('');
+  try {
+    const r = await fetch('/api/index/resolve?' + qs, { cache: 'no-cache' });
+    if (!r.ok) return {};
+    return (await r.json()).resolved || {};
+  } catch (e) { return {}; }
+}
+// Rewrite in-body links after render: external URLs open in a new tab, in-page
+// anchors scroll smoothly, and internal doc refs become #/ routes. Async because the
+// internal refs are resolved in ONE batched request to the server index.
+async function resolveLinks(article, baseId) {
+  const internal = [];
   article.querySelectorAll('a[href]').forEach(a => {
     const raw = a.getAttribute('href') || '';
     if (!raw) return;
@@ -216,7 +231,12 @@ function resolveLinks(article, baseId) {
     const hashIdx = raw.indexOf('#');                           // internal document reference
     const path = (hashIdx >= 0 ? raw.slice(0, hashIdx) : raw).replace(/\.md$/i, '').replace(/\/+$/, '');
     const frag = hashIdx >= 0 ? raw.slice(hashIdx + 1) : '';
-    const id = resolveDocId(path, baseId);
+    internal.push({ a: a, path: path, frag: frag });
+  });
+  if (!internal.length) return;
+  const resolved = await resolveDocPaths(baseId, [...new Set(internal.map(x => x.path))]);
+  for (const { a, path, frag } of internal) {
+    const id = resolved[path];
     if (id) {
       a.setAttribute('href', '#/' + id);
       if (frag) a.addEventListener('click', () => setTimeout(() => {
@@ -225,11 +245,11 @@ function resolveLinks(article, baseId) {
       }, 140));
     } else {
       a.classList.add('doc-link-broken');
-      a.title = 'Unresolved link: ' + raw;
+      a.title = 'Unresolved link';
       a.setAttribute('href', '#');                             // neutralise so middle-click/new-tab can't hit the server
       a.addEventListener('click', ev => ev.preventDefault());
     }
-  });
+  }
 }
 
 // Sanitise a WYSIWYG field's HTML before storing it (manual-test fields), and a
@@ -795,6 +815,65 @@ function setupTestRun() {
   });
 }
 
+// ---- First-run index build progress ---------------------------------------
+// While the server builds its SQLite index for the first time on a large corpus,
+// the /api/index/* endpoints aren't ready - so show a progress bar (driven by
+// /api/index/status) instead of a blank app. Warm restarts report "ready" at once,
+// so this returns immediately and nothing is shown.
+let indexOverlay = null;
+function showIndexOverlay() {
+  if (indexOverlay) return;
+  const ov = document.createElement('div');
+  ov.className = 'index-loading';
+  const card = document.createElement('div'); card.className = 'index-loading-card';
+  const brand = document.createElement('div'); brand.className = 'index-loading-brand';
+  brand.textContent = (state.site && state.site.siteTitle) || 'Documentation';
+  const title = document.createElement('div'); title.className = 'index-loading-title';
+  title.textContent = 'Preparing the document index…';
+  const track = document.createElement('div'); track.className = 'index-progress is-indeterminate';
+  const fill = document.createElement('div'); fill.className = 'index-progress-fill';
+  track.appendChild(fill);
+  const stat = document.createElement('div'); stat.className = 'index-loading-stat'; stat.textContent = 'Scanning files…';
+  const note = document.createElement('div'); note.className = 'index-loading-note';
+  note.textContent = 'First-time indexing of this library. Later starts are near-instant.';
+  card.append(brand, title, track, stat, note);
+  ov.appendChild(card);
+  document.body.appendChild(ov);
+  el('live').textContent = 'Preparing the document index.';
+  indexOverlay = { ov: ov, track: track, fill: fill, stat: stat };
+}
+function updateIndexOverlay(s) {
+  if (!indexOverlay) return;
+  const pct = Math.max(0, Math.min(100, s.pct || 0));
+  const scanning = !pct && !s.docs;   // walk phase: total not known yet -> indeterminate
+  indexOverlay.track.classList.toggle('is-indeterminate', scanning);
+  if (!scanning) indexOverlay.fill.style.width = pct + '%';
+  indexOverlay.stat.textContent = scanning
+    ? 'Scanning files…'
+    : (Number(s.docs || 0).toLocaleString() + ' documents indexed · ' + pct + '%');
+}
+function hideIndexOverlay() {
+  if (!indexOverlay) return;
+  indexOverlay.ov.remove();
+  indexOverlay = null;
+}
+// Block boot until the server index is ready, showing progress if it's a cold build.
+async function waitForIndex() {
+  for (;;) {
+    let s;
+    try {
+      const r = await fetch('/api/index/status', { cache: 'no-cache' });
+      if (!r.ok) break;              // index disabled / unavailable -> proceed (app degrades gracefully)
+      s = await r.json();
+    } catch (e) { break; }
+    if (!s || s.state === 'ready' || s.state === 'error') break;
+    showIndexOverlay();
+    updateIndexOverlay(s);
+    await new Promise(res => setTimeout(res, 600));
+  }
+  hideIndexOverlay();
+}
+
 // ---- Boot -----------------------------------------------------------------
 async function boot() {
   setupTheme();
@@ -816,13 +895,19 @@ async function boot() {
   // missing plugin or absent library is skipped, never blocking boot.
   await loadPlugins(state.site.plugins);
 
+  // On a first-time cold index build, wait here with a progress bar (the tree /
+  // search / map all need the index). Warm starts pass through instantly.
+  await waitForIndex();
+
   // LAZY boot: do NOT discover + load every document body (the old ceiling). The
   // global requirement/test index comes from the server's SQLite index; individual
   // documents load on demand when viewed; the tree, all-docs search and the map are
   // all server-backed. Boot cost is now flat regardless of corpus size.
   state.docs = [];
   await buildRequirementIndex(null, state.site.sources);
-  setLinkDocs([]);   // editor link autocomplete over 50k docs -> server-backed suggestions is a follow-up
+  // Editor link autocomplete: server-backed title/id suggestions via the search index
+  // (scales past any client-held document list).
+  setLinkSearch(async q => (await searchDocs(q, 8)).map(h => ({ id: h.docId, title: h.title })));
 
   // Test-coverage status, so requirement badges in the tables colour by pass/fail.
   try {

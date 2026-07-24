@@ -61,8 +61,8 @@ fenced blocks into diagrams (the default checkout ships mermaid enabled). See
 - **Navigation** — a hamburger document tree between documents, an on-this-page
 contents list within a document, and hash-routed deep links. See
 [Navigation](Docs/features/navigation).
-- **The map** — a hand-rolled SVG graph of how documents and requirements relate,
-with pan, zoom, search, and a minimap. See [The Map View](Docs/features/map).
+- **The map** — a hand-rolled canvas graph of how documents and requirements
+relate, with pan, zoom, search, and a minimap. See [The Map View](Docs/features/map).
 - **Requirements** — metadata-wrapped tables that compose stable requirement ids
 and trace to and from one another across documents. See
 [Requirements Traceability](Docs/features/requirements).
@@ -76,6 +76,10 @@ and saves it to the server. See [Authoring](Docs/reference/authoring).
 See [Search](Docs/features/search).
 - **Theming** — light and dark themes built on CSS custom-property design tokens,
 resolved before the first paint. See [Theming](Docs/design/theming).
+- **Scale** — a standard-library SQLite index on the server and a culled canvas
+renderer let the same reader stay fast from a handful of documents to tens of
+thousands (measured to half a million). See
+[Performance & Scale](Docs/reference/performance).
 
 ## How a document becomes a page
 

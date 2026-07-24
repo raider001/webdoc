@@ -12,7 +12,7 @@
 //   ui.js          shared DOM primitives + the block-type menu
 // ---------------------------------------------------------------------------
 import { serializeDoc, htmlToMd, newBlock } from './editor/serialize.js';
-import { editable, listItem, attachInlineToolbar, setLinkDocs } from './editor/richtext.js';
+import { editable, listItem, attachInlineToolbar, setLinkDocs, setLinkSearch } from './editor/richtext.js';
 import { tableEditor, requirementWidget, testCaseWidget } from './editor/widgets.js';
 import { metadataPanel } from './editor/panels.js';
 import { iconBtn, labeledInput, openBlockMenu } from './editor/ui.js';
@@ -21,11 +21,11 @@ import { iconBtn, labeledInput, openBlockMenu } from './editor/ui.js';
 export { parseDoc } from './editor/serialize.js';
 export { richText } from './editor/richtext.js';
 export { openNewDocModal, confirmDialog } from './editor/panels.js';
-export { setLinkDocs };
+export { setLinkDocs, setLinkSearch };
 
 // opts: { docId, meta, blocks, sources, allDocs, isNew, onSave(md, meta), onClose() }
 export function openEditor(opts) {
-  setLinkDocs(opts.allDocs);   // feed the link popover's URL autocomplete
+  setLinkDocs(opts.allDocs || []);   // static fallback; server-backed suggestions win (setLinkSearch)
   const root = document.createElement('div');
   root.className = 'editor';
 

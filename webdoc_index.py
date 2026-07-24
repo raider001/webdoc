@@ -22,6 +22,7 @@ import time
 import sqlite3
 import threading
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 
 SCHEMA_VERSION = 3
 
@@ -286,11 +287,13 @@ class Index:
     """The SQLite-backed site index. Thread-safe: one connection per thread (WAL),
     a single write lock. Reconcile is incremental (mtime,size + config hash)."""
 
-    def __init__(self, here, sources, index_body=False):
+    def __init__(self, here, sources, index_body=False, index_dir=None):
         self.here = here
         self.sources = sources           # [{name, path, component}]
         self.index_body = index_body
-        self.dir = os.path.join(here, '.webdoc-index')
+        # index_dir lets a second site (e.g. a big demo) keep its own DB instead of
+        # sharing/clobbering the default one when configs differ.
+        self.dir = index_dir if index_dir else os.path.join(here, '.webdoc-index')
         self.db_path = os.path.join(self.dir, 'index.db')
         self._local = threading.local()
         self._wlock = threading.RLock()
@@ -391,7 +394,10 @@ class Index:
         }
 
     def _write_doc(self, c, doc_id, source, rel, component, text, mtime_ns, size):
-        p = self._parse(doc_id, component, text)
+        self._write_parsed(c, doc_id, source, rel, component, self._parse(doc_id, component, text), mtime_ns, size)
+
+    # Write an ALREADY-parsed doc (parsing is done off-thread during a bulk build).
+    def _write_parsed(self, c, doc_id, source, rel, component, p, mtime_ns, size):
         # clear existing child rows for this doc
         for tbl, col in (('heading', 'doc_id'), ('page_link', 'from_id'), ('meta_edge', 'from_id')):
             c.execute('DELETE FROM %s WHERE %s=?' % (tbl, col), (doc_id,))
@@ -418,14 +424,16 @@ class Index:
             intid = cur.lastrowid
         c.execute('INSERT INTO doc_fts(rowid,title,description,headings,body) VALUES(?,?,?,?,?)',
                   (intid, p['title'], p['description'], headings_txt, body_txt))
-        for i, h in enumerate(p['headings']):
-            c.execute('INSERT INTO heading(doc_id,ord,text) VALUES(?,?,?)', (doc_id, i, h))
-        for i, (raw, is_scheme) in enumerate(p['links']):
-            c.execute('INSERT INTO page_link(from_id,raw,is_scheme,ord) VALUES(?,?,?,?)', (doc_id, raw, 1 if is_scheme else 0, i))
-        for i, a in enumerate(p['assumes']):
-            c.execute('INSERT INTO meta_edge(from_id,kind,to_raw,ord) VALUES(?,?,?,?)', (doc_id, 'assumes', str(a), i))
-        for i, n in enumerate(p['next']):
-            c.execute('INSERT INTO meta_edge(from_id,kind,to_raw,ord) VALUES(?,?,?,?)', (doc_id, 'next', str(n), i))
+        if p['headings']:
+            c.executemany('INSERT INTO heading(doc_id,ord,text) VALUES(?,?,?)',
+                          [(doc_id, i, h) for i, h in enumerate(p['headings'])])
+        if p['links']:
+            c.executemany('INSERT INTO page_link(from_id,raw,is_scheme,ord) VALUES(?,?,?,?)',
+                          [(doc_id, raw, 1 if is_scheme else 0, i) for i, (raw, is_scheme) in enumerate(p['links'])])
+        edges = [(doc_id, 'assumes', str(a), i) for i, a in enumerate(p['assumes'])] \
+            + [(doc_id, 'next', str(n), i) for i, n in enumerate(p['next'])]
+        if edges:
+            c.executemany('INSERT INTO meta_edge(from_id,kind,to_raw,ord) VALUES(?,?,?,?)', edges)
         for i, r in enumerate(p['requirements']):
             c.execute('INSERT OR REPLACE INTO requirement(id,doc_id,component,grp,no,description,block_ord) VALUES(?,?,?,?,?,?,?)',
                       (r['id'], doc_id, r['component'], r['group'], r['no'], r['description'], i))
@@ -488,6 +496,13 @@ class Index:
         try:
             with self._wlock:
                 c = self._conn()
+                # Bulk-build tuning: skip fsync per commit (safe - the DB is a
+                # rebuildable cache), give SQLite a big page cache, and checkpoint the
+                # WAL rarely, so a large COLD build isn't throttled by WAL->DB flushes
+                # (the fsync-per-checkpoint wall that appears once the DB outgrows RAM).
+                c.execute('PRAGMA synchronous=OFF')
+                c.execute('PRAGMA cache_size=-262144')       # ~256 MB page cache
+                c.execute('PRAGMA wal_autocheckpoint=20000')
                 have = {r['id']: (r['mtime_ns'], r['size']) for r in c.execute('SELECT id,mtime_ns,size FROM doc')}
                 seen = set()
                 files = []
@@ -503,29 +518,42 @@ class Index:
                             files.append((s, os.path.join(dirpath, fn)))
                 self.progress = {'done': 0, 'total': len(files)}
                 changed = 0
-                for s, fp in files:
+                # Read + parse files in a thread pool: reading 500k tiny files is
+                # I/O-bound (each read is dominated by filesystem / AV-scan latency), so
+                # overlapping them across threads is the difference between a ~20-minute
+                # and a ~2-minute cold build. DB writes stay on THIS thread (SQLite has a
+                # single writer); the pool threads only stat/read/parse (no DB access).
+                def read_parse(sf):
+                    s, fp = sf
                     try:
                         st = os.stat(fp)
                     except OSError:
-                        continue
+                        return None
                     rel = os.path.relpath(fp, s['path']).replace('\\', '/')
                     doc_id = s['name'] + '/' + re.sub(r'\.md$', '', rel, flags=re.I)
-                    seen.add(doc_id)
                     prev = have.get(doc_id)
                     if prev and prev[0] == st.st_mtime_ns and prev[1] == st.st_size:
-                        self.progress['done'] += 1
-                        continue
+                        return ('skip', doc_id)
                     try:
                         with open(fp, 'r', encoding='utf-8-sig', errors='replace') as fh:
                             text = fh.read()
                     except OSError:
+                        return ('skip', doc_id)
+                    return ('doc', doc_id, s['name'], rel, s.get('component'),
+                            self._parse(doc_id, s.get('component'), text), st.st_mtime_ns, st.st_size)
+                with ThreadPoolExecutor(max_workers=16) as ex:
+                    for res in ex.map(read_parse, files, chunksize=64):
                         self.progress['done'] += 1
-                        continue
-                    self._write_doc(c, doc_id, s['name'], rel, s.get('component'), text, st.st_mtime_ns, st.st_size)
-                    changed += 1
-                    self.progress['done'] += 1
-                    if changed % 500 == 0:
-                        c.commit()
+                        if not res:
+                            continue
+                        seen.add(res[1])
+                        if res[0] == 'skip':
+                            continue
+                        _, doc_id, source, rel, component, p, mtime_ns, size = res
+                        self._write_parsed(c, doc_id, source, rel, component, p, mtime_ns, size)
+                        changed += 1
+                        if changed % 20000 == 0:
+                            c.commit()
                 # delete rows for files that disappeared
                 for doc_id in list(have.keys()):
                     if doc_id not in seen:
@@ -533,6 +561,11 @@ class Index:
                         changed += 1
                 self._relink(c)
                 c.commit()
+                try:
+                    c.execute('PRAGMA wal_checkpoint(TRUNCATE)')   # fold the WAL back, reset synchronous
+                except Exception:
+                    pass
+                c.execute('PRAGMA synchronous=NORMAL')
                 self.state = 'ready'
         except Exception as e:
             self.state = 'error'
@@ -612,15 +645,44 @@ class Index:
         c = self._conn()
         prefix = (path.rstrip('/') + '/') if path else ''
         folders, docs = set(), []
-        depth = prefix.count('/')
         for r in c.execute('SELECT id, title FROM doc WHERE id LIKE ? ORDER BY id_lc', (prefix + '%',)):
             rest = r['id'][len(prefix):]
             if '/' in rest:
                 folders.add(rest.split('/', 1)[0])
             else:
                 docs.append({'id': r['id'], 'title': r['title']})
-        # sources are the top level when path is empty
         return {'folders': sorted(folders, key=str.lower), 'docs': docs}
+
+    def resolve(self, base, paths):
+        """Resolve in-body link targets to doc ids against the FULL index (the client
+        no longer holds every id under lazy boot). Mirrors doclinks.resolveDocId:
+        relative-to-base, then as-is, then last-path-segment fallback; case-insensitive."""
+        c = self._conn()
+        return {p: self._resolve_one(c, base, p) for p in paths}
+
+    def _resolve_one(self, c, base, path):
+        if not path:
+            return None
+
+        def hit(cand):
+            if not cand:
+                return None
+            r = c.execute('SELECT id FROM doc WHERE id=? LIMIT 1', (cand,)).fetchone()
+            if r:
+                return r['id']
+            r = c.execute('SELECT id FROM doc WHERE id_lc=? LIMIT 1', (cand.lower(),)).fetchone()
+            return r['id'] if r else None
+        if base:
+            h = hit(join_doc_path(base, path))
+            if h:
+                return h
+        h = hit(path)
+        if h:
+            return h
+        lower = re.sub(r'^\.?/', '', path).lower()
+        r = c.execute("SELECT id FROM doc WHERE instr(id_lc,'/')>0 AND substr(id_lc, instr(id_lc,'/')+1)=? LIMIT 1",
+                      (lower,)).fetchone()
+        return r['id'] if r else None
 
     def graph(self):
         """Whole-graph payload for the map: nodes once + integer-indexed edges (assumes/

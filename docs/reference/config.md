@@ -1,5 +1,5 @@
 <!--meta
-{ "title": "Configuration", "description": "config.json sources and components, and the Python static server.", "assumes": ["Docs/reference/authoring"], "next": [] }
+{ "title": "Configuration", "description": "config.json sources and components, and the Python static server.", "assumes": ["Docs/reference/authoring"], "next": ["Docs/reference/performance"] }
 -->
 
 # Configuration
@@ -7,9 +7,11 @@
 WebDocs has exactly one configuration file, `config.json`, and one program that
 reads it, `serve.py`. Between them they decide what the site is called, which
 folders of Markdown make up the library, what component each folder belongs to,
-which document opens first, and the default theme. There is no build step and no
-database — the server is a thin static file host, and everything about *how* the
-documents render is decided in the browser.
+which document opens first, and the default theme. There is no build step: the
+server is a thin static file host that also maintains a lightweight search index
+(standard-library `sqlite3`), and everything about *how* the documents render is
+decided in the browser. See [Performance & Scale](Docs/reference/performance) for
+that index and the library sizes it supports.
 
 This page is the reference for both files. It assumes you know how to write a
 document; if not, start with the [Authoring Reference](Docs/reference/authoring).
@@ -183,14 +185,18 @@ It also accepts two writes, so the app can save without a separate backend:
   (anything else returns `400`); it returns `201` when it creates a new file and
   `200` when it overwrites an existing one.
 
-Crucially, the server performs **no** Markdown parsing, no metadata extraction,
-and no rendering. It never reads the body of a `.md` file for meaning — on a read
-it just hands the bytes over, and on a write it just stores the opaque bytes.
-Discovery, stripping the `<!--meta-->` header, parsing, sanitizing, numbering,
-highlighting and drawing the map all happen client-side. That keeps the server
-tiny and the whole library effectively static: you could host the same files
-behind any static file host and only lose the convenience of the JSON directory
-listings and the two write endpoints.
+To let the library scale to tens of thousands of documents, the server also builds
+a lightweight **SQLite index** of each document's metadata, headings, in-body
+links, and requirement/test blocks — using standard-library `sqlite3` on a
+background thread, cached in a disposable `.webdoc-index/` folder. It exposes
+read-only `GET /api/index/…` endpoints (search, the tree, the map graph, coverage,
+and link resolution) that the browser uses instead of loading every document at
+start-up, and it updates the index incrementally on each save. Crucially the server
+still performs **no Markdown rendering**: it extracts only lightweight index data
+and never turns a document body into HTML. Parsing, sanitizing, numbering,
+highlighting and drawing the map all still happen client-side. See
+[Performance & Scale](Docs/reference/performance) for the index and the sizes it
+supports.
 
 Requests are path-traversal guarded — a URL cannot escape its source folder — and
 dotfiles are omitted from listings.

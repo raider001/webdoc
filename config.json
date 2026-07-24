@@ -1,7 +1,7 @@
 {
   "siteTitle": "WebDocs",
   "sources": [
-    { "name": "Docs", "path": "docs", "component": "WD", "testResults": ".results.xml" }
+    { "name": "Docs", "path": "docs", "component": "WD" }
   ],
   "defaultDoc": "Docs/overview",
   "theme": "auto",
