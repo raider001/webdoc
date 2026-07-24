@@ -3,6 +3,7 @@
 // info, verifying-test linking, automated-test connection) and the exportable HTML
 // report. Extracted from main.js; cross-cutting handles (closing the other overlay,
 // linking tests to requirements) come through the shared `app` registry.
+import { elem, append } from './dom.js';
 import { state, el, downloadFile, isoDate, combinedStatus, app } from './app-shell.js';
 import { requirementList, testList, setCoverageStatus } from './requirements.js';
 import { loadResults, computeCoverage, computeTestStatus, testsFor } from './coverage.js';
@@ -14,12 +15,16 @@ let covApi = null;
 let covTransform = null;   // last pan/zoom of the coverage map, persisted across reopen + rebuilds
 export function setupCoverageView() {
   const btn = el('covBtn');
-  const overlay = document.createElement('div');
-  overlay.className = 'graph-overlay cov-overlay';
-  overlay.id = 'covOverlay';
-  overlay.hidden = true;
-  const stage = document.createElement('div');
-  overlay.appendChild(stage);
+  const stage = elem('div');
+  const legend = elem('div', 'cov-legend');
+  const panel = elem('aside', { class: 'cov-report', hidden: true });
+  const overlay = elem('div', { class: 'graph-overlay cov-overlay', id: 'covOverlay', hidden: true },
+    stage,
+    legend,
+    // Export a self-contained, shareable test report (downloads an .html file).
+    elem('button', { class: 'cov-export-btn', type: 'button', title: 'Download a self-contained test report (HTML) you can share anywhere', onClick: () => exportReport() }, '⤓ Export report'),
+    panel);
+  document.body.appendChild(overlay);
 
   // Status legend, each entry a toggle that hides/shows nodes of that status
   // (and any edges that touch a hidden node), like the map's category legend.
@@ -29,13 +34,9 @@ export function setupCoverageView() {
     // hidden-status nodes and any edge touching one.
     if (covApi && covApi.setStatusFilter) covApi.setStatusFilter(statusOff);
   }
-  const legend = document.createElement('div');
-  legend.className = 'cov-legend';
-  [['pass', 'Passing'], ['fail', 'Failing'], ['partial', 'Partial'], ['untested', 'Untested']].forEach(([k, l]) => {
-    const item = document.createElement('button'); item.type = 'button'; item.className = 'cov-legend-item';
-    item.setAttribute('aria-pressed', 'true'); item.title = 'Toggle ' + l + ' requirements';
-    const sw = document.createElement('span'); sw.className = 'cov-swatch cov-swatch-' + k;
-    item.append(sw, document.createTextNode(l));
+  [['pass', 'Passing'], ['fail', 'Failing'], ['partial', 'Partial'], ['untested', 'Untested']].forEach(([k, label]) => {
+    const item = elem('button', { type: 'button', class: 'cov-legend-item', 'aria-pressed': 'true', title: 'Toggle ' + label + ' requirements' },
+      elem('span', 'cov-swatch cov-swatch-' + k), label);
     item.addEventListener('click', () => {
       const off = !statusOff.has(k);
       if (off) statusOff.add(k); else statusOff.delete(k);
@@ -43,24 +44,11 @@ export function setupCoverageView() {
       item.setAttribute('aria-pressed', off ? 'false' : 'true');
       applyStatusFilter();
     });
-    legend.appendChild(item);
+    append(legend, item);
   });
-  overlay.appendChild(legend);
-
-  // Export a self-contained, shareable test report (downloads an .html file).
-  const exportBtn = document.createElement('button');
-  exportBtn.className = 'cov-export-btn'; exportBtn.type = 'button';
-  exportBtn.textContent = '⤓ Export report';
-  exportBtn.title = 'Download a self-contained test report (HTML) you can share anywhere';
-  exportBtn.addEventListener('click', () => exportReport());
-  overlay.appendChild(exportBtn);
-
-  const panel = document.createElement('aside'); panel.className = 'cov-report'; panel.hidden = true;
-  overlay.appendChild(panel);
-  document.body.appendChild(overlay);
 
   // Left-edge grip to drag the report panel wider/narrower (persists per session).
-  const resizeHandle = document.createElement('div'); resizeHandle.className = 'cov-report-resize'; resizeHandle.title = 'Drag to resize';
+  const resizeHandle = elem('div', { class: 'cov-report-resize', title: 'Drag to resize' });
   resizeHandle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     const startX = e.clientX, startW = panel.getBoundingClientRect().width;

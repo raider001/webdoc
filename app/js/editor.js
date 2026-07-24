@@ -11,6 +11,7 @@
 //   panels.js      metadata side panel, new-document modal
 //   ui.js          shared DOM primitives + the block-type menu
 // ---------------------------------------------------------------------------
+import { elem, append } from './dom.js';
 import { serializeDoc, htmlToMd, newBlock } from './editor/serialize.js';
 import { editable, listItem, attachInlineToolbar, setLinkDocs, setLinkSearch, setImageResolver } from './editor/richtext.js';
 import { tableEditor, requirementWidget, testCaseWidget } from './editor/widgets.js';
@@ -28,44 +29,34 @@ export { setLinkDocs, setLinkSearch };
 export function openEditor(opts) {
   setLinkDocs(opts.allDocs || []);   // static fallback; server-backed suggestions win (setLinkSearch)
   setImageResolver(src => resolveResourceUrl(opts.docId, src));   // inserted relative images show + round-trip
-  const root = document.createElement('div');
-  root.className = 'editor';
-
-  // --- block canvas (left/centre) ---
-  const canvas = document.createElement('div');
-  canvas.className = 'editor-canvas';
-  const list = document.createElement('div');
-  list.className = 'editor-blocks';
-  canvas.appendChild(list);
 
   const blocks = opts.blocks.map(b => ({ ...b }));
+  const list = elem('div', 'editor-blocks');
+  const canvas = elem('div', 'editor-canvas', list);
 
   // The trace-to picker's options, computed LIVE each time it opens: the saved
   // requirements from every other document PLUS the ones being edited right now
   // in this document (composed from the current component + group + number), so
   // intra-session traces autocomplete without needing a save first.
   const liveReqs = () => {
-    const list = (opts.requirements || []).slice();
-    const seen = new Set(list.map(q => q.id));
+    const reqs = (opts.requirements || []).slice();
+    const seen = new Set(reqs.map(q => q.id));
     const comp = opts.component || '';
     if (comp) blocks.forEach(b => {
       if (b.type === 'requirement' && b.group) (b.rows || []).forEach(row => {
         const no = (row.no || '').trim();
         if (!no) return;
         const id = ('R_' + comp + '_' + b.group + '_' + no).toUpperCase();   // matches the composed requirement id
-        if (!seen.has(id)) { seen.add(id); list.push({ id: id, description: row.description || '', docId: opts.docId, group: b.group }); }
+        if (!seen.has(id)) { seen.add(id); reqs.push({ id, description: row.description || '', docId: opts.docId, group: b.group }); }
       });
     });
-    return list;
+    return reqs;
   };
 
   function repaint() {
     list.textContent = '';
     blocks.forEach((b, i) => list.appendChild(renderBlockEditor(b, i)));
-    const add = document.createElement('button');
-    add.className = 'blk-add-end';
-    add.textContent = '+ Add block';
-    add.addEventListener('click', () => openBlockMenu(add, t => { blocks.push(newBlock(t)); repaint(); }));
+    const add = elem('button', { class: 'blk-add-end', onClick: () => openBlockMenu(add, t => { blocks.push(newBlock(t)); repaint(); }) }, '+ Add block');
     list.appendChild(add);
     resolveDisplayImages(list);   // make relative <img>s show (they'd 404 against the app route)
   }
@@ -82,69 +73,49 @@ export function openEditor(opts) {
     });
   }
 
+  // One block row: the reorder/insert/delete gutter plus the block's editable body.
   function renderBlockEditor(b, i) {
-    const wrap = document.createElement('div');
-    wrap.className = 'blk blk-' + b.type;
-
-    const gutter = document.createElement('div');
-    gutter.className = 'blk-gutter';
-    gutter.appendChild(iconBtn('↑', 'Move up', () => { if (i > 0) { [blocks[i - 1], blocks[i]] = [blocks[i], blocks[i - 1]]; repaint(); } }));
-    gutter.appendChild(iconBtn('↓', 'Move down', () => { if (i < blocks.length - 1) { [blocks[i + 1], blocks[i]] = [blocks[i], blocks[i + 1]]; repaint(); } }));
-    gutter.appendChild(iconBtn('＋', 'Insert below', (e) => openBlockMenu(e.target, t => { blocks.splice(i + 1, 0, newBlock(t)); repaint(); })));
-    gutter.appendChild(iconBtn('✕', 'Delete', () => { blocks.splice(i, 1); if (!blocks.length) blocks.push(newBlock('paragraph')); repaint(); }));
-    wrap.appendChild(gutter);
-
-    const body = document.createElement('div');
-    body.className = 'blk-body';
-    body.appendChild(blockField(b));
-    wrap.appendChild(body);
-    return wrap;
+    const gutter = elem('div', 'blk-gutter',
+      iconBtn('↑', 'Move up', () => { if (i > 0) { [blocks[i - 1], blocks[i]] = [blocks[i], blocks[i - 1]]; repaint(); } }),
+      iconBtn('↓', 'Move down', () => { if (i < blocks.length - 1) { [blocks[i + 1], blocks[i]] = [blocks[i], blocks[i + 1]]; repaint(); } }),
+      iconBtn('＋', 'Insert below', e => openBlockMenu(e.target, t => { blocks.splice(i + 1, 0, newBlock(t)); repaint(); })),
+      iconBtn('✕', 'Delete', () => { blocks.splice(i, 1); if (!blocks.length) blocks.push(newBlock('paragraph')); repaint(); }));
+    return elem('div', 'blk blk-' + b.type, gutter, elem('div', 'blk-body', blockField(b)));
   }
 
   // Build the editable field(s) for a block, writing edits back into `b`.
   function blockField(b) {
     if (b.type === 'heading') {
-      const row = document.createElement('div'); row.className = 'blk-heading';
-      const sel = document.createElement('select');
-      for (let l = 1; l <= 6; l++) { const o = document.createElement('option'); o.value = l; o.textContent = 'H' + l; if (b.level === l) o.selected = true; sel.appendChild(o); }
-      sel.addEventListener('change', () => { b.level = +sel.value; });
-      const ed = editable(b.html || '', 'heading', h => b.html = h, 'h' + (b.level || 2));
-      row.appendChild(sel); row.appendChild(ed);
-      return row;
+      const select = elem('select', { onChange: () => { b.level = +select.value; } });
+      for (let l = 1; l <= 6; l++) append(select, elem('option', { value: l, selected: b.level === l }, 'H' + l));
+      return elem('div', 'blk-heading', select, editable(b.html || '', 'heading', h => b.html = h, 'h' + (b.level || 2)));
     }
     if (b.type === 'paragraph') return editable(b.html || '', 'para', h => b.html = h, 'Write text…');
     if (b.type === 'quote') return editable(b.html || '', 'quote', h => b.html = h, 'Quote…');
     if (b.type === 'list') {
-      const ul = document.createElement(b.ordered ? 'ol' : 'ul'); ul.className = 'blk-list';
-      (b.itemsHtml || ['']).forEach(html => ul.appendChild(listItem(html)));
-      ul.setAttribute('contenteditable', 'true');
+      const ul = elem(b.ordered ? 'ol' : 'ul', { class: 'blk-list', contenteditable: 'true' },
+        (b.itemsHtml || ['']).map(html => listItem(html)));
       ul.addEventListener('input', () => { b.itemsHtml = [...ul.querySelectorAll('li')].map(li => li.innerHTML); });
       attachInlineToolbar(ul);
-      // seed items into b in case it never receives input
-      b.itemsHtml = [...ul.querySelectorAll('li')].map(li => li.innerHTML);
+      b.itemsHtml = [...ul.querySelectorAll('li')].map(li => li.innerHTML);   // seed in case it never receives input
       return ul;
     }
     if (b.type === 'code') {
-      const box = document.createElement('div'); box.className = 'blk-codebox';
-      const lang = document.createElement('input'); lang.className = 'blk-lang'; lang.placeholder = 'language (e.g. python)'; lang.value = b.lang || '';
-      lang.addEventListener('input', () => b.lang = lang.value.trim());
-      const ta = document.createElement('textarea'); ta.className = 'blk-code'; ta.value = b.code || ''; ta.rows = Math.max(3, (b.code || '').split('\n').length);
-      ta.addEventListener('input', () => { b.code = ta.value; ta.rows = Math.max(3, ta.value.split('\n').length); });
-      box.appendChild(lang); box.appendChild(ta);
-      return box;
+      const lang = elem('input', { class: 'blk-lang', placeholder: 'language (e.g. python)', value: b.lang || '', onInput: () => b.lang = lang.value.trim() });
+      const code = elem('textarea', { class: 'blk-code', value: b.code || '', rows: Math.max(3, (b.code || '').split('\n').length) });
+      code.addEventListener('input', () => { b.code = code.value; code.rows = Math.max(3, code.value.split('\n').length); });
+      return elem('div', 'blk-codebox', lang, code);
     }
     if (b.type === 'table') return tableEditor(b);
     if (b.type === 'image') {
-      const box = document.createElement('div'); box.className = 'blk-imgbox';
-      const src = labeledInput('Image URL', b.src || '', v => b.src = v);
-      const alt = labeledInput('Alt text', b.alt || '', v => b.alt = v);
-      box.appendChild(src); box.appendChild(alt);
-      return box;
+      return elem('div', 'blk-imgbox',
+        labeledInput('Image URL', b.src || '', v => b.src = v),
+        labeledInput('Alt text', b.alt || '', v => b.alt = v));
     }
-    if (b.type === 'hr') { const d = document.createElement('div'); d.className = 'blk-hr'; d.textContent = '— divider —'; return d; }
+    if (b.type === 'hr') return elem('div', 'blk-hr', '— divider —');
     if (b.type === 'requirement') return requirementWidget(b, liveReqs);
     if (b.type === 'testcase') return testCaseWidget(b, liveReqs, opts.component);
-    const d = document.createElement('div'); d.textContent = '(unsupported block)'; return d;
+    return elem('div', null, '(unsupported block)');
   }
 
   repaint();
@@ -154,17 +125,9 @@ export function openEditor(opts) {
   const panel = metadataPanel(meta, opts.allDocs, opts.docId);
 
   // --- toolbar ---
-  const bar = document.createElement('div');
-  bar.className = 'editor-bar';
-  const title = document.createElement('span'); title.className = 'editor-bar-title';
-  title.textContent = (opts.isNew ? 'New document · ' : 'Editing · ') + opts.docId;
-  const spacer = document.createElement('span'); spacer.style.flex = '1';
-  const status = document.createElement('span'); status.className = 'editor-status';
-  const cancel = document.createElement('button'); cancel.className = 'btn'; cancel.textContent = 'Cancel';
-  cancel.addEventListener('click', () => opts.onClose());
-  const save = document.createElement('button'); save.className = 'btn btn-primary'; save.textContent = 'Save';
-  save.addEventListener('click', () => {
-    // pull inline HTML -> markdown for text blocks
+  const status = elem('span', 'editor-status');
+  function onSave() {
+    // pull inline HTML -> markdown for text blocks; other block types pass through.
     const out = blocks.map(b => {
       if (b.type === 'heading') return { type: 'heading', level: b.level || 2, text: htmlToMd(b.html) };
       if (b.type === 'paragraph') return { type: 'paragraph', text: htmlToMd(b.html) };
@@ -173,14 +136,15 @@ export function openEditor(opts) {
       return b;
     });
     meta.title = meta.title || opts.meta.title || 'Untitled';
-    const md = serializeDoc(meta, out);
     status.textContent = 'Saving…';
-    opts.onSave(md, meta, status);
-  });
-  bar.append(title, spacer, status, cancel, save);
+    opts.onSave(serializeDoc(meta, out), meta, status);
+  }
+  const bar = elem('div', 'editor-bar',
+    elem('span', 'editor-bar-title', (opts.isNew ? 'New document · ' : 'Editing · ') + opts.docId),
+    elem('span', { style: 'flex:1' }),
+    status,
+    elem('button', { class: 'btn', onClick: () => opts.onClose() }, 'Cancel'),
+    elem('button', { class: 'btn btn-primary', onClick: onSave }, 'Save'));
 
-  const cols = document.createElement('div'); cols.className = 'editor-cols';
-  cols.append(canvas, panel);
-  root.append(bar, cols);
-  return root;
+  return elem('div', 'editor', bar, elem('div', 'editor-cols', canvas, panel));
 }

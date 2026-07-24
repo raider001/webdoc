@@ -22,6 +22,7 @@ import { loadPlugins } from './plugins.js';
 import { buildRequirementIndex, prepareDocGroups, preprocessRequirements, renderRequirements, revealRequirement, revealTest, reqFromQuery, testFromQuery, requirementTraceEdges, requirementList, testList, setCoverageStatus, inlineMarkdown, blockMarkdown, resolveRequirementRef } from './requirements.js';
 import { state, el, combinedStatus, app } from './app-shell.js';
 import { setupCoverageView } from './coverage-view.js';
+import { elem, append } from './dom.js';
 
 // ---- Theme ----------------------------------------------------------------
 function setupTheme() {
@@ -83,38 +84,19 @@ function setupDrawerSearch(drawer) {
       const mySeq = ++seq;
       ctrl = new AbortController();
       results.textContent = '';
-      const loading = document.createElement('p'); loading.className = 'search-empty'; loading.textContent = 'Searching…';
-      results.appendChild(loading);
+      append(results, elem('p', 'search-empty', 'Searching…'));
       let hits = [];
       try { hits = await searchDocs(q, 50, ctrl.signal); } catch (e) { hits = []; }
       if (mySeq !== seq) return;   // superseded by a newer keystroke
       results.textContent = '';
-      if (!hits.length) {
-        const p = document.createElement('p'); p.className = 'search-empty';
-        p.textContent = 'No documents match “' + q + '”.';
-        results.appendChild(p); return;
-      }
+      if (!hits.length) { append(results, elem('p', 'search-empty', 'No documents match “' + q + '”.')); return; }
       for (const hit of hits) {
-        const a = document.createElement('a');
-        a.className = 'search-hit';
-        a.href = '#/' + hit.docId;
-        const t = document.createElement('span');
-        t.className = 'search-hit-title';
-        t.textContent = hit.title;
-        a.appendChild(t);
-        if (hit.snippet) {
-          const sub = document.createElement('span');
-          sub.className = 'search-hit-sub';
-          sub.textContent = hit.snippet;
-          a.appendChild(sub);
-        }
-        a.addEventListener('click', ev => {
-          if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
-          ev.preventDefault();
-          navigate(hit.docId);
-          drawer.close();
-        });
-        results.appendChild(a);
+        append(results, elem('a', {
+          class: 'search-hit', href: '#/' + hit.docId,
+          onClick: ev => { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return; ev.preventDefault(); navigate(hit.docId); drawer.close(); }
+        },
+          elem('span', 'search-hit-title', hit.title),
+          hit.snippet && elem('span', 'search-hit-sub', hit.snippet)));
       }
     }, 200);
   });
@@ -126,27 +108,21 @@ function renderDoc(doc) {
   content.textContent = '';
 
   if (INTERIM) {
-    const banner = document.createElement('div');
-    banner.className = 'interim-banner';
-    banner.innerHTML = '<strong>Interim renderer.</strong> Layout preview only — the full, ' +
-      'CommonMark-compliant engine (verified against spec.json) is the next phase and will ' +
-      'replace this without changing anything else.';
-    content.appendChild(banner);
+    content.appendChild(elem('div', {
+      class: 'interim-banner',
+      html: '<strong>Interim renderer.</strong> Layout preview only — the full, ' +
+        'CommonMark-compliant engine (verified against spec.json) is the next phase and will ' +
+        'replace this without changing anything else.'
+    }));
   }
 
-  const article = document.createElement('article');
-  article.className = 'doc';
-
   // pipeline: extract requirement groups -> parse -> sanitize (inert) -> adopt
-  const html = renderMarkdown(preprocessRequirements(doc.body || '', doc.id));
-  article.appendChild(sanitizeToFragment(html));
+  const article = elem('article', 'doc', sanitizeToFragment(renderMarkdown(preprocessRequirements(doc.body || '', doc.id))));
   content.appendChild(article);
 
   // Surface the metadata description as a subtitle under the first heading.
   if (doc.description) {
-    const lede = document.createElement('p');
-    lede.className = 'doc-lede';
-    lede.textContent = doc.description;
+    const lede = elem('p', 'doc-lede', doc.description);
     const h1 = article.querySelector('h1');
     if (h1) h1.after(lede); else article.prepend(lede);
   }
@@ -292,27 +268,15 @@ function buildFootGroup(container, ids, caption, isNext) {
   container.textContent = '';
   if (!ids || !ids.length) { container.hidden = true; return; }
   container.hidden = false;
-
-  const cap = document.createElement('span');
-  cap.className = 'foot-cap';
-  cap.textContent = caption;
-  container.appendChild(cap);
-
-  const ul = document.createElement('ul');
-  ul.className = 'foot-links';
   // Lazy boot no longer preloads every doc, so we can't cheaply verify a target
   // exists - link it with an id-derived title (a real title if it happens to be
   // cached); a dead link just lands on the not-found view when clicked.
-  for (const id of ids) {
-    const li = document.createElement('li');
-    const a = document.createElement('a');
-    a.href = '#/' + id;
-    const target = state.byId.get(id);
-    a.textContent = (target && target.title) || titleFromId(id);
-    li.appendChild(a);
-    ul.appendChild(li);
-  }
-  container.appendChild(ul);
+  append(container,
+    elem('span', 'foot-cap', caption),
+    elem('ul', 'foot-links', ids.map(id => {
+      const target = state.byId.get(id);
+      return elem('li', null, elem('a', { href: '#/' + id }, (target && target.title) || titleFromId(id)));
+    })));
 }
 
 // A display title derived from a doc id's last segment (lazy footer/stub fallback).
@@ -388,9 +352,7 @@ function highlight(root, q) {
     let s = text.nodeValue, lower = s.toLowerCase(), i = 0, idx;
     while ((idx = lower.indexOf(needle, i)) !== -1) {
       if (idx > i) frag.appendChild(document.createTextNode(s.slice(i, idx)));
-      const mark = document.createElement('mark');
-      mark.className = 'find';
-      mark.textContent = s.slice(idx, idx + needle.length);
+      const mark = elem('mark', 'find', s.slice(idx, idx + needle.length));
       frag.appendChild(mark);
       if (!firstMark) firstMark = mark;
       i = idx + needle.length;
@@ -514,12 +476,8 @@ async function buildDocGraph(keepView, animate, refit) {
 }
 function setupGraphButton() {
   const btn = el('graphBtn');
-  const overlay = document.createElement('div');
-  overlay.className = 'graph-overlay';
-  overlay.id = 'graphOverlay';
-  overlay.hidden = true;
-  const stage = document.createElement('div'); // becomes .graph-root, fills overlay
-  overlay.appendChild(stage);
+  const stage = elem('div'); // becomes .graph-root, fills overlay
+  const overlay = elem('div', { class: 'graph-overlay', id: 'graphOverlay', hidden: true }, stage);
   document.body.appendChild(overlay);
   docMapStage = stage;
 
@@ -843,10 +801,7 @@ function defaultId() {
 function showError(msg) {
   const content = el('content');
   content.textContent = '';
-  const box = document.createElement('div');
-  box.className = 'doc-error';
-  box.textContent = msg;
-  content.appendChild(box);
+  content.appendChild(elem('div', 'doc-error', msg));
 }
 function navigate(id) {
   if (location.hash === '#/' + id) route(); else location.hash = '#/' + id;
@@ -878,21 +833,16 @@ function setupTestRun() {
 let indexOverlay = null;
 function showIndexOverlay() {
   if (indexOverlay) return;
-  const ov = document.createElement('div');
-  ov.className = 'index-loading';
-  const card = document.createElement('div'); card.className = 'index-loading-card';
-  const brand = document.createElement('div'); brand.className = 'index-loading-brand';
-  brand.textContent = (state.site && state.site.siteTitle) || 'Documentation';
-  const title = document.createElement('div'); title.className = 'index-loading-title';
-  title.textContent = 'Preparing the document index…';
-  const track = document.createElement('div'); track.className = 'index-progress is-indeterminate';
-  const fill = document.createElement('div'); fill.className = 'index-progress-fill';
-  track.appendChild(fill);
-  const stat = document.createElement('div'); stat.className = 'index-loading-stat'; stat.textContent = 'Scanning files…';
-  const note = document.createElement('div'); note.className = 'index-loading-note';
-  note.textContent = 'First-time indexing of this library. Later starts are near-instant.';
-  card.append(brand, title, track, stat, note);
-  ov.appendChild(card);
+  const fill = elem('div', 'index-progress-fill');
+  const track = elem('div', 'index-progress is-indeterminate', fill);
+  const stat = elem('div', 'index-loading-stat', 'Scanning files…');
+  const ov = elem('div', 'index-loading',
+    elem('div', 'index-loading-card',
+      elem('div', 'index-loading-brand', (state.site && state.site.siteTitle) || 'Documentation'),
+      elem('div', 'index-loading-title', 'Preparing the document index…'),
+      track,
+      stat,
+      elem('div', 'index-loading-note', 'First-time indexing of this library. Later starts are near-instant.')));
   document.body.appendChild(ov);
   el('live').textContent = 'Preparing the document index.';
   indexOverlay = { ov: ov, track: track, fill: fill, stat: stat };

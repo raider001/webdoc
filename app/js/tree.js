@@ -5,6 +5,8 @@
 // costs nothing at 50k docs until you drill in. Native <details>/<summary> keep it
 // keyboard-operable for free.
 
+import { elem } from './dom.js';
+
 let onSelectCb = null;
 
 async function fetchChildren(path) {
@@ -16,28 +18,19 @@ async function fetchChildren(path) {
 }
 
 function docLink(doc) {
-  const a = document.createElement('a');
-  a.className = 'doc-link';
-  a.href = '#/' + doc.id;
-  a.dataset.id = doc.id;
-  a.textContent = doc.title || doc.id.split('/').pop();
-  a.addEventListener('click', ev => {
-    if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return; // allow open-in-new-tab
-    ev.preventDefault();
-    if (onSelectCb) onSelectCb(doc.id);
-  });
-  return a;
+  return elem('a', {
+    class: 'doc-link', href: '#/' + doc.id, 'data-id': doc.id,
+    onClick: ev => {
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return; // allow open-in-new-tab
+      ev.preventDefault();
+      if (onSelectCb) onSelectCb(doc.id);
+    }
+  }, doc.title || doc.id.split('/').pop());
 }
 
 function folderNode(name, path) {
-  const details = document.createElement('details');
-  details.dataset.path = path;
-  const summary = document.createElement('summary');
-  summary.textContent = name;
-  details.appendChild(summary);
-  const kids = document.createElement('div');
-  kids.className = 'group-children';
-  details.appendChild(kids);
+  const kids = elem('div', 'group-children');
+  const details = elem('details', { 'data-path': path }, elem('summary', null, name), kids);
   let loaded = false;
   const load = async () => {
     if (loaded) return; loaded = true;

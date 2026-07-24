@@ -1,50 +1,48 @@
 // editor/richtext.js - contenteditable text fields, the floating inline toolbar
-// (Bold / Italic / Code / Link) shown on selection, and the link popover with
-// internal-document URL autocomplete. Everything about editing inline rich text.
+// (Bold / Italic / Code / Link / Image) shown on selection, and the link & image
+// popovers (the link one with internal-document URL autocomplete). Everything about
+// editing inline rich text.
+import { elem, append } from '../dom.js';
 
 /* ---- editable inline field (contenteditable + inline toolbar) ---- */
 export function editable(html, cls, onChange, placeholder) {
-  const ed = document.createElement('div');
-  ed.className = 'blk-edit blk-edit-' + cls;
-  ed.setAttribute('contenteditable', 'true');
-  ed.setAttribute('data-ph', placeholder || '');
-  ed.innerHTML = html;
-  ed.addEventListener('input', () => onChange(ed.innerHTML));
+  const ed = elem('div', {
+    class: 'blk-edit blk-edit-' + cls, contenteditable: 'true', 'data-ph': placeholder || '',
+    html, onInput: () => onChange(ed.innerHTML)
+  });
   attachInlineToolbar(ed);
   return ed;
 }
-export function listItem(html) { const li = document.createElement('li'); li.innerHTML = html || ''; return li; }
+export function listItem(html) { return elem('li', { html: html || '' }); }
 
 // A standalone rich-text field (contenteditable + the shared inline toolbar),
 // for callers outside the block editor (e.g. the manual-test editor).
 export function richText(html, onChange, placeholder) {
-  const ed = document.createElement('div');
-  ed.className = 'wysiwyg';
-  ed.setAttribute('contenteditable', 'true');
-  ed.setAttribute('data-ph', placeholder || '');
-  ed.innerHTML = html || '';
-  ed.addEventListener('input', () => onChange(ed.innerHTML));
+  const ed = elem('div', {
+    class: 'wysiwyg', contenteditable: 'true', 'data-ph': placeholder || '',
+    html: html || '', onInput: () => onChange(ed.innerHTML)
+  });
   attachInlineToolbar(ed);
   return ed;
 }
 
-// A small floating toolbar (Bold / Italic / Code / Link) shown on selection.
+// A small floating toolbar (Bold / Italic / Code / Link / Image) shown on selection.
 let sharedBar = null;
 export function attachInlineToolbar(ed) {
   ed.addEventListener('mouseup', showBar);
   ed.addEventListener('keyup', showBar);
   // Click an existing link to edit its text / URL or unlink it (no prompt()).
   ed.addEventListener('click', e => {
-    const a = e.target.closest && e.target.closest('a');
-    if (!a || !ed.contains(a)) return;
+    const anchor = e.target.closest && e.target.closest('a');
+    if (!anchor || !ed.contains(anchor)) return;
     e.preventDefault();
     if (sharedBar) sharedBar.style.display = 'none';
-    const plain = !a.querySelector('*');   // link wraps only text -> its text is editable
+    const plain = !anchor.querySelector('*');   // link wraps only text -> its text is editable
     openLinkPopover({
-      rect: a.getBoundingClientRect(),
-      text: a.textContent, url: a.getAttribute('href') || '', canText: plain,
-      onApply: (text, url) => { a.setAttribute('href', url); if (plain && text !== a.textContent) a.textContent = text; fireInput(ed); },
-      onRemove: () => { unwrapAnchor(a); fireInput(ed); }
+      rect: anchor.getBoundingClientRect(),
+      text: anchor.textContent, url: anchor.getAttribute('href') || '', canText: plain,
+      onApply: (text, url) => { anchor.setAttribute('href', url); if (plain && text !== anchor.textContent) anchor.textContent = text; fireInput(ed); },
+      onRemove: () => { unwrapAnchor(anchor); fireInput(ed); }
     });
   });
   ed.addEventListener('blur', () => setTimeout(() => { if (sharedBar && !sharedBar.matches(':hover')) sharedBar.style.display = 'none'; }, 150));
@@ -67,31 +65,33 @@ export function attachInlineToolbar(ed) {
     bar.style.left = (window.scrollX + r.left) + 'px';
   }
 }
+
 function ensureBar() {
   if (sharedBar) return sharedBar;
-  sharedBar = document.createElement('div');
-  sharedBar.className = 'inline-bar';
-  const mk = (label, fn, title) => { const b = document.createElement('button'); b.textContent = label; b.title = title; b.addEventListener('mousedown', e => { e.preventDefault(); fn(); }); return b; };
-  sharedBar.append(
-    mk('B', () => document.execCommand('bold'), 'Bold'),
-    mk('I', () => document.execCommand('italic'), 'Italic'),
-    mk('<>', wrapCode, 'Inline code'),
-    mk('🔗', addLink, 'Link'),
-    mk('🖼', addImage, 'Insert image')
-  );
+  // Buttons preventDefault on mousedown so the field keeps its selection.
+  const button = (label, run, title) => elem('button', { title, onMousedown: e => { e.preventDefault(); run(); } }, label);
+  sharedBar = elem('div', 'inline-bar',
+    button('B', () => document.execCommand('bold'), 'Bold'),
+    button('I', () => document.execCommand('italic'), 'Italic'),
+    button('<>', wrapCode, 'Inline code'),
+    button('🔗', addLink, 'Link'),
+    button('🖼', addImage, 'Insert image'));
   document.body.appendChild(sharedBar);
   return sharedBar;
 }
+
 function wrapCode() {
-  const sel = window.getSelection(); if (!sel.rangeCount || sel.isCollapsed) return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
-  const code = document.createElement('code');
-  code.textContent = range.toString();
-  range.deleteContents(); range.insertNode(code);
+  const code = elem('code', { text: range.toString() });
+  range.deleteContents();
+  range.insertNode(code);
   sel.removeAllRanges();
-  // fire input on the editable
-  const host = code.closest('[contenteditable]'); if (host) host.dispatchEvent(new Event('input', { bubbles: true }));
+  const host = code.closest('[contenteditable]');   // fire input on the editable
+  if (host) host.dispatchEvent(new Event('input', { bubbles: true }));
 }
+
 // Link button on the inline toolbar. Selection preserved (buttons preventDefault
 // on mousedown). Opens the popover to create a link, or to edit one the caret is
 // inside. Text is editable when inserting fresh or editing an existing link; when
@@ -104,31 +104,30 @@ function addLink() {
   const host = startEl && startEl.closest('[contenteditable]');
   if (!host) return;
   if (sharedBar) sharedBar.style.display = 'none';
-  const a = existingAnchor(range);
-  const aPlain = a ? !a.querySelector('*') : false;   // formatted link -> keep its markup, text not editable
+  const anchor = existingAnchor(range);
+  const anchorPlain = anchor ? !anchor.querySelector('*') : false;   // formatted link -> keep its markup, text not editable
   openLinkPopover({
-    rect: a ? a.getBoundingClientRect() : range.getBoundingClientRect(),
-    text: a ? a.textContent : sel.toString(),
-    url: a ? (a.getAttribute('href') || '') : '',
-    canText: a ? aPlain : range.collapsed,  // edit text for a plain link or a fresh insert; keep selected text when wrapping
-    onApply: (text, url) => applyLink(host, range, a, text, url),
-    onRemove: a ? () => { unwrapAnchor(a); fireInput(host); } : null
+    rect: anchor ? anchor.getBoundingClientRect() : range.getBoundingClientRect(),
+    text: anchor ? anchor.textContent : sel.toString(),
+    url: anchor ? (anchor.getAttribute('href') || '') : '',
+    canText: anchor ? anchorPlain : range.collapsed,  // edit text for a plain link or a fresh insert; keep selected text when wrapping
+    onApply: (text, url) => applyLink(host, range, anchor, text, url),
+    onRemove: anchor ? () => { unwrapAnchor(anchor); fireInput(host); } : null
   });
 }
 
-function applyLink(host, range, a, text, url) {
-  if (a) {
-    a.setAttribute('href', url);
-    if (!a.querySelector('*') && text != null && text !== a.textContent) a.textContent = text; // don't flatten inner markup
+function applyLink(host, range, anchor, text, url) {
+  if (anchor) {
+    anchor.setAttribute('href', url);
+    if (!anchor.querySelector('*') && text != null && text !== anchor.textContent) anchor.textContent = text; // don't flatten inner markup
   } else if (!range.collapsed) {
-    const link = document.createElement('a'); link.href = url;
+    const link = elem('a', { href: url });
     try { range.surroundContents(link); }
-    catch (e) { const frag = range.extractContents(); link.appendChild(frag); range.insertNode(link); }
+    catch (e) { link.appendChild(range.extractContents()); range.insertNode(link); }
     link.querySelectorAll('a').forEach(unwrapAnchor); // no nested anchors (would be invalid Markdown)
     if (text && text !== link.textContent) link.textContent = text;
   } else {
-    const link = document.createElement('a'); link.href = url; link.textContent = text || url;
-    range.insertNode(link);
+    range.insertNode(elem('a', { href: url, text: text || url }));
   }
   fireInput(host);
 }
@@ -137,11 +136,12 @@ function applyLink(host, range, a, text, url) {
 function existingAnchor(range) {
   let n = range.startContainer;
   n = n.nodeType === 1 ? n : n.parentElement;
-  const a = n && n.closest ? n.closest('a') : null;
-  return (a && a.closest('[contenteditable]')) ? a : null;
+  const anchor = n && n.closest ? n.closest('a') : null;
+  return (anchor && anchor.closest('[contenteditable]')) ? anchor : null;
 }
 function unwrapAnchor(a) {
-  const parent = a.parentNode; if (!parent) return;
+  const parent = a.parentNode;
+  if (!parent) return;
   while (a.firstChild) parent.insertBefore(a.firstChild, a);
   parent.removeChild(a);
 }
@@ -178,47 +178,51 @@ function addImage() {
     }
   });
 }
+
+/* ---- popovers -------------------------------------------------------------- */
+// Shared bits: a labelled input row, and positioning below the anchoring rect.
+function popRow(labelText, input) {
+  return elem('label', 'link-pop-row', elem('span', null, labelText), input);
+}
+function positionPopover(pop, rect) {
+  const r = rect || { bottom: 80, left: 80 };
+  const width = 300;
+  pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+  pop.style.left = (window.scrollX + Math.max(8, Math.min(r.left, window.innerWidth - width - 12))) + 'px';
+}
+
 // A minimal image popover (URL + Alt, Insert / Cancel), reusing the link popover's
 // shared state + styling. No doc autocomplete - image paths aren't in the doc index.
 function openImagePopover(o) {
   closeLinkPop();
-  const pop = document.createElement('div'); pop.className = 'link-pop';
-  function mkRow(labelTxt, ph) {
-    const row = document.createElement('label'); row.className = 'link-pop-row';
-    const s = document.createElement('span'); s.textContent = labelTxt;
-    const i = document.createElement('input'); i.type = 'text'; i.placeholder = ph || '';
-    row.append(s, i); return i;
-  }
-  const uIn = mkRow('Image URL', 'diagram.png or https://…'); uIn.classList.add('link-pop-url');
-  const aIn = mkRow('Alt text', 'describe the image');
-  const bar = document.createElement('div'); bar.className = 'link-pop-bar';
-  const sp = document.createElement('span'); sp.style.flex = '1';
-  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
-  const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'link-pop-apply'; apply.textContent = 'Insert';
-  bar.append(sp, cancel, apply);
-  pop.append(uIn.parentElement, aIn.parentElement, bar);
+  const urlInput = elem('input', { type: 'text', class: 'link-pop-url', placeholder: 'diagram.png or https://…' });
+  const altInput = elem('input', { type: 'text', placeholder: 'describe the image' });
+  const pop = elem('div', 'link-pop',
+    popRow('Image URL', urlInput),
+    popRow('Alt text', altInput),
+    elem('div', 'link-pop-bar',
+      elem('span', { style: 'flex:1' }),
+      elem('button', { type: 'button', onMousedown: e => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
+      elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Insert')));
   document.body.appendChild(pop);
   linkPop = pop;
-  const r = o.rect || { bottom: 80, left: 80 };
-  const w = 300;
-  pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
-  pop.style.left = (window.scrollX + Math.max(8, Math.min(r.left, window.innerWidth - w - 12))) + 'px';
+  positionPopover(pop, o.rect);
+
   function commit() {
-    const url = normalizeImgUrl(uIn.value);
-    if (!url) { pop.classList.add('link-pop-err'); uIn.focus(); return; }
-    o.onApply(aIn.value.trim(), url);
+    const url = normalizeImgUrl(urlInput.value);
+    if (!url) { pop.classList.add('link-pop-err'); urlInput.focus(); return; }
+    o.onApply(altInput.value.trim(), url);
     closeLinkPop();
   }
-  apply.addEventListener('click', commit);
-  cancel.addEventListener('mousedown', e => { e.preventDefault(); closeLinkPop(); });
-  [uIn, aIn].forEach(i => i.addEventListener('keydown', e => {
+  [urlInput, altInput].forEach(i => i.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   }));
-  linkOff = function (e) { if (linkPop && !linkPop.contains(e.target)) closeLinkPop(); };
+  linkOff = e => { if (linkPop && !linkPop.contains(e.target)) closeLinkPop(); };
   setTimeout(() => document.addEventListener('mousedown', linkOff), 0);
-  setTimeout(() => uIn.focus(), 20);
+  setTimeout(() => urlInput.focus(), 20);
 }
+
 // Image-src acceptance: relative paths are kept AS-IS (a bare "diagram.png" is a
 // file next to the doc, NOT a bare domain - so, unlike link URLs, never prepend
 // https://). Schemes are limited to http(s)/data; others (javascript:, …) rejected.
@@ -252,42 +256,32 @@ function closeLinkPop() {
   if (linkPop) { linkPop.remove(); linkPop = null; }
   document.querySelectorAll('.link-ac').forEach(n => n.remove());
 }
+
 function openLinkPopover(o) {
   closeLinkPop();
-  const pop = document.createElement('div'); pop.className = 'link-pop';
-  function mkRow(labelTxt, val, ph, disabled) {
-    const row = document.createElement('label'); row.className = 'link-pop-row';
-    const s = document.createElement('span'); s.textContent = labelTxt;
-    const i = document.createElement('input'); i.type = 'text'; i.value = val || ''; i.placeholder = ph || ''; i.disabled = !!disabled;
-    row.append(s, i); return i;
-  }
-  const tIn = mkRow('Text', o.text, 'Link text', !o.canText);
-  const uIn = mkRow('URL', o.url, 'https://…', false); uIn.classList.add('link-pop-url');
-  const bar = document.createElement('div'); bar.className = 'link-pop-bar';
-  const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'link-pop-remove'; rm.textContent = 'Unlink';
-  const sp = document.createElement('span'); sp.style.flex = '1';
-  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
-  const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'link-pop-apply'; apply.textContent = 'Apply';
-  bar.append(rm, sp, cancel, apply);
-  if (!o.onRemove) rm.style.display = 'none';
-  pop.append(tIn.parentElement, uIn.parentElement, bar);
+  const textInput = elem('input', { type: 'text', value: o.text || '', placeholder: 'Link text', disabled: !o.canText });
+  const urlInput = elem('input', { type: 'text', class: 'link-pop-url', value: o.url || '', placeholder: 'https://…' });
+  const removeBtn = elem('button', { type: 'button', class: 'link-pop-remove', onClick: () => { if (o.onRemove) o.onRemove(); closeLinkPop(); } }, 'Unlink');
+  if (!o.onRemove) removeBtn.style.display = 'none';
+
+  const pop = elem('div', 'link-pop',
+    popRow('Text', textInput),
+    popRow('URL', urlInput),
+    elem('div', 'link-pop-bar',
+      removeBtn,
+      elem('span', { style: 'flex:1' }),
+      elem('button', { type: 'button', onMousedown: e => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
+      elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Apply')));
   document.body.appendChild(pop);
   linkPop = pop;
-
-  const r = o.rect || { bottom: 80, left: 80 };
-  const w = 300;
-  pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
-  pop.style.left = (window.scrollX + Math.max(8, Math.min(r.left, window.innerWidth - w - 12))) + 'px';
+  positionPopover(pop, o.rect);
 
   function commit() {
-    const url = normalizeUrl(uIn.value);
-    if (!url) { pop.classList.add('link-pop-err'); uIn.focus(); return; }
-    o.onApply(o.canText ? tIn.value : o.text, url);
+    const url = normalizeUrl(urlInput.value);
+    if (!url) { pop.classList.add('link-pop-err'); urlInput.focus(); return; }
+    o.onApply(o.canText ? textInput.value : o.text, url);
     closeLinkPop();
   }
-  apply.addEventListener('click', commit);
-  cancel.addEventListener('mousedown', e => { e.preventDefault(); closeLinkPop(); });
-  rm.addEventListener('click', () => { if (o.onRemove) o.onRemove(); closeLinkPop(); });
 
   // URL autocomplete: suggest internal documents by title / id. Selecting one
   // inserts its doc id (the reading view resolves it to a route). Typing a real
@@ -295,27 +289,29 @@ function openLinkPopover(o) {
   let acItems = [], acActive = -1, acDrop = null, acSeq = 0, acTimer = null;
   function looksExternal(v) { return /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(v); }
   function closeUrlAc() { if (acTimer) { clearTimeout(acTimer); acTimer = null; } if (acDrop) { acDrop.remove(); acDrop = null; } acItems = []; acActive = -1; }
-  function pickDoc(d) { uIn.value = d.id; if (o.canText && !tIn.disabled && !tIn.value) tIn.value = d.title || d.id; pop.classList.remove('link-pop-err'); closeUrlAc(); uIn.focus(); }
+  function pickDoc(d) {
+    urlInput.value = d.id;
+    if (o.canText && !textInput.disabled && !textInput.value) textInput.value = d.title || d.id;
+    pop.classList.remove('link-pop-err');
+    closeUrlAc();
+    urlInput.focus();
+  }
   function renderUrlAc() {
     if (!acItems.length) { if (acDrop) { acDrop.remove(); acDrop = null; } return; }
     if (acActive >= acItems.length) acActive = acItems.length - 1;
-    if (!acDrop) { acDrop = document.createElement('div'); acDrop.className = 'ac-drop link-ac'; document.body.appendChild(acDrop); }
+    if (!acDrop) { acDrop = elem('div', 'ac-drop link-ac'); document.body.appendChild(acDrop); }
     acDrop.textContent = '';
-    acItems.forEach((d, idx) => {
-      const opt = document.createElement('div'); opt.className = 'ac-opt' + (idx === acActive ? ' is-active' : '');
-      const idEl = document.createElement('span'); idEl.className = 'ac-id'; idEl.textContent = d.title || d.id;
-      const de = document.createElement('span'); de.className = 'ac-desc'; de.textContent = d.id;
-      opt.append(idEl, de);
-      opt.addEventListener('mousedown', e => { e.preventDefault(); pickDoc(d); });
-      acDrop.appendChild(opt);
-    });
-    const rc = uIn.getBoundingClientRect();
+    acItems.forEach((d, idx) => append(acDrop,
+      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: e => { e.preventDefault(); pickDoc(d); } },
+        elem('span', 'ac-id', d.title || d.id),
+        elem('span', 'ac-desc', d.id))));
+    const rc = urlInput.getBoundingClientRect();
     acDrop.style.left = (window.scrollX + rc.left) + 'px';
     acDrop.style.top = (window.scrollY + rc.bottom + 3) + 'px';
     acDrop.style.minWidth = Math.max(220, rc.width) + 'px';
   }
   function openUrlAc() {
-    const raw = uIn.value.trim();
+    const raw = urlInput.value.trim();
     if (looksExternal(raw)) { closeUrlAc(); return; }
     if (linkSearch) {
       // Server-backed: query the index as you type (debounced; a sequence guard drops
@@ -335,9 +331,9 @@ function openLinkPopover(o) {
       renderUrlAc();
     }
   }
-  uIn.addEventListener('input', () => { pop.classList.remove('link-pop-err'); acActive = -1; openUrlAc(); });
-  uIn.addEventListener('focus', openUrlAc);
-  uIn.addEventListener('keydown', e => {
+  urlInput.addEventListener('input', () => { pop.classList.remove('link-pop-err'); acActive = -1; openUrlAc(); });
+  urlInput.addEventListener('focus', openUrlAc);
+  urlInput.addEventListener('keydown', e => {
     if (acDrop && acItems.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); acActive = Math.min(acItems.length - 1, acActive + 1); renderUrlAc(); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); acActive = Math.max(0, acActive - 1); renderUrlAc(); return; }
@@ -347,7 +343,7 @@ function openLinkPopover(o) {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   });
-  tIn.addEventListener('keydown', e => {
+  textInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   });
@@ -356,5 +352,5 @@ function openLinkPopover(o) {
     if (linkPop && !linkPop.contains(e.target) && !(e.target.closest && e.target.closest('.link-ac'))) closeLinkPop();
   };
   setTimeout(() => document.addEventListener('mousedown', linkOff), 0);
-  setTimeout(() => ((o.canText && !tIn.value) ? tIn : uIn).focus(), 20);
+  setTimeout(() => ((o.canText && !textInput.value) ? textInput : urlInput).focus(), 20);
 }

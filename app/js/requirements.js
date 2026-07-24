@@ -25,6 +25,7 @@
 // aligned regardless of the mix of requirement / test / invalid blocks.
 // ---------------------------------------------------------------------------
 
+import { elem, append } from './dom.js';
 import { loadDoc } from './catalog.js';
 import { renderInline, renderMarkdown } from './commonmark.js';
 import { sanitizeToFragment } from './sanitize.js';
@@ -301,34 +302,20 @@ export function preprocessRequirements(body, docId) {
 // ---- rendering ------------------------------------------------------------
 function reqLink(composedId) {
   const rec = index.get(composedId);
-  const a = document.createElement('a');
-  a.className = 'req-link';
-  a.href = '#/' + rec.docId + '?req=' + encodeURIComponent(composedId);
-  a.textContent = composedId;
-  return a;
+  return elem('a', { class: 'req-link', href: '#/' + rec.docId + '?req=' + encodeURIComponent(composedId) }, composedId);
 }
 function testLink(testId) {
   const rec = testIndex.get(testId);
-  const a = document.createElement('a');
-  a.className = 'req-link tc-link';
-  a.href = '#/' + rec.docId + '?test=' + encodeURIComponent(testId);
-  a.textContent = testId;
-  return a;
+  return elem('a', { class: 'req-link tc-link', href: '#/' + rec.docId + '?test=' + encodeURIComponent(testId) }, testId);
 }
 function missingChip(raw) {
-  const span = document.createElement('span');
-  span.className = 'req-missing';
-  span.title = 'Not found: ' + raw;
-  span.textContent = '⚠ ' + raw;
-  return span;
+  return elem('span', { class: 'req-missing', title: 'Not found: ' + raw }, '⚠ ' + raw);
 }
-function noneCell() { const s = document.createElement('span'); s.className = 'req-none'; s.textContent = '—'; return s; }
+function noneCell() { return elem('span', 'req-none', '—'); }
+// Fill a trace cell with comma-separated link/chip nodes (or an em-dash if empty).
 function fillTrace(td, nodes) {
   if (!nodes.length) { td.textContent = '—'; td.classList.add('req-none'); return; }
-  nodes.forEach((node, i) => {
-    td.appendChild(node);
-    if (i < nodes.length - 1) td.appendChild(document.createTextNode(', '));
-  });
+  nodes.forEach((node, i) => { if (i) append(td, ', '); append(td, node); });
 }
 function statusOf(id) {
   if (!coverageStatus) return null;
@@ -337,94 +324,62 @@ function statusOf(id) {
 function badgeStatus(badge, id) { const s = statusOf(id); if (s) badge.classList.add('req-badge-st-' + s.status); }
 function resultBadge(testId) {
   const st = (statusOf(testId) || {}).status || 'untested';
-  const span = document.createElement('span');
-  span.className = 'tc-result tc-result-' + st;
-  span.textContent = st === 'pass' ? 'Pass' : st === 'fail' ? 'Fail' : st === 'partial' ? 'Partial' : 'Untested';
-  return span;
+  const label = st === 'pass' ? 'Pass' : st === 'fail' ? 'Fail' : st === 'partial' ? 'Partial' : 'Untested';
+  return elem('span', 'tc-result tc-result-' + st, label);
 }
 
 function buildReqTable(g) {
-  const fig = document.createElement('figure'); fig.className = 'req-group';
-  const cap = document.createElement('figcaption'); cap.className = 'req-cap'; cap.textContent = 'Requirements — ' + g.group; fig.appendChild(cap);
-  if (g.error) { const err = document.createElement('p'); err.className = 'req-error'; err.textContent = '⚠ ' + g.error; fig.appendChild(err); }
-
-  const table = document.createElement('table'); table.className = 'req-tbl';
-  const thead = document.createElement('thead'); const htr = document.createElement('tr');
-  ['Requirement', 'Description', 'Trace To', 'Trace From', 'Verified By'].forEach(h => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
-  thead.appendChild(htr); table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
+  const tbody = elem('tbody');
   for (const rec of g.rows) {
-    const tr = document.createElement('tr');
+    const badge = elem('span', 'req-badge', rec.id);
+    badgeStatus(badge, rec.id);
+    const tdTo = elem('td'); fillTrace(tdTo, rec.traceTo.map(raw => { const t = resolveReqRef(raw, rec); return t ? reqLink(t) : missingChip(raw); }));
+    const tdFrom = elem('td'); fillTrace(tdFrom, rec.traceFrom.map(id => reqLink(id)));
+    const tdVer = elem('td'); fillTrace(tdVer, (rec.verifiedBy || []).map(id => testLink(id)));
+    const tr = elem('tr', null,
+      elem('td', 'req-idcell', badge),
+      elem('td', null, inlineMarkdown(rec.description)),
+      tdTo, tdFrom, tdVer);
     if (rec.component && rec.group) tr.id = 'req-' + cssSafe(rec.id);
-
-    const tdId = document.createElement('td'); tdId.className = 'req-idcell';
-    const badge = document.createElement('span'); badge.className = 'req-badge'; badge.textContent = rec.id;
-    badgeStatus(badge, rec.id); tdId.appendChild(badge); tr.appendChild(tdId);
-
-    const tdDesc = document.createElement('td'); tdDesc.appendChild(inlineMarkdown(rec.description)); tr.appendChild(tdDesc);
-
-    const tdTo = document.createElement('td');
-    fillTrace(tdTo, rec.traceTo.map(raw => { const t = resolveReqRef(raw, rec); return t ? reqLink(t) : missingChip(raw); }));
-    tr.appendChild(tdTo);
-
-    const tdFrom = document.createElement('td');
-    fillTrace(tdFrom, rec.traceFrom.map(id => reqLink(id)));
-    tr.appendChild(tdFrom);
-
-    const tdVer = document.createElement('td');
-    fillTrace(tdVer, (rec.verifiedBy || []).map(id => testLink(id)));
-    tr.appendChild(tdVer);
-
-    tbody.appendChild(tr);
+    append(tbody, tr);
   }
-  table.appendChild(tbody);
 
-  const wrap = document.createElement('div'); wrap.className = 'req-scroll'; wrap.appendChild(table); fig.appendChild(wrap);
-  return fig;
+  const table = elem('table', 'req-tbl',
+    elem('thead', null, elem('tr', null, ['Requirement', 'Description', 'Trace To', 'Trace From', 'Verified By'].map(h => elem('th', null, h)))),
+    tbody);
+  return elem('figure', 'req-group',
+    elem('figcaption', 'req-cap', 'Requirements — ' + g.group),
+    g.error && elem('p', 'req-error', '⚠ ' + g.error),
+    elem('div', 'req-scroll', table));
 }
 
 // A test case renders as: a caption (name + id + Result), a "Verifies" line, and
 // the numbered action / expected-response step table.
 function buildTestCase(block) {
   const rec = block.rec;
-  const fig = document.createElement('figure'); fig.className = 'req-group test-case';
+  const cap = elem('figcaption', 'req-cap tc-cap',
+    'Test case — ' + rec.name + ' ',
+    elem('span', 'tc-id', rec.id),
+    resultBadge(rec.id),
+    (rec.component && rec.key) && elem('button', { type: 'button', class: 'tc-run', title: 'Run this test case', onClick: () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: rec.id } })) }, '▷ Run'));
+
+  const verifies = elem('p', 'tc-verifies', 'Verifies: ');
+  if (rec.verifies.length) rec.verifies.forEach((id, i) => { if (i) append(verifies, ', '); append(verifies, reqLink(id)); });
+  else append(verifies, noneCell());
+
+  const table = elem('table', 'req-tbl test-steps-tbl',
+    elem('thead', null, elem('tr', null, ['#', 'Action', 'Expected response'].map(h => elem('th', null, h)))),
+    elem('tbody', null, rec.steps.map((s, i) => elem('tr', null,
+      elem('td', 'tc-stepno', String(i + 1)),
+      elem('td', 'tc-md', blockMarkdown(s.action)),
+      elem('td', 'tc-steps tc-md', blockMarkdown(s.expected))))));
+
+  const fig = elem('figure', 'req-group test-case',
+    cap,
+    block.error && elem('p', 'req-error', '⚠ ' + block.error),
+    verifies,
+    elem('div', 'req-scroll', table));
   if (rec.component && rec.key) fig.id = 'test-' + cssSafe(rec.id);
-
-  const cap = document.createElement('figcaption'); cap.className = 'req-cap tc-cap';
-  cap.appendChild(document.createTextNode('Test case — ' + rec.name + ' '));
-  const idEl = document.createElement('span'); idEl.className = 'tc-id'; idEl.textContent = rec.id; cap.appendChild(idEl);
-  cap.appendChild(resultBadge(rec.id));
-  if (rec.component && rec.key) {
-    const run = document.createElement('button'); run.type = 'button'; run.className = 'tc-run'; run.textContent = '▷ Run';
-    run.title = 'Run this test case';
-    run.addEventListener('click', () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: rec.id } })));
-    cap.appendChild(run);
-  }
-  fig.appendChild(cap);
-
-  if (block.error) { const err = document.createElement('p'); err.className = 'req-error'; err.textContent = '⚠ ' + block.error; fig.appendChild(err); }
-
-  const vp = document.createElement('p'); vp.className = 'tc-verifies';
-  vp.appendChild(document.createTextNode('Verifies: '));
-  if (rec.verifies.length) rec.verifies.forEach((id, i) => { if (i) vp.appendChild(document.createTextNode(', ')); vp.appendChild(reqLink(id)); });
-  else vp.appendChild(noneCell());
-  fig.appendChild(vp);
-
-  const table = document.createElement('table'); table.className = 'req-tbl test-steps-tbl';
-  const thead = document.createElement('thead'); const htr = document.createElement('tr');
-  ['#', 'Action', 'Expected response'].forEach(h => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
-  thead.appendChild(htr); table.appendChild(thead);
-  const tbody = document.createElement('tbody');
-  rec.steps.forEach((s, i) => {
-    const tr = document.createElement('tr');
-    const n = document.createElement('td'); n.className = 'tc-stepno'; n.textContent = String(i + 1); tr.appendChild(n);
-    const a = document.createElement('td'); a.className = 'tc-md'; a.appendChild(blockMarkdown(s.action)); tr.appendChild(a);
-    const e = document.createElement('td'); e.className = 'tc-steps tc-md'; e.appendChild(blockMarkdown(s.expected)); tr.appendChild(e);
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  const wrap = document.createElement('div'); wrap.className = 'req-scroll'; wrap.appendChild(table); fig.appendChild(wrap);
   return fig;
 }
 

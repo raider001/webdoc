@@ -22,6 +22,8 @@
 // its shape elements) - it is defence-in-depth over the plugin's own output.
 // ---------------------------------------------------------------------------
 
+import { elem } from './dom.js';
+
 const registry = new Map(); // lang -> { render, label }
 
 // Register a renderer for a fenced info-string. `render(source, ctx)` may return
@@ -70,16 +72,10 @@ function scrubRendered(container) {
 function renderFallback(host, lang, label, source, err) {
   host.textContent = '';
   host.classList.add('block-render-failed');
-  const note = document.createElement('div');
-  note.className = 'block-render-note';
   const reason = (err && err.message) ? ': ' + err.message : '';
-  note.textContent = (label || lang) + ' could not be rendered' + reason + ' — showing source.';
-  const pre = document.createElement('pre');
-  const code = document.createElement('code');
-  code.className = 'language-' + lang;
-  code.textContent = source;
-  pre.appendChild(code);
-  host.append(note, pre);
+  host.append(
+    elem('div', 'block-render-note', (label || lang) + ' could not be rendered' + reason + ' — showing source.'),
+    elem('pre', null, elem('code', { class: 'language-' + lang, text: source })));
 }
 
 function fill(host, node) {
@@ -104,9 +100,7 @@ export function renderBlocks(root, ctx = {}) {
     if (!pre || pre.tagName !== 'PRE' || !pre.parentNode) return;
 
     const source = code.textContent;
-    const host = document.createElement('div');
-    host.className = 'block-render';
-    host.setAttribute('data-block-lang', lang);
+    const host = elem('div', { class: 'block-render', 'data-block-lang': lang });
     pre.replaceWith(host);                     // host is in the DOM before render (libs may measure layout)
 
     let out;
