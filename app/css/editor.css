@@ -69,9 +69,11 @@ body.is-editing .app-footer { display: none; }
 .blk-hr { text-align: center; color: var(--faint); font-size: 12px; padding: 10px 0; border-top: 1px dashed var(--border); }
 .blk-imgbox, .blk-tablebox, .blk-reqbox { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface); }
 .blk-table { border-collapse: collapse; width: 100%; }
-.blk-table th, .blk-table td { border: 1px solid var(--border); padding: 0; }
-.blk-table input { width: 100%; border: none; background: none; color: var(--text); padding: 6px 8px; outline: none; font: inherit; }
-.blk-table th input { font-weight: 600; background: var(--surface-2); }
+.blk-table th, .blk-table td { border: 1px solid var(--border); padding: 0; vertical-align: top; }
+/* Rich-text cell (contenteditable): supports inline markdown + images. */
+.blk-table .blk-edit-tablecell { min-width: 4em; min-height: 1.3em; padding: 6px 8px; outline: none; color: var(--text); font: inherit; }
+.blk-table th .blk-edit-tablecell { font-weight: 600; background: var(--surface-2); }
+.blk-table .blk-edit-tablecell img { max-width: 160px; height: auto; vertical-align: middle; }
 .blk-table-ctr, .blk-req-add { margin-top: 8px; display: flex; gap: 6px; }
 .blk-small { height: 26px; padding: 0 9px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 12px; }
 .blk-small:hover { background: var(--surface-2); }

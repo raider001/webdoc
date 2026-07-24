@@ -15,7 +15,9 @@ import { highlightWithin } from './highlighter.js';
 import { renderBlocks } from './blocks.js';
 // (doclinks' documentLinks/resolveDocId are no longer used here - link data + resolution
 // are server-backed now: the map comes from /api/index/graph and in-body links resolve
-// via /api/index/resolve. See fetchGraphModel and resolveLinks.)
+// via /api/index/resolve. See fetchGraphModel and resolveLinks. resolveResourceUrl stays:
+// relative image resolution is pure client-side path math, shared with the editor.)
+import { resolveResourceUrl } from './doclinks.js';
 import { loadPlugins } from './plugins.js';
 import { buildRequirementIndex, prepareDocGroups, preprocessRequirements, renderRequirements, revealRequirement, revealTest, reqFromQuery, testFromQuery, requirementTraceEdges, requirementList, testList, setCoverageStatus, inlineMarkdown, blockMarkdown, resolveRequirementRef } from './requirements.js';
 import { state, el, combinedStatus, app } from './app-shell.js';
@@ -162,6 +164,8 @@ function renderDoc(doc) {
   // Resolve in-body links: internal doc-id refs -> hash routes, in-page anchors
   // -> smooth scroll, external URLs -> open in a new tab. (Heading ids exist now.)
   resolveLinks(article, doc.id);
+  // Resolve relative image sources to the doc's server folder (/docs/<source>/<dir>/).
+  resolveImages(article, doc.id);
 
   // Pluggable rendered blocks (diagrams etc.): post-sanitize, before the
   // highlighter, so a registered ```lang block becomes DOM instead of code.
@@ -250,6 +254,20 @@ async function resolveLinks(article, baseId) {
       a.addEventListener('click', ev => ev.preventDefault());
     }
   }
+}
+
+// Resolve relative in-body image sources to the document's folder on the server. A
+// Markdown image ![x](diagram.png) renders to <img src="diagram.png">, which the
+// browser resolves against the app route (#/...) and 404s at the server root. Doc
+// resources live NEXT TO the .md under /docs/<source>/<dir>/, so a relative src
+// resolves there (../ and ./ handled by the URL parser). External (http/https/
+// data/blob/protocol-relative) and root-absolute srcs are the author's explicit
+// choice and left untouched. Pure client-side path math - no server lookup needed.
+function resolveImages(article, baseId) {
+  article.querySelectorAll('img[src]').forEach(img => {
+    const url = resolveResourceUrl(baseId, img.getAttribute('src'));
+    if (url) img.setAttribute('src', url);
+  });
 }
 
 // Sanitise a WYSIWYG field's HTML before storing it (manual-test fields), and a
@@ -428,6 +446,11 @@ async function ensureGraphModel() { if (!graphModel) graphModel = await fetchGra
 // after an edit-connections change so the view doesn't jump). Async: it fetches
 // the server graph model (cached) before laying out.
 async function buildDocGraph(keepView, animate, refit) {
+  // Fetch the (cached) server graph model BEFORE touching the live graph, so the
+  // current map stays on-screen during the await. Destroying first and THEN awaiting
+  // left the map blank for a frame -> the "flash" on create/delete/edit rebuilds.
+  // With the model in hand, destroy + recreate happen in ONE synchronous step.
+  const model = await ensureGraphModel();
   // Restore the map's last pan/zoom (persisted in docMapState.transform) so it
   // survives close/reopen, switching between views, and tree-update rebuilds -
   // EXCEPT on a focus change (refit), where the layout differs enough that we fit
@@ -440,7 +463,6 @@ async function buildDocGraph(keepView, animate, refit) {
     if (animate && graphApi.getNodePositions) animateFrom = graphApi.getNodePositions();
     graphApi.destroy();
   }
-  const model = await ensureGraphModel();
   const focused = !!(docMapState.focusMode && docMapState.focusId);
   // "Map by" mode picks which connection TYPE shapes the tree layout. It never
   // hides edges - every connection is still drawn; the legend toggles own visibility.
@@ -484,8 +506,9 @@ async function buildDocGraph(keepView, animate, refit) {
         : await editDocRelation(fromId, toId, 'next', 'remove');     // recnext edge D->S means D.next has S
       if (ok) buildDocGraph(true, true);
     },
-    onDelete: (id) => deleteDocFlow(id, { rebuildMap: true }),  // Delete key on a selected node
-    onCreate: () => openNewDocFlow()                            // "New document" button (modal opens over the map)
+    onDelete: (id) => deleteDocFlow(id, { rebuildMap: true })   // Delete key on a selected node
+    // No in-map "New document" button: the header's ＋ (title "New document") is
+    // always available, so a second create button on the map was redundant.
   });
   if (docMapState.editMode) { graphApi.setEditMode(true); graphApi.setConnector(docMapState.connector); }
 }
@@ -539,22 +562,50 @@ function setupEditButtons() {
   el('deleteBtn').addEventListener('click', () => { if (state.current) deleteDocFlow(state.current.id, { rebuildMap: false }); });
 }
 
-// Open the "new document" modal, from the header ＋ or the map's New button. The
-// modal opens OVER the current view (the map stays put) so nothing shifts while
-// you name the doc; the map is only dismissed once you confirm and enterEdit opens
-// the editor (which would otherwise sit behind the map overlay).
-function openNewDocFlow() {
+// Open the "new document" modal, from the header ＋. The modal opens OVER the
+// current view (the map stays put) so nothing shifts while you name the doc; the
+// map is only dismissed once you confirm and enterEdit opens the editor (which
+// would otherwise sit behind the map overlay).
+async function openNewDocFlow() {
+  // The "already exists" guard must see EVERY doc, not just visited ones - boot is
+  // lazy so state.byId is sparse, and checking it would let a new doc silently
+  // overwrite an existing (unvisited) file. Use the server graph model's full id set.
+  const known = new Set((await ensureGraphModel()).docs.map(d => d.id));
+  // From the map, "New document" just creates the file (and the node appears) - it
+  // does NOT drop you into the editor. From the reader, it opens the editor as usual.
+  const fromMap = !el('graphOverlay').hidden;
   openNewDocModal({
     sources: (state.site && state.site.sources) || [],
-    exists: (id) => state.byId.has(id),
-    onCreate: (id) => startNewDoc(id)
+    exists: (id) => known.has(id) || state.byId.has(id),
+    onCreate: (id) => fromMap ? createDocInPlace(id) : startNewDoc(id)
   });
 }
 
-function startNewDoc(id) {
+async function startNewDoc(id) {
   const title = id.split('/').pop().replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  enterEdit(id, { title, description: '', assumes: [], next: [] },
+  await enterEdit(id, { title, description: '', assumes: [], next: [] },
     [{ type: 'heading', level: 1, html: title }, { type: 'paragraph', html: '' }], true);
+}
+
+// Create a minimal document on disk WITHOUT opening the editor (used from the map:
+// the file is written + indexed and its node appears; the user stays on the map).
+// The body is just the meta header + an H1 - the same shape serializeDoc emits.
+async function createDocInPlace(id) {
+  const title = titleFromId(id);
+  const md = '<!--meta\n' + JSON.stringify({ title: title, description: '', assumes: [], next: [] }, null, 2) +
+    '\n-->\n\n# ' + title + '\n';
+  const slash = id.indexOf('/');
+  const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
+  let res;
+  try {
+    res = await fetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
+      { method: 'PUT', body: md });
+  } catch (e) { el('live').textContent = 'Create failed: ' + e.message; return; }
+  if (!res.ok) { el('live').textContent = 'Create failed (' + res.status + ')'; return; }
+  await refreshCatalog();                    // server re-indexed on PUT; invalidate the client graph model
+  await renderTree(el('treeList'), tid => { navigate(tid); if (appDrawer) appDrawer.close(); });   // new file -> tree changed
+  el('live').textContent = 'Created “' + title + '”.';
+  if (!el('graphOverlay').hidden) buildDocGraph(true, true);   // rebuild the open map so the new node shows (keep view + animate)
 }
 
 async function editExisting(doc) {
@@ -564,17 +615,21 @@ async function editExisting(doc) {
   parsed.meta.description = doc.description || parsed.meta.description;
   parsed.meta.assumes = (doc.assumes || []).slice();
   parsed.meta.next = (doc.next || []).slice();
-  enterEdit(doc.id, parsed.meta, parsed.blocks, false);
+  await enterEdit(doc.id, parsed.meta, parsed.blocks, false);
 }
 
-function enterEdit(id, meta, blocks, isNew) {
+async function enterEdit(id, meta, blocks, isNew) {
   exitEdit();
   if (app.closeMapView) app.closeMapView();   // opening the editor: dismiss the map so it isn't left behind the editor
   document.body.classList.add('is-editing');
+  // The metadata pickers (Assumed knowledge / Recommended next) need the full doc
+  // list. Boot no longer holds one (lazy/server-backed), so pull it from the same
+  // server graph model the map uses (cached; invalidated after a create/delete/edit).
+  const allDocs = (await ensureGraphModel()).docs;
   editorEl = openEditor({
     docId: id, meta, blocks, isNew,
     sources: (state.site && state.site.sources) || [],
-    allDocs: state.docs,
+    allDocs: allDocs,
     requirements: requirementList(),
     component: componentFor(id),
     onSave: (md, newMeta, status) => saveDoc(id, md, isNew, status),
@@ -664,8 +719,8 @@ async function deleteDocFlow(id, opts) {
     const next = defaultId();
     if (next && next !== id) navigate(next); else showError('No documents left.');
   }
-  // Refresh an open map in place so the deleted node is gone.
-  if (opts && opts.rebuildMap && !el('graphOverlay').hidden) buildDocGraph(false);
+  // Refresh an open map in place so the deleted node is gone (keep view + animate).
+  if (opts && opts.rebuildMap && !el('graphOverlay').hidden) buildDocGraph(true, true);
 }
 
 // Link / unlink a test case and a requirement by editing the requirement id in

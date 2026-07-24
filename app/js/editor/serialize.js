@@ -23,6 +23,11 @@ function inlineToMd(node) {
     else if (tag === 'code') out += '`' + n.textContent + '`';
     else if (tag === 'del' || tag === 's') out += '~~' + inner + '~~';
     else if (tag === 'a') out += '[' + inner + '](' + mdDest(n.getAttribute('href') || '') + ')';
+    // Image: prefer data-mdsrc (the ORIGINAL relative path the editor stashes when it
+    // resolves a src to /docs/... for display) so a relative image round-trips as
+    // written, not rewritten to an absolute server path. Without this case, <img>
+    // fell through to `inner` (empty) and inline images were silently lost on save.
+    else if (tag === 'img') out += '![' + (n.getAttribute('alt') || '') + '](' + mdDest(n.getAttribute('data-mdsrc') || n.getAttribute('src') || '') + ')';
     else if (tag === 'br') out += '  \n';
     else out += inner;
   });
@@ -50,6 +55,22 @@ function blockToMd(b) {
     case 'code': return '```' + (b.lang || '') + '\n' + b.code.replace(/\n$/, '') + '\n```';
     case 'hr': return '---';
     case 'image': return '![' + (b.alt || '') + '](' + (b.src || '') + ')';
+    case 'table': {
+      // GFM pipe table. Cells are inline HTML (rich-text contenteditable) -> convert
+      // each to inline Markdown, then escape literal pipes and collapse newlines
+      // (a cell must stay on one line; use <br> markup, which htmlToMd emits, for a
+      // soft break within a cell).
+      const headers = b.headers || [];
+      const aligns = b.aligns || [];
+      const rows = b.rows || [];
+      const esc = (s) => String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\r?\n+/g, ' ');
+      const cellMd = (html) => esc(htmlToMd(String(html == null ? '' : html)));
+      const sepFor = (a) => a === 'center' ? ':---:' : a === 'right' ? '---:' : a === 'left' ? ':---' : '---';
+      const rowLine = (cells) => '| ' + headers.map((_, i) => cellMd(cells[i])).join(' | ') + ' |';
+      const lines = [rowLine(headers), '| ' + headers.map((_, i) => sepFor(aligns[i] || '')).join(' | ') + ' |'];
+      rows.forEach(r => lines.push(rowLine(r)));
+      return lines.join('\n');
+    }
     case 'requirement': {
       const head = '<!--meta start {"requirement-group":' + JSON.stringify(b.group) + '}-->';
       const foot = '<!--meta end {"requirement-group":' + JSON.stringify(b.group) + '}-->';
@@ -174,9 +195,11 @@ function langOf(code) {
   return m ? m[1] : '';
 }
 function tableBlock(table) {
-  const headers = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+  // innerHTML (not textContent): cells carry inline markup - <strong>, <a>, <code>,
+  // <img> - which round-trips back to inline Markdown on save.
+  const headers = [...table.querySelectorAll('thead th')].map(th => th.innerHTML.trim());
   const aligns = [...table.querySelectorAll('thead th')].map(th => th.getAttribute('align') || '');
-  const rows = [...table.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent.trim()));
+  const rows = [...table.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.innerHTML.trim()));
   return { type: 'table', headers, aligns, rows };
 }
 

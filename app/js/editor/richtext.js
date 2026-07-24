@@ -56,9 +56,12 @@ export function attachInlineToolbar(ed) {
   });
   function showBar() {
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !ed.contains(sel.anchorNode)) { if (sharedBar) sharedBar.style.display = 'none'; return; }
+    // Show while the caret is anywhere in this field (not only on a selection), so
+    // Link / Image can be inserted at an empty caret - e.g. into a blank table cell.
+    if (!sel || !sel.rangeCount || !ed.contains(sel.anchorNode)) { if (sharedBar) sharedBar.style.display = 'none'; return; }
     const bar = ensureBar();
-    const r = sel.getRangeAt(0).getBoundingClientRect();
+    let r = sel.getRangeAt(0).getBoundingClientRect();
+    if (!r.width && !r.height && !r.top) r = ed.getBoundingClientRect();   // empty node -> anchor to the field
     bar.style.display = 'flex';
     bar.style.top = (window.scrollY + r.top - 40) + 'px';
     bar.style.left = (window.scrollX + r.left) + 'px';
@@ -73,7 +76,8 @@ function ensureBar() {
     mk('B', () => document.execCommand('bold'), 'Bold'),
     mk('I', () => document.execCommand('italic'), 'Italic'),
     mk('<>', wrapCode, 'Inline code'),
-    mk('🔗', addLink, 'Link')
+    mk('🔗', addLink, 'Link'),
+    mk('🖼', addImage, 'Insert image')
   );
   document.body.appendChild(sharedBar);
   return sharedBar;
@@ -142,6 +146,88 @@ function unwrapAnchor(a) {
   parent.removeChild(a);
 }
 function fireInput(host) { if (host) host.dispatchEvent(new Event('input', { bubbles: true })); }
+
+// Image button on the inline toolbar: insert an <img> at the caret. Works in any
+// rich-text field, including table cells. A relative src (diagram.png, ../x.png) is
+// resolved for DISPLAY via the editor's image resolver (set by setImageResolver),
+// keeping the original in data-mdsrc, so it shows in the editor AND serializes back
+// to the relative path - the same contract as images loaded from a document.
+let imageResolver = null;
+export function setImageResolver(fn) { imageResolver = (typeof fn === 'function') ? fn : null; }
+function addImage() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0).cloneRange();
+  const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  const host = startEl && startEl.closest('[contenteditable]');
+  if (!host) return;
+  if (sharedBar) sharedBar.style.display = 'none';
+  openImagePopover({
+    rect: range.getBoundingClientRect(),
+    onApply: (alt, url) => {
+      const img = document.createElement('img');
+      img.setAttribute('src', url);
+      if (alt) img.setAttribute('alt', alt);
+      const resolved = imageResolver ? imageResolver(url) : null;   // relative -> /docs/... for display
+      if (resolved) { img.setAttribute('data-mdsrc', url); img.setAttribute('src', resolved); }
+      range.deleteContents();
+      range.insertNode(img);
+      range.setStartAfter(img); range.collapse(true);
+      sel.removeAllRanges(); sel.addRange(range);
+      fireInput(host);
+    }
+  });
+}
+// A minimal image popover (URL + Alt, Insert / Cancel), reusing the link popover's
+// shared state + styling. No doc autocomplete - image paths aren't in the doc index.
+function openImagePopover(o) {
+  closeLinkPop();
+  const pop = document.createElement('div'); pop.className = 'link-pop';
+  function mkRow(labelTxt, ph) {
+    const row = document.createElement('label'); row.className = 'link-pop-row';
+    const s = document.createElement('span'); s.textContent = labelTxt;
+    const i = document.createElement('input'); i.type = 'text'; i.placeholder = ph || '';
+    row.append(s, i); return i;
+  }
+  const uIn = mkRow('Image URL', 'diagram.png or https://…'); uIn.classList.add('link-pop-url');
+  const aIn = mkRow('Alt text', 'describe the image');
+  const bar = document.createElement('div'); bar.className = 'link-pop-bar';
+  const sp = document.createElement('span'); sp.style.flex = '1';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+  const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'link-pop-apply'; apply.textContent = 'Insert';
+  bar.append(sp, cancel, apply);
+  pop.append(uIn.parentElement, aIn.parentElement, bar);
+  document.body.appendChild(pop);
+  linkPop = pop;
+  const r = o.rect || { bottom: 80, left: 80 };
+  const w = 300;
+  pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+  pop.style.left = (window.scrollX + Math.max(8, Math.min(r.left, window.innerWidth - w - 12))) + 'px';
+  function commit() {
+    const url = normalizeImgUrl(uIn.value);
+    if (!url) { pop.classList.add('link-pop-err'); uIn.focus(); return; }
+    o.onApply(aIn.value.trim(), url);
+    closeLinkPop();
+  }
+  apply.addEventListener('click', commit);
+  cancel.addEventListener('mousedown', e => { e.preventDefault(); closeLinkPop(); });
+  [uIn, aIn].forEach(i => i.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
+  }));
+  linkOff = function (e) { if (linkPop && !linkPop.contains(e.target)) closeLinkPop(); };
+  setTimeout(() => document.addEventListener('mousedown', linkOff), 0);
+  setTimeout(() => uIn.focus(), 20);
+}
+// Image-src acceptance: relative paths are kept AS-IS (a bare "diagram.png" is a
+// file next to the doc, NOT a bare domain - so, unlike link URLs, never prepend
+// https://). Schemes are limited to http(s)/data; others (javascript:, …) rejected.
+function normalizeImgUrl(v) {
+  v = (v || '').trim();
+  if (!v) return '';
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^(https?:|data:)/i.test(v) ? v : '';
+  return v;   // relative (diagram.png, ./x.png, ../x.png, /assets/x.png)
+}
 
 // Accept the same URL shapes the sanitizer keeps; bare domains get https://.
 // Returns '' for an unsafe/empty URL (caller flags the field).

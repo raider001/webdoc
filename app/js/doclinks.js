@@ -34,6 +34,19 @@ export function joinDocPath(baseId, rel) {
   }
   return segs.join('/');
 }
+// Resolve a RELATIVE in-body resource reference (an image src, mostly) to its URL
+// on the server. Doc resources live next to the .md under /docs/<source>/<dir>/, so
+// a relative ./ ../ path resolves there (via joinDocPath). External (scheme://,
+// protocol-relative //, data:) and root-absolute (/…) refs are the author's explicit
+// choice -> returns null (leave the src untouched). Shared by the reader (main.js)
+// and the editor so a relative image renders the same in both.
+export function resolveResourceUrl(baseId, src) {
+  const s = String(src || '');
+  if (!s || HAS_SCHEME.test(s) || s.startsWith('//') || s.startsWith('/')) return null;
+  const joined = joinDocPath(baseId, s);            // "Docs/features/image.png"
+  if (!joined) return null;
+  return '/docs/' + joined.split('/').map(encodeURIComponent).join('/');
+}
 // `ids` is anything with .has(id) and .keys() (a Set of ids, or a Map keyed by id).
 export function resolveDocId(path, baseId, ids) {
   if (!path || !ids) return null;

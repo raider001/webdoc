@@ -2,6 +2,7 @@
 // group, test case, and the shared reference-picker (chips + autocomplete) that
 // backs both a requirement's Trace-To and a test case's Verifies.
 import { smallBtn } from './ui.js';
+import { editable } from './richtext.js';
 
 /* ---- table editor ---- */
 export function tableEditor(b) {
@@ -25,10 +26,14 @@ export function tableEditor(b) {
     if (b.headers.length > 1) ctr.appendChild(smallBtn('− Column', () => { b.headers.pop(); b.aligns.pop(); b.rows.forEach(r => r.pop()); draw(); }));
     box.appendChild(ctr);
   }
+  // Cells are rich text (contenteditable), so they hold inline Markdown - bold,
+  // links, `code`, and images - not just plain strings. The stored cell value is
+  // inline HTML; serialize.js converts each cell via htmlToMd (GFM cells accept
+  // inline markdown as long as it stays on one line and pipes are escaped).
   function cell(val, onChange, head) {
     const td = document.createElement(head ? 'th' : 'td');
-    const inp = document.createElement('input'); inp.value = val; inp.addEventListener('input', () => onChange(inp.value));
-    td.appendChild(inp); return td;
+    td.appendChild(editable(val || '', 'tablecell', onChange, ''));
+    return td;
   }
   draw();
   return box;

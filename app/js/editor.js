@@ -12,10 +12,11 @@
 //   ui.js          shared DOM primitives + the block-type menu
 // ---------------------------------------------------------------------------
 import { serializeDoc, htmlToMd, newBlock } from './editor/serialize.js';
-import { editable, listItem, attachInlineToolbar, setLinkDocs, setLinkSearch } from './editor/richtext.js';
+import { editable, listItem, attachInlineToolbar, setLinkDocs, setLinkSearch, setImageResolver } from './editor/richtext.js';
 import { tableEditor, requirementWidget, testCaseWidget } from './editor/widgets.js';
 import { metadataPanel } from './editor/panels.js';
 import { iconBtn, labeledInput, openBlockMenu } from './editor/ui.js';
+import { resolveResourceUrl } from './doclinks.js';
 
 // Public API re-exported so existing importers (main.js, runner.js) stay unchanged.
 export { parseDoc } from './editor/serialize.js';
@@ -26,6 +27,7 @@ export { setLinkDocs, setLinkSearch };
 // opts: { docId, meta, blocks, sources, allDocs, isNew, onSave(md, meta), onClose() }
 export function openEditor(opts) {
   setLinkDocs(opts.allDocs || []);   // static fallback; server-backed suggestions win (setLinkSearch)
+  setImageResolver(src => resolveResourceUrl(opts.docId, src));   // inserted relative images show + round-trip
   const root = document.createElement('div');
   root.className = 'editor';
 
@@ -65,6 +67,19 @@ export function openEditor(opts) {
     add.textContent = '+ Add block';
     add.addEventListener('click', () => openBlockMenu(add, t => { blocks.push(newBlock(t)); repaint(); }));
     list.appendChild(add);
+    resolveDisplayImages(list);   // make relative <img>s show (they'd 404 against the app route)
+  }
+
+  // Relative image srcs (image.png, ../x.png) don't resolve in the editor any more
+  // than in the reader - resolve them to the doc's server folder for DISPLAY, but
+  // stash the ORIGINAL in data-mdsrc so serialize.js writes the relative path back
+  // (never rewrites it to an absolute /docs/... path on save).
+  function resolveDisplayImages(root) {
+    root.querySelectorAll('img').forEach(img => {
+      const raw = img.getAttribute('data-mdsrc') || img.getAttribute('src');
+      const url = resolveResourceUrl(opts.docId, raw);
+      if (url) { img.setAttribute('data-mdsrc', raw); img.setAttribute('src', url); }
+    });
   }
 
   function renderBlockEditor(b, i) {
