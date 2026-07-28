@@ -17,209 +17,90 @@
 // "Verified By" column is the calculated inverse (a test may verify many
 // requirements, and a requirement may be verified by many tests).
 //
-// Both are extracted from the RAW markdown pre-parse; each meta region leaves a
-// fenced `reqgroup` placeholder that the parser emits as
-// <pre><code class="language-reqgroup">docId::N</code>, replaced post-sanitize by
-// the built table. The placeholder index N is the Nth meta block in the document,
-// and extractGroups pushes exactly one entry per meta block (in order) so N stays
-// aligned regardless of the mix of requirement / test / invalid blocks.
+// This file is the entry/barrel: it owns the GLOBAL index build (from the server)
+// + the list/deep-link API, and re-exports the public surface from the subsystem
+// under ./requirements/: store.js (shared maps + status), parse.js (raw markdown
+// -> block structures + ref resolution + the placeholder pass), render.js (block
+// structures -> the in-document tables).
 // ---------------------------------------------------------------------------
+import { index, testIndex, groupsByDoc, setComponentBySource, componentOf } from './requirements/store.js';
+import { extractGroups, resolveReqRef, cssSafe } from './requirements/parse.js';
 
-import { elem, append } from './dom.js';
-import { loadDoc } from './catalog.js';
-import { renderInline, renderMarkdown } from './commonmark.js';
-import { sanitizeToFragment } from './sanitize.js';
+export { setCoverageStatus } from './requirements/store.js';
+export { resolveRequirementRef, preprocessRequirements } from './requirements/parse.js';
+export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirements/render.js';
 
-// INLINE markdown (code / emphasis / links, no block constructs) -> sanitized
-// fragment. For single-line contexts like a requirement description.
-export function inlineMarkdown(text) {
-  return sanitizeToFragment(renderInline(String(text == null ? '' : text)));
-}
-// FULL markdown (paragraphs, lists, code blocks, ...) -> sanitized fragment. Test
-// steps are structured data now, so their action / expected may be any markdown.
-export function blockMarkdown(text) {
-  return sanitizeToFragment(renderMarkdown(String(text == null ? '' : text)));
-}
+/** @typedef {import('./catalog.js').Doc} Doc */
+/** @typedef {import('./catalog.js').SourceConfig} SourceConfig */
+/** @typedef {import('./requirements/parse.js').ReqOrTestBlock} ReqOrTestBlock */
 
-const index = new Map();        // requirement id -> record
-const testIndex = new Map();    // test id -> record
-let coverageStatus = null;      // Map id -> {status,pct}; set by the app so badges colour by status
-export function setCoverageStatus(m) { coverageStatus = m; }
-const groupsByDoc = new Map();  // docId -> [ block ]  (requirement group OR test case, in document order)
-let componentBySource = {};
+/**
+ * One test-case step: an action and its expected response. Same shape as the
+ * editor's own step objects (editor/widgets.js's TestStep) - structured data in
+ * the meta header now (any markdown allowed), though older docs kept steps in a
+ * table (requirements/parse.js's extractTestCase reads both forms).
+ * @typedef {import('./editor/widgets.js').TestStep} TestStep
+ */
 
-// Fresh regex each call (global-flag lastIndex safety).
-function metaBlockRe() {
-  return /<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->([\s\S]*?)<!--\s*meta\s+end\b[\s\S]*?-->/gi;
-}
-function cssSafe(id) { return String(id).replace(/[^A-Za-z0-9_-]/g, '-'); }
-function splitRefs(raw) { return raw ? String(raw).split(',').map(s => s.trim()).filter(Boolean) : []; }
+/**
+ * One requirement record (an R_ id). Built per-document by requirements/parse.js's
+ * extractReqGroup and, in fuller form (with resolved traceFrom/verifiedBy), from
+ * the server's global coverage index by buildRequirementIndex/requirementList.
+ * @typedef {Object} RequirementEntry
+ * @property {string} id
+ * @property {string} docId
+ * @property {string} component
+ * @property {string} group
+ * @property {string} no
+ * @property {string} description
+ * @property {string[]} traceTo
+ * @property {string[]} traceFrom
+ * @property {string[]} verifiedBy
+ */
 
-// Character ranges [start,end) that lie inside a fenced code block. A document
-// that DOCUMENTS this syntax (e.g. the authoring reference, the how-to guide)
-// shows a `<!--meta start … -->` / `<!--meta end … -->` pair literally inside a
-// code fence; those must NOT be mistaken for real requirement/test blocks. Both
-// the index build (extractGroups) and the placeholder pass (preprocessRequirements)
-// skip fenced matches identically, so their Nth-block counting stays aligned.
-function fencedRanges(body) {
-  const ranges = [];
-  let offset = 0, open = null;
-  for (const line of String(body).split('\n')) {
-    const start = offset, end = offset + line.length;
-    if (!open) {
-      const o = /^ {0,3}([`~]{3,})/.exec(line);            // opening fence (info string allowed)
-      if (o) open = { ch: o[1][0], len: o[1].length, from: start };
-    } else {
-      const c = /^ {0,3}([`~]{3,})[ \t]*$/.exec(line);     // closing fence: bare, no info
-      if (c && c[1][0] === open.ch && c[1].length >= open.len) { ranges.push([open.from, end]); open = null; }
-    }
-    offset = end + 1;                                       // + the consumed '\n'
-  }
-  if (open) ranges.push([open.from, String(body).length]); // an unterminated fence runs to the end
-  return ranges;
-}
-function inFence(ranges, pos) {
-  for (let i = 0; i < ranges.length; i++) if (pos >= ranges[i][0] && pos < ranges[i][1]) return true;
-  return false;
-}
+/**
+ * One test-case record (a T_ id). Built per-document by requirements/parse.js's
+ * extractTestCase and, in fuller form, from the server's global index by
+ * buildRequirementIndex/testList.
+ * @typedef {Object} TestCaseEntry
+ * @property {string} id
+ * @property {string} docId
+ * @property {string} component
+ * @property {string} key
+ * @property {string} name
+ * @property {TestStep[]} steps
+ * @property {string[]} verifiesRaw
+ * @property {string[]} verifies
+ */
 
-// ---- table parsing --------------------------------------------------------
-function splitRow(line) {
-  let s = line.trim();
-  if (s.startsWith('|')) s = s.slice(1);
-  if (s.endsWith('|')) s = s.slice(0, -1);
-  const cells = [];
-  let cur = '';
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (c === '\\' && i + 1 < s.length) { cur += s[i + 1]; i++; continue; }
-    if (c === '|') { cells.push(cur); cur = ''; continue; }
-    cur += c;
-  }
-  cells.push(cur);
-  return cells.map(c => c.trim());
-}
-function parseTable(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l && l.indexOf('|') !== -1);
-  if (lines.length < 2) return { header: [], rows: [] };
-  const header = splitRow(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '-'));
-  const rows = [];
-  for (let r = 2; r < lines.length; r++) { // lines[1] is the |---| delimiter
-    const cells = splitRow(lines[r]);
-    const rec = {};
-    header.forEach((h, i) => { rec[h] = (cells[i] || '').trim(); });
-    rows.push(rec);
-  }
-  return { header, rows };
-}
-function pick(rec, names) { for (const n of names) if (rec[n] !== undefined && rec[n] !== '') return rec[n]; return ''; }
-
-// ---- reference resolution -------------------------------------------------
-function resolveIn(idx, cands) { for (const c of cands) if (idx.has(c)) return c; return null; }
-// A requirement ref: full id (R_WD_nav_1), group_no (nav_1, same component), or a
-// bare no (1, same group). ctx = { component, group? }.
-function resolveReqRef(raw, ctx) {
-  const cands = [raw, 'R_' + ctx.component + '_' + raw];
-  if (ctx.group) cands.push('R_' + ctx.component + '_' + ctx.group + '_' + raw);
-  return resolveIn(index, cands.map(c => c.toUpperCase())); // requirement ids are upper-case; match case-insensitively
-}
-// A requirement ref (short or full) -> its composed id, or null. For the app to
-// match a test's `verifies` entries when linking / unlinking.
-export function resolveRequirementRef(raw, component) {
-  return resolveReqRef(String(raw == null ? '' : raw), { component: component });
-}
-
-// ---- extraction -----------------------------------------------------------
-function extractGroups(body, doc, component) {
-  const blocks = [];
-  const ranges = fencedRanges(body);
-  const RE = metaBlockRe();
-  let m;
-  while ((m = RE.exec(body)) !== null) {
-    if (inFence(ranges, m.index)) continue;   // literal example in a code fence, not a real block
-    let meta = null;
-    try { meta = JSON.parse(m[1]); } catch (e) { /* handled below */ }
-    const table = parseTable(m[2]);
-    const isTest = !!(meta && (meta.test || meta['test-case']));
-    blocks.push(isTest ? extractTestCase(meta, table, doc, component)
-                       : extractReqGroup(meta, table, doc, component));
-  }
-  return blocks;
-}
-
-function extractReqGroup(meta, table, doc, component) {
-  const group = meta && (meta['requirement-group'] || meta.group);
-  let error = null;
-  if (!component) error = "source '" + doc.source + "' has no 'component' id in the server config";
-  else if (!meta) error = 'requirement-group metadata is not valid JSON';
-  else if (!group) error = 'requirement-group name is missing';
-
-  const g = { kind: 'req', group: group || '(unnamed)', component: component || '?', rows: [], error: error };
-  for (const row of table.rows) {
-    const no = pick(row, ['requirement-no', 'req-no', 'no', 'requirement', '#']);
-    if (!no) continue;
-    const id = ((component && group) ? 'R_' + component + '_' + group + '_' + no : 'R_?_' + no).toUpperCase();
-    const rec = {
-      id: id, docId: doc.id, component: component, group: group, no: no,
-      description: pick(row, ['description', 'desc']),
-      traceTo: splitRefs(pick(row, ['trace-to', 'traceto', 'trace'])),
-      traceFrom: [], verifiedBy: []   // verifiedBy is CALCULATED from tests' `verifies`
-    };
-    // NOTE: the global index comes from the server (buildRequirementIndex); per-doc
-    // extraction only builds block structure for rendering, so it does NOT populate
-    // the global index here (prepareDocGroups enriches from it instead).
-    g.rows.push(rec);
-  }
-  return g;
-}
-
-function extractTestCase(meta, table, doc, component) {
-  const key = meta && (meta.test || meta['test-case']);
-  let error = null;
-  if (!component) error = "source '" + doc.source + "' has no 'component' id in the server config";
-  else if (!meta) error = 'test-case metadata is not valid JSON';
-  else if (!key) error = 'test-case key ("test") is missing';
-
-  const id = (component && key) ? 'T_' + component + '_' + key : 'T_?_' + (key || 'x');
-  // Steps are structured data in the meta header (a custom block, NOT a markdown
-  // table), so each action / expected can hold arbitrary markdown - pipes,
-  // backslashes, multiple lines. Older docs kept them in a table; still read those.
-  let steps = [];
-  if (Array.isArray(meta && meta.steps)) {
-    steps = meta.steps.map(s => ({
-      action: (s && s.action) || '',
-      expected: (s && (s.expected || s['expected-response'] || s.response)) || ''
-    })).filter(s => s.action || s.expected);
-  } else {
-    for (const row of table.rows) {
-      const action = pick(row, ['action', 'step', 'request', 'do', 'when']);
-      const expected = pick(row, ['expected-response', 'expected', 'response', 'result', 'then']);
-      if (!action && !expected) continue;
-      steps.push({ action: action, expected: expected });
-    }
-  }
-  const verifiesRaw = Array.isArray(meta && meta.verifies) ? meta.verifies.map(String)
-                    : splitRefs(meta && (meta.verifies || meta.verify || ''));
-  const rec = {
-    id: id, docId: doc.id, component: component, key: key || '',
-    name: (meta && meta.name) || key || id,
-    steps: steps, verifiesRaw: verifiesRaw, verifies: []
-  };
-  // Global test index comes from the server (see extractReqGroup note).
-  return { kind: 'test', rec: rec, error: error };
-}
+/**
+ * A plain doc-to-doc reference pair. The same {from,to} shape is independently
+ * produced twice - as requirement-trace edges (requirementTraceEdges, below) and
+ * as in-body page-link edges (doclinks.js) - and consumed identically by the graph.
+ * @typedef {Object} DocEdgeRef
+ * @property {string} from
+ * @property {string} to
+ */
 
 // Build the GLOBAL requirement/test index from the server's SQLite index (composed
 // ids + resolved trace-from / verified-by / verifies). This used to scan every doc
 // body at boot - the wall that capped the corpus. Now the server computes it and the
 // browser fetches a compact list; per-document block STRUCTURE (for the in-document
 // tables) is parsed on demand from the displayed doc only (prepareDocGroups).
+/**
+ * @param {Doc[]|null} docs - not read by this function; every current call site
+ *   passes null now that the index comes from the server instead of being built
+ *   by scanning docs (kept for call-site/API stability)
+ * @param {SourceConfig[]} sources
+ * @returns {Promise<void>}
+ */
 export async function buildRequirementIndex(docs, sources) {
   index.clear();
   testIndex.clear();
   groupsByDoc.clear();
-  componentBySource = {};
-  for (const s of sources || []) componentBySource[s.name] = s.component;
+  const cbs = {};
+  for (const s of sources || []) cbs[s.name] = s.component;
+  setComponentBySource(cbs);
 
   let data = null;
   try {
@@ -242,11 +123,17 @@ export async function buildRequirementIndex(docs, sources) {
   }
 }
 
-// Parse the CURRENT document's requirement/test blocks from its (already-loaded)
-// body and stash them for renderRequirements, enriched with the global trace-from /
-// verified-by / verifies resolved by the server. Only the displayed doc is parsed.
+/**
+ * Parse the CURRENT document's requirement/test blocks from its (already-loaded)
+ * body and stash them for renderRequirements, enriched with the global trace-from /
+ * verified-by / verifies resolved by the server. Only the displayed doc is parsed.
+ * @param {string} body - raw markdown
+ * @param {string} docId
+ * @param {string} source - source name, for component lookup (see componentOf)
+ * @returns {ReqOrTestBlock[]}
+ */
 export function prepareDocGroups(body, docId, source) {
-  const component = componentBySource[source];
+  const component = componentOf(source);
   const blocks = extractGroups(String(body || ''), { id: docId, source: source }, component);
   for (const b of blocks) {
     if (b.kind === 'req') {
@@ -263,7 +150,10 @@ export function prepareDocGroups(body, docId, source) {
   return blocks;
 }
 
-// Every known requirement (for the coverage rollup and the editor picker).
+/**
+ * Every known requirement (for the coverage rollup and the editor picker).
+ * @returns {RequirementEntry[]} sorted by id
+ */
 export function requirementList() {
   return [...index.values()]
     .map(r => ({
@@ -276,7 +166,11 @@ export function requirementList() {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-// Every known test case (for the coverage rollup, graph, runner and editor).
+/**
+ * Every known test case (for the coverage rollup, graph, runner and editor).
+ * @returns {TestCaseEntry[]} sorted by id (verifiesRaw is omitted from this
+ *   projection - only the resolved verifies list is included)
+ */
 export function testList() {
   return [...testIndex.values()]
     .map(t => ({
@@ -285,117 +179,6 @@ export function testList() {
       verifies: (t.verifies || []).slice()
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
-}
-
-// Replace each meta-wrapped region in the raw markdown with a fenced placeholder.
-export function preprocessRequirements(body, docId) {
-  const src = String(body);
-  const ranges = fencedRanges(src);
-  let n = 0;
-  return src.replace(metaBlockRe(), (whole, _json, _inner, offset) => {
-    if (inFence(ranges, offset)) return whole;   // leave a literal example untouched
-    const key = docId + '::' + (n++);
-    return '\n```reqgroup\n' + key + '\n```\n';
-  });
-}
-
-// ---- rendering ------------------------------------------------------------
-function reqLink(composedId) {
-  const rec = index.get(composedId);
-  return elem('a', { class: 'req-link', href: '#/' + rec.docId + '?req=' + encodeURIComponent(composedId) }, composedId);
-}
-function testLink(testId) {
-  const rec = testIndex.get(testId);
-  return elem('a', { class: 'req-link tc-link', href: '#/' + rec.docId + '?test=' + encodeURIComponent(testId) }, testId);
-}
-function missingChip(raw) {
-  return elem('span', { class: 'req-missing', title: 'Not found: ' + raw }, '⚠ ' + raw);
-}
-function noneCell() { return elem('span', 'req-none', '—'); }
-// Fill a trace cell with comma-separated link/chip nodes (or an em-dash if empty).
-function fillTrace(td, nodes) {
-  if (!nodes.length) { td.textContent = '—'; td.classList.add('req-none'); return; }
-  nodes.forEach((node, i) => { if (i) append(td, ', '); append(td, node); });
-}
-function statusOf(id) {
-  if (!coverageStatus) return null;
-  return coverageStatus.get ? coverageStatus.get(id) : coverageStatus[id];
-}
-function badgeStatus(badge, id) { const s = statusOf(id); if (s) badge.classList.add('req-badge-st-' + s.status); }
-function resultBadge(testId) {
-  const st = (statusOf(testId) || {}).status || 'untested';
-  const label = st === 'pass' ? 'Pass' : st === 'fail' ? 'Fail' : st === 'partial' ? 'Partial' : 'Untested';
-  return elem('span', 'tc-result tc-result-' + st, label);
-}
-
-function buildReqTable(g) {
-  const tbody = elem('tbody');
-  for (const rec of g.rows) {
-    const badge = elem('span', 'req-badge', rec.id);
-    badgeStatus(badge, rec.id);
-    const tdTo = elem('td'); fillTrace(tdTo, rec.traceTo.map(raw => { const t = resolveReqRef(raw, rec); return t ? reqLink(t) : missingChip(raw); }));
-    const tdFrom = elem('td'); fillTrace(tdFrom, rec.traceFrom.map(id => reqLink(id)));
-    const tdVer = elem('td'); fillTrace(tdVer, (rec.verifiedBy || []).map(id => testLink(id)));
-    const tr = elem('tr', null,
-      elem('td', 'req-idcell', badge),
-      elem('td', null, inlineMarkdown(rec.description)),
-      tdTo, tdFrom, tdVer);
-    if (rec.component && rec.group) tr.id = 'req-' + cssSafe(rec.id);
-    append(tbody, tr);
-  }
-
-  const table = elem('table', 'req-tbl',
-    elem('thead', null, elem('tr', null, ['Requirement', 'Description', 'Trace To', 'Trace From', 'Verified By'].map(h => elem('th', null, h)))),
-    tbody);
-  return elem('figure', 'req-group',
-    elem('figcaption', 'req-cap', 'Requirements — ' + g.group),
-    g.error && elem('p', 'req-error', '⚠ ' + g.error),
-    elem('div', 'req-scroll', table));
-}
-
-// A test case renders as: a caption (name + id + Result), a "Verifies" line, and
-// the numbered action / expected-response step table.
-function buildTestCase(block) {
-  const rec = block.rec;
-  const cap = elem('figcaption', 'req-cap tc-cap',
-    'Test case — ' + rec.name + ' ',
-    elem('span', 'tc-id', rec.id),
-    resultBadge(rec.id),
-    (rec.component && rec.key) && elem('button', { type: 'button', class: 'tc-run', title: 'Run this test case', onClick: () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: rec.id } })) }, '▷ Run'));
-
-  const verifies = elem('p', 'tc-verifies', 'Verifies: ');
-  if (rec.verifies.length) rec.verifies.forEach((id, i) => { if (i) append(verifies, ', '); append(verifies, reqLink(id)); });
-  else append(verifies, noneCell());
-
-  const table = elem('table', 'req-tbl test-steps-tbl',
-    elem('thead', null, elem('tr', null, ['#', 'Action', 'Expected response'].map(h => elem('th', null, h)))),
-    elem('tbody', null, rec.steps.map((s, i) => elem('tr', null,
-      elem('td', 'tc-stepno', String(i + 1)),
-      elem('td', 'tc-md', blockMarkdown(s.action)),
-      elem('td', 'tc-steps tc-md', blockMarkdown(s.expected))))));
-
-  const fig = elem('figure', 'req-group test-case',
-    cap,
-    block.error && elem('p', 'req-error', '⚠ ' + block.error),
-    verifies,
-    elem('div', 'req-scroll', table));
-  if (rec.component && rec.key) fig.id = 'test-' + cssSafe(rec.id);
-  return fig;
-}
-
-// Replace each reqgroup placeholder with its built table (post-sanitize).
-export function renderRequirements(article, docId) {
-  article.querySelectorAll('pre > code.language-reqgroup').forEach(code => {
-    const pre = code.parentElement;
-    const key = code.textContent.trim();
-    const sep = key.indexOf('::');
-    const dId = sep >= 0 ? key.slice(0, sep) : docId;
-    const n = sep >= 0 ? parseInt(key.slice(sep + 2), 10) : 0;
-    const blocks = groupsByDoc.get(dId);
-    const g = blocks && blocks[n];
-    if (!g) { pre.remove(); return; }
-    pre.replaceWith(g.kind === 'test' ? buildTestCase(g) : buildReqTable(g));
-  });
 }
 
 // Deep-link: scroll a requirement or test into view and flash it.
@@ -407,22 +190,29 @@ function reveal(prefix, id) {
   el.classList.add('req-flash');
   setTimeout(() => el.classList.remove('req-flash'), 1600);
 }
+/** @param {string} reqId @returns {void} */
 export function revealRequirement(reqId) { reveal('req-', reqId); }
+/** @param {string} testId @returns {void} */
 export function revealTest(testId) { reveal('test-', testId); }
 
 // Pull ?req=<id> / ?test=<id> out of a hash-route query string.
+/** @param {string} query @returns {string|null} */
 export function reqFromQuery(query) {
   if (!query) return null;
   const m = /(?:^|[?&])req=([^&]+)/.exec(query);
   return m ? decodeURIComponent(m[1]) : null;
 }
+/** @param {string} query @returns {string|null} */
 export function testFromQuery(query) {
   if (!query) return null;
   const m = /(?:^|[?&])test=([^&]+)/.exec(query);
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-// Document -> document trace edges, for the map view's requirement-trace layer.
+/**
+ * Document -> document trace edges, for the map view's requirement-trace layer.
+ * @returns {DocEdgeRef[]}
+ */
 export function requirementTraceEdges() {
   const seen = new Set();
   const edges = [];

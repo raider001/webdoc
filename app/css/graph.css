@@ -7,31 +7,25 @@
   --graph-canvas:#f2f4f7;
   --graph-node-bg:#ffffff;
   --graph-node-border:#c7cdd6;
-  --graph-node-shadow:0 1px 2px rgba(16,24,40,.10);
   --graph-current-ring:var(--accent);
   --graph-current-bg:var(--accent-soft);
-  --graph-missing-bg:repeating-linear-gradient(45deg, #eef0f3, #eef0f3 6px, #e6e9ee 6px, #e6e9ee 12px);
   --graph-missing-border:#b7bdc7;
   --graph-missing-text:#7b828c;
   --graph-overlay-bg:rgba(255,255,255,.92);
   --graph-overlay-border:var(--border);
   --graph-minimap-bg:rgba(255,255,255,.9);
-  --graph-view-stroke:var(--accent);
 }
 :root[data-theme="dark"] {
   --graph-canvas:#0a0e14;
   --graph-node-bg:#141a22;
   --graph-node-border:#333c47;
-  --graph-node-shadow:0 1px 3px rgba(0,0,0,.5);
   --graph-current-ring:var(--accent);
   --graph-current-bg:var(--accent-soft);
-  --graph-missing-bg:repeating-linear-gradient(45deg, #171d25, #171d25 6px, #1d242d 6px, #1d242d 12px);
   --graph-missing-border:#3a434e;
   --graph-missing-text:#8a929c;
   --graph-overlay-bg:rgba(18,23,30,.92);
   --graph-overlay-border:var(--border-strong);
   --graph-minimap-bg:rgba(13,17,23,.9);
-  --graph-view-stroke:var(--accent);
 }
 
 /* ---- Root container ------------------------------------------------------- */
@@ -58,85 +52,6 @@
   cursor:grab;
 }
 .graph-svg.is-panning { cursor:grabbing; }
-
-/* ---- Edges ---------------------------------------------------------------- */
-.graph-edges { pointer-events:none; }
-.graph-edge { fill:none; stroke-width:1.6; }
-.graph-edge-prereq  { stroke:var(--prereq); }
-.graph-edge-recnext { stroke:var(--recnext); stroke-dasharray:6 5; }
-
-.graph-arrow-prereq  path { fill:var(--prereq); stroke:none; }
-.graph-arrow-recnext path { fill:var(--recnext); stroke:none; }
-
-/* ---- Nodes ---------------------------------------------------------------- */
-.graph-node { cursor:pointer; }
-.graph-node:focus { outline:none; }
-.graph-node-box {
-  fill:var(--graph-node-bg);
-  stroke:var(--graph-node-border);
-  stroke-width:1.25;
-  filter:drop-shadow(var(--graph-node-shadow));
-  transition:stroke var(--dur), fill var(--dur);
-}
-.graph-node:hover .graph-node-box { stroke:var(--accent); }
-.graph-node:focus-visible .graph-node-box { stroke:var(--focus-ring); stroke-width:2; }
-
-.graph-node-fo { pointer-events:none; overflow:visible; }
-.graph-node-body {
-  box-sizing:border-box;
-  width:100%; height:100%;
-  padding:8px 12px;
-  display:flex; flex-direction:column; justify-content:center; gap:3px;
-  font:13px/1.3 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color:var(--text);
-  overflow:hidden;
-}
-.graph-node-title {
-  font-weight:600; font-size:13.5px; color:var(--text);
-  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
-  overflow:hidden; line-height:1.25;
-}
-.graph-node-desc {
-  font-size:11.5px; color:var(--muted);
-  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
-  overflow:hidden; line-height:1.25;
-}
-.graph-node-tag {
-  align-self:flex-start;
-  font-size:10.5px; letter-spacing:.05em; text-transform:uppercase;
-  color:var(--graph-missing-text);
-  border:1px solid var(--graph-missing-border); border-radius:4px;
-  padding:0 5px;
-}
-
-/* Current document */
-.graph-node.is-current .graph-node-box {
-  stroke:var(--graph-current-ring); stroke-width:2.5;
-  fill:var(--graph-current-bg);
-}
-.graph-node.is-current .graph-node-title { color:var(--text); }
-
-/* Missing (non-clickable placeholder) */
-.graph-node.is-missing { cursor:default; }
-.graph-node.is-missing .graph-node-box {
-  fill:transparent;
-  stroke:var(--graph-missing-border);
-  stroke-width:1.25;
-  stroke-dasharray:5 4;
-  filter:none;
-}
-.graph-node.is-missing .graph-node-title { color:var(--graph-missing-text); font-weight:500; }
-
-/* Search hit flash */
-.graph-node.is-found .graph-node-box {
-  stroke:var(--accent); stroke-width:3;
-  animation:graph-pulse 1.8s ease-out;
-}
-@keyframes graph-pulse {
-  0%   { stroke-width:4; }
-  60%  { stroke-width:2.5; }
-  100% { stroke-width:2.5; }
-}
 
 /* ---- Overlay chrome ------------------------------------------------------- */
 .graph-controls {
@@ -227,31 +142,11 @@
 :root { --req-trace:#7c3aed; }
 :root[data-theme="dark"] { --req-trace:#a78bfa; }
 .graph-legend-swatch.trace { border-top-color:var(--req-trace); border-top-style:dotted; }
-.graph-edge-trace { stroke:var(--req-trace); stroke-width:1.6; stroke-dasharray:2 3; fill:none; }
-.graph-arrow-trace path { fill:var(--req-trace); }
-.graph-viewport.hide-prereq  .graph-edge-prereq  { display:none; }
-.graph-viewport.hide-recnext .graph-edge-recnext { display:none; }
-.graph-viewport.hide-trace   .graph-edge-trace   { display:none; }
-.graph-viewport.hide-missing .graph-node.is-missing { display:none; }
-.graph-viewport.hide-missing .graph-edge-tomissing  { display:none; }
 
 /* Page-link edges + external-link nodes (in-body markdown links) */
 :root { --page-link:#0d9488; }
 :root[data-theme="dark"] { --page-link:#2dd4bf; }
 .graph-legend-swatch.pagelink { border-top-color:var(--page-link); border-top-style:dashed; }
-.graph-edge-pagelink { stroke:var(--page-link); stroke-width:1.6; stroke-dasharray:5 3; fill:none; }
-.graph-arrow-pagelink path { fill:var(--page-link); }
-.graph-viewport.hide-pagelink .graph-edge-pagelink { display:none; }
-.graph-viewport.hide-pagelink .graph-ext-node { display:none; }
-.graph-ext-node { cursor:pointer; }
-.graph-ext-node:hover .graph-ext-box, .graph-ext-node:focus-visible .graph-ext-box { stroke-width:2.25; }
-.graph-ext-node:focus-visible { outline:none; }
-.graph-ext-box { fill:var(--surface); stroke:var(--page-link); stroke-width:1.25; stroke-dasharray:4 3; }
-.graph-ext-body { box-sizing:border-box; width:100%; height:100%; display:flex; align-items:center; padding:6px 12px 6px 10px; overflow:hidden; }
-.graph-ext-url { font:12px ui-monospace, "Cascadia Code", Consolas, monospace; color:var(--text);
-  overflow:hidden; word-break:break-all; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-.graph-ext-bubble circle { fill:var(--page-link); }
-.graph-ext-bubble text { fill:var(--bg); font:700 11px ui-sans-serif, system-ui, sans-serif; }
 .graph-legend-swatch { width:22px; height:0; border-top-width:2px; border-top-style:solid; display:inline-block; }
 .graph-legend-swatch.prereq  { border-top-color:var(--prereq); }
 .graph-legend-swatch.recnext { border-top-color:var(--recnext); border-top-style:dashed; }
@@ -305,12 +200,6 @@
 .graph-root.is-editing .graph-legend-item[data-kind="pagelink"],
 .graph-root.is-editing .graph-legend-item[data-kind="trace"],
 .graph-root.is-editing .graph-legend-item[data-kind="missing"] { opacity:.4; pointer-events:none; }
-.graph-root.is-editing .graph-node { cursor:crosshair; }
-.graph-node.is-connect-source .graph-node-box { stroke:var(--accent); stroke-width:3; }
-/* Wide invisible hit target over each editable edge (clickable only in edit mode). */
-.graph-edge-hit { fill:none; stroke:transparent; stroke-width:14; pointer-events:none; }
-.graph-root.is-editing .graph-edge-hit { pointer-events:stroke; cursor:pointer; }
-.graph-edge.is-selected { stroke:var(--accent); stroke-width:3; stroke-dasharray:none; }
 
 /* ---- Minimap -------------------------------------------------------------- */
 .graph-minimap {
@@ -322,13 +211,6 @@
   -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px);
 }
 .graph-minimap-svg { width:100%; height:100%; display:block; cursor:pointer; }
-.graph-minimap-node { fill:var(--muted); opacity:.55; }
-.graph-minimap-node.is-current { fill:var(--accent); opacity:1; }
-.graph-minimap-node.is-missing { fill:none; stroke:var(--graph-missing-border); stroke-width:1; opacity:.7; }
-.graph-minimap-view {
-  fill:var(--accent); fill-opacity:.12;
-  stroke:var(--graph-view-stroke); stroke-width:1.25;
-}
 
 /* ---- Empty state ---------------------------------------------------------- */
 .graph-empty {
@@ -340,7 +222,4 @@
 @media (max-width:600px) {
   .graph-minimap { display:none; }
   .graph-search input { width:150px; }
-}
-@media (prefers-reduced-motion:reduce) {
-  .graph-node.is-found .graph-node-box { animation:none; }
 }

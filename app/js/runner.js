@@ -6,23 +6,81 @@
 // with run metadata (when + who). Definitions come from the docs; only the run
 // outcome is stored. Zero dependencies.
 // ---------------------------------------------------------------------------
+import { elem } from './dom.js';
+import { html } from './html.js';
+import { checkIcon, closeIcon } from './icons.js';
 import { richText } from './editor.js';
 import { manualTests, saveManual } from './coverage.js';
 import { sanitizeToFragment } from './sanitize.js';
 import { blockMarkdown } from './requirements.js';
 
+/** @typedef {import('./main.js').RunnerOpts} RunnerOpts */
+
+/**
+ * One step's live run state inside a test's working model: the definition
+ * (action/expected, both Markdown source, carried over unchanged from the
+ * TestCaseEntry) plus what the tester has recorded this run.
+ * @typedef {Object} RunStep
+ * @property {string} action - Markdown source
+ * @property {string} expected - Markdown source
+ * @property {string} actual - the tester's recorded response, as HTML
+ * @property {boolean|null} pass - null when not yet recorded
+ */
+
+/**
+ * One test case's working run state, pre-populated from its latest stored
+ * result (if any) so a re-run starts where the last one left off. `dirty`
+ * gates which tests Save actually rewrites - untouched tests keep whatever
+ * result is already stored.
+ * @typedef {Object} RunTest
+ * @property {string} id
+ * @property {string} name
+ * @property {string[]} verifies - requirement/test ids this test verifies
+ * @property {boolean} dirty
+ * @property {string} notes - HTML
+ * @property {RunStep[]} steps
+ */
+
+/**
+ * Who ran a test and when.
+ * @typedef {Object} TestRunMeta
+ * @property {string} at - ISO timestamp
+ * @property {string} by - tester name
+ */
+
+/**
+ * One test's stored manual run outcome, keyed by test id inside a per-source
+ * manual-results sidecar (CoverageResults.manual).
+ * @typedef {Object} TestRunRecord
+ * @property {TestRunMeta} run
+ * @property {{step: string, response: string, pass: boolean|null}[]} steps
+ * @property {string} report - HTML
+ */
+
+/**
+ * Sanitize (strip anything unsafe) and trim a run's recorded HTML before it
+ * is stored.
+ * @param {string} html
+ * @returns {string}
+ */
 function cleanHtml(html) {
   const d = document.createElement('div');
   d.appendChild(sanitizeToFragment(String(html || '')));
   return d.innerHTML.trim();
 }
 
+/** @type {HTMLElement|null} */
 let runnerEl = null;
+/** Close and remove the run overlay, if one is open. @returns {void} */
 export function closeRunner() {
   if (runnerEl) { runnerEl.remove(); runnerEl = null; document.body.classList.remove('is-running'); }
 }
 
-// opts: { tests:[{id,name,steps:[{action,expected}],verifies}], results, sources, onSaved() }
+/**
+ * Open the full-screen test-run overlay for a set of test cases.
+ * @param {RunnerOpts} opts
+ * @returns {void}
+ */
 export function openRunner(opts) {
   closeRunner();
   const tests = opts.tests || [];
@@ -30,6 +88,7 @@ export function openRunner(opts) {
 
   // Working model, pre-populated from any existing latest result (so re-runs
   // start where the last one left off). `dirty` gates which tests get rewritten.
+  /** @type {RunTest[]} */
   const model = tests.map(t => {
     const ex = manualTests(results.manual[t.id]);
     const exSteps = ex.length ? (ex[0].steps || []) : [];
@@ -44,28 +103,23 @@ export function openRunner(opts) {
     };
   });
 
-  const overlay = document.createElement('div'); overlay.className = 'runner-overlay'; overlay.id = 'runnerOverlay';
-
-  // ---- top bar ----
-  const bar = document.createElement('div'); bar.className = 'runner-bar';
-  const title = document.createElement('span'); title.className = 'runner-title'; title.textContent = 'Test run';
-  const prog = document.createElement('span'); prog.className = 'runner-progress';
-  const spacer = document.createElement('span'); spacer.style.flex = '1';
-  const byLabel = document.createElement('label'); byLabel.className = 'runner-by-l'; byLabel.textContent = 'Tester ';
-  const byInput = document.createElement('input'); byInput.className = 'runner-by'; byInput.placeholder = 'name…';
+  // ---- top bar + body ----
+  const byInput = elem('input', { class: 'runner-by', placeholder: 'name…' });
   try { byInput.value = localStorage.getItem('wd-tester') || ''; } catch (e) {}
-  byLabel.appendChild(byInput);
-  const status = document.createElement('span'); status.className = 'runner-status';
-  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'btn'; cancel.textContent = 'Close';
-  const save = document.createElement('button'); save.type = 'button'; save.className = 'btn btn-primary'; save.textContent = 'Save run';
-  bar.append(title, prog, spacer, byLabel, status, cancel, save);
-  overlay.appendChild(bar);
-
-  // ---- body ----
-  const body = document.createElement('div'); body.className = 'runner-body';
-  const inner = document.createElement('div'); inner.className = 'runner-inner';
-  body.appendChild(inner);
-  overlay.appendChild(body);
+  const prog = elem('span', 'runner-progress');
+  const status = elem('span', 'runner-status');
+  const save = elem('button', { type: 'button', class: 'btn btn-primary' }, 'Save run');
+  const inner = elem('div', 'runner-inner');
+  const overlay = elem('div', { class: 'runner-overlay', id: 'runnerOverlay' },
+    elem('div', 'runner-bar',
+      elem('span', 'runner-title', 'Test run'),
+      prog,
+      elem('span', { style: 'flex:1' }),
+      elem('label', 'runner-by-l', 'Tester ', byInput),
+      status,
+      elem('button', { type: 'button', class: 'btn', onClick: closeRunner }, 'Close'),
+      save),
+    elem('div', 'runner-body', inner));
 
   function updateProgress() {
     let steps = 0, rec = 0, pass = 0, fail = 0;
@@ -73,6 +127,10 @@ export function openRunner(opts) {
     prog.textContent = model.length + ' test' + (model.length === 1 ? '' : 's') + ' · ' + rec + '/' + steps + ' steps recorded · ' + pass + ' pass, ' + fail + ' fail';
   }
 
+  /**
+   * @param {RunTest} t
+   * @returns {'pass'|'fail'|'untested'}
+   */
   function testStatus(t) {
     let anySet = false, anyFail = false;
     t.steps.forEach(s => { if (s.pass !== null) { anySet = true; if (!s.pass) anyFail = true; } });
@@ -80,67 +138,69 @@ export function openRunner(opts) {
     return anyFail ? 'fail' : 'pass';
   }
 
+  /**
+   * A two-button Pass/Fail toggle bound to one step (clicking the active one
+   * clears it).
+   * @param {RunStep} step
+   * @param {() => void} onChange
+   * @returns {HTMLElement}
+   */
   function pfControl(step, onChange) {
-    const wrap = document.createElement('div'); wrap.className = 'run-pf';
-    const p = document.createElement('button'); p.type = 'button'; p.className = 'run-pf-btn run-pf-pass'; p.textContent = '✓'; p.title = 'Pass';
-    const f = document.createElement('button'); f.type = 'button'; f.className = 'run-pf-btn run-pf-fail'; f.textContent = '✗'; f.title = 'Fail';
+    const p = elem('button', { type: 'button', class: 'run-pf-btn run-pf-pass', title: 'Pass' }, checkIcon());
+    const f = elem('button', { type: 'button', class: 'run-pf-btn run-pf-fail', title: 'Fail' }, closeIcon());
     function sync() { p.classList.toggle('is-on', step.pass === true); f.classList.toggle('is-on', step.pass === false); }
     p.addEventListener('click', () => { step.pass = step.pass === true ? null : true; sync(); onChange(); });
     f.addEventListener('click', () => { step.pass = step.pass === false ? null : false; sync(); onChange(); });
-    wrap.append(p, f); sync();
-    return wrap;
+    sync();
+    return elem('div', 'run-pf', p, f);
   }
 
+  /**
+   * @param {RunTest} t
+   * @returns {HTMLElement}
+   */
   function drawTest(t) {
-    const card = document.createElement('section'); card.className = 'run-test'; card.dataset.testId = t.id;
-    const head = document.createElement('div'); head.className = 'run-test-head';
-    const h = document.createElement('h3');
-    h.appendChild(document.createTextNode(t.name + ' '));
-    const idEl = document.createElement('span'); idEl.className = 'tc-id'; idEl.textContent = t.id; h.appendChild(idEl);
-    const pill = document.createElement('span'); pill.className = 'run-test-pill';
+    const pill = elem('span', 'run-test-pill');
     function syncPill() { const st = testStatus(t); pill.className = 'run-test-pill tc-result tc-result-' + st; pill.textContent = st === 'pass' ? 'Pass' : st === 'fail' ? 'Fail' : 'Not run'; }
-    head.append(h, pill); card.appendChild(head);
-
-    if (t.verifies.length) {
-      const v = document.createElement('p'); v.className = 'run-verifies'; v.textContent = 'Verifies: ' + t.verifies.join(', ');
-      card.appendChild(v);
-    }
-
     const onChange = () => { t.dirty = true; syncPill(); updateProgress(); };
 
-    const table = document.createElement('table'); table.className = 'run-grid';
-    const thead = document.createElement('thead'); const htr = document.createElement('tr');
-    ['#', 'Action', 'Expected response', 'Actual response', 'Result'].forEach(x => { const th = document.createElement('th'); th.textContent = x; htr.appendChild(th); });
-    thead.appendChild(htr); table.appendChild(thead);
-    const tbody = document.createElement('tbody');
-    t.steps.forEach((s, i) => {
-      const tr = document.createElement('tr');
-      const n = document.createElement('td'); n.className = 'run-no'; n.textContent = String(i + 1); tr.appendChild(n);
-      const a = document.createElement('td'); a.className = 'run-action tc-md'; a.appendChild(blockMarkdown(s.action)); tr.appendChild(a);
-      const e = document.createElement('td'); e.className = 'run-expected tc-md'; e.appendChild(blockMarkdown(s.expected)); tr.appendChild(e);
-      const act = document.createElement('td'); act.className = 'run-actual';
-      act.appendChild(richText(s.actual, html => { s.actual = html; t.dirty = true; }, 'What actually happened…'));
-      tr.appendChild(act);
-      const res = document.createElement('td'); res.className = 'run-result-cell'; res.appendChild(pfControl(s, onChange)); tr.appendChild(res);
-      tbody.appendChild(tr);
+    const headers = ['#', 'Action', 'Expected response', 'Actual response', 'Result'];
+    const rows = t.steps.map((s, i) => {
+      const actualField = richText(s.actual, value => { s.actual = value; t.dirty = true; }, 'What actually happened…');
+      const result = pfControl(s, onChange);
+      return html`
+        <tr>
+          <td class="run-no">${i + 1}</td>
+          <td class="run-action tc-md">${blockMarkdown(s.action)}</td>
+          <td class="run-expected tc-md">${blockMarkdown(s.expected)}</td>
+          <td class="run-actual">${actualField}</td>
+          <td class="run-result-cell">${result}</td>
+        </tr>
+      `;
     });
-    table.appendChild(tbody);
-    const wrap = document.createElement('div'); wrap.className = 'req-scroll'; wrap.appendChild(table); card.appendChild(wrap);
+    const table = html`
+      <table class="run-grid">
+        <thead><tr>${headers.map(x => html`<th>${x}</th>`)}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
 
-    const nl = document.createElement('label'); nl.className = 'run-notes-l'; nl.textContent = 'Notes';
-    const notes = richText(t.notes, html => { t.notes = html; t.dirty = true; }, 'Notes for this run…'); notes.classList.add('run-notes');
-    card.append(nl, notes);
+    const notes = richText(t.notes, value => { t.notes = value; t.dirty = true; }, 'Notes for this run…');
+    notes.classList.add('run-notes');
+
+    const card = elem('section', { class: 'run-test', 'data-test-id': t.id },
+      elem('div', 'run-test-head', elem('h3', null, t.name + ' ', elem('span', 'tc-id', t.id)), pill),
+      t.verifies.length && elem('p', 'run-verifies', 'Verifies: ' + t.verifies.join(', ')),
+      elem('div', 'req-scroll', table),
+      elem('label', 'run-notes-l', 'Notes'),
+      notes);
 
     syncPill();
     return card;
   }
 
-  if (!model.length) {
-    const empty = document.createElement('p'); empty.className = 'runner-empty'; empty.textContent = 'No test cases to run. Author a test-case table first.';
-    inner.appendChild(empty);
-  } else {
-    model.forEach(t => inner.appendChild(drawTest(t)));
-  }
+  if (!model.length) inner.appendChild(elem('p', 'runner-empty', 'No test cases to run. Author a test-case table first.'));
+  else model.forEach(t => inner.appendChild(drawTest(t)));
   updateProgress();
 
   save.addEventListener('click', async () => {
@@ -163,7 +223,6 @@ export function openRunner(opts) {
     if (ok && typeof opts.onSaved === 'function') opts.onSaved();
   });
 
-  cancel.addEventListener('click', closeRunner);
   overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRunner(); });
 
   document.body.appendChild(overlay);

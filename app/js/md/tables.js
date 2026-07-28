@@ -5,8 +5,15 @@
 import { makeBlock } from './blocks.js';
 import { parseInlines } from './inline.js';
 
-// Split one table row into trimmed cell strings. An escaped pipe (\|) is a
-// literal pipe; a single unescaped leading/trailing pipe is a fence, not a cell.
+/** @typedef {import('./blocks.js').MdBlockNode} MdBlockNode */
+/** @typedef {import('./blockpost.js').RefDefinition} RefDefinition */
+
+/**
+ * Split one table row into trimmed cell strings. An escaped pipe (\|) is a
+ * literal pipe; a single unescaped leading/trailing pipe is a fence, not a cell.
+ * @param {string} line
+ * @returns {string[]}
+ */
 function splitTableRow(line) {
   const s = line.trim();
   const cells = [];
@@ -23,7 +30,11 @@ function splitTableRow(line) {
   if (cells.length > 1 && cells[cells.length - 1].trim() === '') cells.pop();
   return cells.map(c => c.trim());
 }
-// Validate a delimiter row; return an array of per-column alignments or null.
+/**
+ * Validate a GFM table delimiter row.
+ * @param {string} line
+ * @returns {(string|null)[]|null} an array of per-column alignments ('left'|'right'|'center'|null), or null if invalid
+ */
 function parseDelimiterRow(line) {
   if (line.indexOf('|') === -1) return null; // require at least one pipe
   const cells = splitTableRow(line);
@@ -37,8 +48,21 @@ function parseDelimiterRow(line) {
   }
   return aligns;
 }
-// If `lines` (a paragraph's accumulated lines) contain a header row immediately
-// followed by a delimiter row with matching column count, describe the table.
+/**
+ * Result of tryBuildTable: describes where a header/delimiter row pair was
+ * found inside a paragraph's accumulated lines.
+ * @typedef {Object} TableBuildInfo
+ * @property {number} headerIndex - index into `lines` of the header row
+ * @property {number} delimIndex - index into `lines` of the delimiter row (headerIndex + 1)
+ * @property {(string|null)[]} aligns - per-column alignment
+ */
+
+/**
+ * If `lines` (a paragraph's accumulated lines) contain a header row immediately
+ * followed by a delimiter row with matching column count, describe the table.
+ * @param {string[]} lines
+ * @returns {TableBuildInfo|null}
+ */
 function tryBuildTable(lines) {
   for (let d = 1; d < lines.length; d++) {
     const aligns = parseDelimiterRow(lines[d]);
@@ -49,7 +73,11 @@ function tryBuildTable(lines) {
   }
   return null;
 }
-// Walk the block tree, converting qualifying paragraphs into table blocks.
+/**
+ * Walk the block tree, converting qualifying paragraphs into table blocks.
+ * @param {MdBlockNode} block
+ * @returns {void}
+ */
 export function extractTables(block) {
   const kids = block.children;
   for (let i = 0; i < kids.length; i++) {
@@ -77,6 +105,12 @@ export function extractTables(block) {
     }
   }
 }
+/**
+ * Render a `table` block to HTML.
+ * @param {MdBlockNode} b
+ * @param {Object<string, RefDefinition>} refs
+ * @returns {string}
+ */
 export function renderTable(b, refs) {
   const cols = b.aligns.length;
   const attr = a => a ? ' align="' + a + '"' : '';

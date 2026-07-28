@@ -5,20 +5,34 @@
 //   elem('span', 'cov-name', name)                     -> <span class="cov-name">name</span>
 //   elem('button', { class: 'btn', type: 'button', onClick: save }, 'Save')
 //   elem('div', 'row', childA, childB, maybeChild && childC)   // children in order
-//
-// Second argument is EITHER a className string (the common case) OR a props object:
-//   class / className        -> element.className
-//   text  / textContent      -> element.textContent
-//   html  / innerHTML        -> element.innerHTML
-//   onClick, onInput, on...  -> addEventListener('click' | 'input' | ...)
-//   style                    -> the inline style string
-//   any DOM property (type, value, disabled, hidden, href, ...) -> set directly
-//   anything else (aria-*, data-*, ...) -> setAttribute
-//   a null / undefined value is skipped.
-//
-// Remaining arguments are children: DOM nodes are appended as-is, strings become
-// text nodes, arrays are flattened, and null / undefined / false are skipped (so
-// `cond && child` and `list.map(...)` drop straight in).
+
+/**
+ * A valid elem()/append() child: a DOM node, or text (stringified) - or a
+ * null / undefined / false value, which is skipped, so `cond && child` and
+ * `list.map(...)` drop straight in. Arrays are flattened to any depth.
+ * @typedef {Node|string|number|boolean|null|undefined|false} Child
+ */
+
+/**
+ * elem()'s second argument is EITHER a className string (the common case) OR
+ * a props object:
+ *   class / className        -> element.className
+ *   text  / textContent      -> element.textContent
+ *   html  / innerHTML        -> element.innerHTML
+ *   onClick, onInput, on...  -> addEventListener('click' | 'input' | ...)
+ *   style                    -> the inline style string
+ *   any DOM property (type, value, disabled, hidden, href, ...) -> set directly
+ *   anything else (aria-*, data-*, ...) -> setAttribute
+ *   a null / undefined value is skipped.
+ * @typedef {Object<string, *>} ElemProps
+ */
+
+/**
+ * @param {string} tag
+ * @param {string|ElemProps} [props] - a className string, or a props object
+ * @param {...(Child|Child[])} children
+ * @returns {HTMLElement}
+ */
 export function elem(tag, props, ...children) {
   const node = document.createElement(tag);
   if (typeof props === 'string') node.className = props;
@@ -27,8 +41,13 @@ export function elem(tag, props, ...children) {
   return node;
 }
 
-// Append a flat list of children to a parent, skipping empties (see elem's rules).
-// Exported so callers can add children to an existing node the same way.
+/**
+ * Append a flat list of children to a parent, skipping empties (see Child).
+ * Exported so callers can add children to an existing node the same way.
+ * @param {Element} node
+ * @param {...(Child|Child[])} children
+ * @returns {Element}
+ */
 export function append(node, ...children) {
   for (const child of children.flat(Infinity)) {
     if (child == null || child === false) continue;
@@ -37,6 +56,10 @@ export function append(node, ...children) {
   return node;
 }
 
+/**
+ * @param {HTMLElement} node
+ * @param {ElemProps} props
+ */
 function applyProps(node, props) {
   for (const key in props) {
     const value = props[key];

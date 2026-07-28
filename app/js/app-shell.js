@@ -5,20 +5,99 @@
 // modules never form an import cycle with the bootstrap.
 import { computeCoverage, computeTestStatus } from './coverage.js';
 
-// The single shared app state (discovery result + current doc + scroll-spy handle).
+/** @typedef {import('./catalog.js').Doc} Doc */
+/** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
+/** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
+/** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
+/** @typedef {import('./coverage.js').CoverageResults} CoverageResults */
+
+/**
+ * The single shared app state (discovery result + current doc + scroll-spy
+ * handle), kept here (not in main.js) so a feature module can read/write it
+ * without importing main.js.
+ * @typedef {Object} AppState
+ * @property {Object<string, *>|null} site - parsed site.json ({siteTitle, defaultDoc, theme, sources, plugins, ...})
+ * @property {Doc[]} docs - deliberately empty under the lazy server-backed architecture; byId is the real per-doc cache
+ * @property {Map<string, Doc>} byId - docs seen so far, keyed by id - stubs from docFromId and/or fully loaded via catalog.loadDoc
+ * @property {Doc|null} current - the doc currently routed/displayed
+ * @property {*} spy - reserved for a scroll-spy handle; not assigned anywhere in the current code (reader.js keeps its own module-local IntersectionObserver instead)
+ */
+/** @type {AppState} */
 export const state = { site: null, docs: [], byId: new Map(), current: null, spy: null };
 
+/**
+ * @param {string} id
+ * @returns {HTMLElement|null}
+ */
 export const el = id => document.getElementById(id);
 
-// Combined status map: requirement rollups (which now include their Verified By
-// tests) plus each test case's own pass/fail. Keys never collide (T namespace).
+/**
+ * A display title derived from a doc id's last segment (footer + new-doc
+ * fallback, used when the full title isn't in the sparse client cache).
+ * @param {string} id
+ * @returns {string}
+ */
+export function titleFromId(id) {
+  const base = String(id).split('/').pop().replace(/[-_]+/g, ' ');
+  return base.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * The document to show when no (or an unknown) id is routed. state.docs is
+ * empty under lazy boot, so a configured defaultDoc is what actually resolves.
+ * @returns {string|undefined}
+ */
+export function defaultId() {
+  return (state.site && state.site.defaultDoc) || (state.docs[0] && state.docs[0].id);
+}
+/**
+ * Build a doc stub {id, source, rel, url, name} from an id, matching
+ * catalog.makeDoc, so the router can loadDoc it on demand (a 404 is the
+ * not-found signal).
+ * @param {string} id
+ * @returns {Doc|null}
+ */
+export function docFromId(id) {
+  const slash = String(id).indexOf('/');
+  if (slash < 0) return null;
+  const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
+  const url = '/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/');
+  return { id: id, source: source, rel: rel, url: url, name: id.split('/').pop() + '.md' };
+}
+/**
+ * Resolve an id to a cached doc, or a fresh stub (cached for reuse). Shared by
+ * the router (route) and authoring (deleteDocFlow).
+ * @param {string} id
+ * @returns {Doc|null|undefined}
+ */
+export function getDoc(id) {
+  let d = state.byId.get(id);
+  if (!d && id) { d = docFromId(id); if (d) state.byId.set(id, d); }
+  return d;
+}
+
+/**
+ * Combined status map: requirement rollups (which now include their Verified
+ * By tests) plus each test case's own pass/fail. Keys never collide (T
+ * namespace).
+ * @param {RequirementEntry[]} reqs
+ * @param {TestCaseEntry[]} tests
+ * @param {CoverageResults} results
+ * @returns {Map<string, CoverageStatus>}
+ */
 export function combinedStatus(reqs, tests, results) {
   const m = computeCoverage(reqs, results);
   computeTestStatus(tests, results).forEach((v, k) => m.set(k, v));
   return m;
 }
 
-// Download a string as a file (self-contained report), no server round-trip.
+/**
+ * Download a string as a file (self-contained report), no server round-trip.
+ * @param {string} filename
+ * @param {string} text
+ * @param {string} [mime]
+ * @returns {void}
+ */
 export function downloadFile(filename, text, mime) {
   const blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -26,13 +105,27 @@ export function downloadFile(filename, text, mime) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+/**
+ * @param {Date} d
+ * @returns {string}
+ */
 export function isoDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
-// Service registry: cross-cutting functions the modules call each other through,
-// set by main.js at boot. Using a shared object (not direct imports) is what keeps
-// the feature modules acyclic. Known handles:
-//   navigate(id)                       - route to a document
-//   refreshCatalog()                   - re-discover after a write
-//   closeMapView() / closeCoverageView() - close the other full-screen overlay
-//   linkTestToRequirement / unlinkTestFromRequirement - edit a test's `verifies`
+/**
+ * Service registry: cross-cutting functions the modules call each other
+ * through, set by main.js at boot (and by authoring.js/map-view.js/
+ * coverage-view.js themselves on first use). Using a shared object (not
+ * direct imports) is what keeps the feature modules acyclic.
+ * @typedef {Object} AppRegistry
+ * @property {(id: string) => void} [navigate] - route to a document
+ * @property {(msg: string) => void} [showError] - show an error in place of the document view
+ * @property {() => void} [closeDrawer] - close the mobile nav drawer, if open
+ * @property {() => void} [closeMapView] - close the map overlay, if open
+ * @property {() => void} [closeCoverageView] - close the coverage overlay, if open
+ * @property {(testId: string, reqId: string) => Promise<boolean>} [linkTestToRequirement] - add a test's `verifies` connection
+ * @property {(testId: string, reqId: string) => Promise<boolean>} [unlinkTestFromRequirement] - remove a test's `verifies` connection
+ * @property {(fromId: string, toId: string, field: ('assumes'|'next'), action: ('add'|'remove')) => Promise<boolean>} [editDocRelation] - edit a doc's assumes/next list
+ * @property {(id: string, opts?: {rebuildMap?: boolean}) => Promise<void>} [deleteDocFlow] - confirm + delete a document
+ */
+/** @type {AppRegistry} */
 export const app = {};

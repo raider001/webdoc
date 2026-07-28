@@ -1,8 +1,25 @@
 // graph/util.js - constants and small pure helpers shared across the graph modules.
 
-const SVGNS = 'http://www.w3.org/2000/svg';
+/**
+ * Layout tuning-parameter bag: node box size, gaps between layers/rows/
+ * components, barycenter-sweep iteration count, which connection type drives
+ * the tree ('all'|'prereq'|'recnext'), and the node-count ceiling above which
+ * the cosmetic branch-relocation pass is skipped. Defaulted here as LO and
+ * merged with per-call overrides (auto-sized dimensions, map mode) before
+ * being threaded through the layout pipeline (graph/layout.js).
+ * @typedef {Object} LayoutOptions
+ * @property {number} nodeW
+ * @property {number} nodeH
+ * @property {number} hGap
+ * @property {number} vGap
+ * @property {number} compGap
+ * @property {number} iters
+ * @property {string} [layoutMode]
+ * @property {number} [relocateMax]
+ */
 
 // Layout tuning. All in world units (pre-transform).
+/** @type {LayoutOptions} */
 const LO = {
   nodeW: 210, nodeH: 76,   // node box size
   hGap: 110,  vGap: 40,    // gaps between layers (h) and rows (v)
@@ -21,18 +38,32 @@ const DRAG_THRESHOLD = 5; // px of pointer travel before a press becomes a drag
 // Minimap box dimensions.
 const MINI_W = 168, MINI_H = 120, MINI_PAD = 6;
 
-function svg(tag, attrs) {
-  const el = document.createElementNS(SVGNS, tag);
-  if (attrs) for (const k in attrs) el.setAttribute(k, attrs[k]);
-  return el;
-}
+/**
+ * @param {number} v
+ * @param {number} lo
+ * @param {number} hi
+ * @returns {number} v clamped to [lo, hi]
+ */
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+/**
+ * Format a number to (at most) 3 decimal places, for SVG path data.
+ * @param {number} n
+ * @returns {string}
+ */
 function fmt(n) { return String(Math.round(n * 1000) / 1000); }
+/**
+ * @param {string} id
+ * @returns {string} `id` escaped for use in a CSS selector
+ */
 function cssEscape(id) {
   return (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/([^\w-])/g, '\\$1');
 }
 
 // Bezier path through a chain of points (horizontal tangents).
+/**
+ * @param {{x: number, y: number}[]} points
+ * @returns {string} an SVG path `d` attribute, or '' if fewer than 2 points
+ */
 function edgePath(points) {
   if (points.length < 2) return '';
   let d = 'M ' + fmt(points[0].x) + ' ' + fmt(points[0].y);
@@ -44,4 +75,4 @@ function edgePath(points) {
   return d;
 }
 
-export { SVGNS, LO, MIN_K, MAX_K, FIT_MIN_K, DRAG_THRESHOLD, MINI_W, MINI_H, MINI_PAD, svg, clamp, fmt, cssEscape, edgePath };
+export { LO, MIN_K, MAX_K, FIT_MIN_K, DRAG_THRESHOLD, MINI_W, MINI_H, MINI_PAD, clamp, fmt, cssEscape, edgePath };

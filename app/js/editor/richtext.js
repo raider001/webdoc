@@ -5,6 +5,13 @@
 import { elem, append } from '../dom.js';
 
 /* ---- editable inline field (contenteditable + inline toolbar) ---- */
+/**
+ * @param {string} html
+ * @param {string} cls
+ * @param {(html: string) => void} onChange
+ * @param {string} [placeholder]
+ * @returns {HTMLElement}
+ */
 export function editable(html, cls, onChange, placeholder) {
   const ed = elem('div', {
     class: 'blk-edit blk-edit-' + cls, contenteditable: 'true', 'data-ph': placeholder || '',
@@ -13,10 +20,17 @@ export function editable(html, cls, onChange, placeholder) {
   attachInlineToolbar(ed);
   return ed;
 }
+/** @param {string} [html] @returns {HTMLLIElement} */
 export function listItem(html) { return elem('li', { html: html || '' }); }
 
-// A standalone rich-text field (contenteditable + the shared inline toolbar),
-// for callers outside the block editor (e.g. the manual-test editor).
+/**
+ * A standalone rich-text field (contenteditable + the shared inline toolbar),
+ * for callers outside the block editor (e.g. the manual-test editor).
+ * @param {string} html
+ * @param {(html: string) => void} onChange
+ * @param {string} [placeholder]
+ * @returns {HTMLElement}
+ */
 export function richText(html, onChange, placeholder) {
   const ed = elem('div', {
     class: 'wysiwyg', contenteditable: 'true', 'data-ph': placeholder || '',
@@ -28,6 +42,7 @@ export function richText(html, onChange, placeholder) {
 
 // A small floating toolbar (Bold / Italic / Code / Link / Image) shown on selection.
 let sharedBar = null;
+/** @param {HTMLElement} ed - a contenteditable field */
 export function attachInlineToolbar(ed) {
   ed.addEventListener('mouseup', showBar);
   ed.addEventListener('keyup', showBar);
@@ -153,6 +168,7 @@ function fireInput(host) { if (host) host.dispatchEvent(new Event('input', { bub
 // keeping the original in data-mdsrc, so it shows in the editor AND serializes back
 // to the relative path - the same contract as images loaded from a document.
 let imageResolver = null;
+/** @param {(url: string) => (string|null|undefined)} fn - resolves a relative image src for DISPLAY */
 export function setImageResolver(fn) { imageResolver = (typeof fn === 'function') ? fn : null; }
 function addImage() {
   const sel = window.getSelection();
@@ -248,8 +264,10 @@ function normalizeUrl(v) {
    o: { rect, text, url, canText, onApply(text,url), onRemove|null } ---- */
 let linkPop = null, linkOff = null;
 let linkDocs = [];   // static fallback list for the URL autocomplete: [{ id, title }]
+/** @param {{id: string, title: string}[]} docs */
 export function setLinkDocs(docs) { linkDocs = Array.isArray(docs) ? docs : []; }
 let linkSearch = null;   // async (query) -> [{id,title}]: server-backed suggestions (scales past a client list)
+/** @param {(query: string) => Promise<{id: string, title: string}[]>} fn */
 export function setLinkSearch(fn) { linkSearch = (typeof fn === 'function') ? fn : null; }
 function closeLinkPop() {
   if (linkOff) { document.removeEventListener('mousedown', linkOff); linkOff = null; } // no leaked global listener

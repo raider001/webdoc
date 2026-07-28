@@ -6,9 +6,20 @@
 // frame; applyTransform just marks the canvas dirty.
 import { clamp, MIN_K, MAX_K, FIT_MIN_K, MINI_W, MINI_H, MINI_PAD } from './util.js';
 
+/** @typedef {import('../graph.js').GraphContext} GraphContext */
+
+/**
+ * Attach the viewport API (pan/zoom transform, fit, zoom, focus/flash, search,
+ * minimap) onto the shared context, as g.viewSize / g.applyTransform / g.fit /
+ * g.zoomAround / g.zoomCenter / g.flash / g.focus / g.setCurrent / g.search /
+ * g.buildMinimap / g.updateMinimap.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 export function attachView(g) {
   if (g.minK === undefined) g.minK = MIN_K;   // live zoom floor; fit() lowers it to frame a huge graph
 
+  /** @returns {{w: number, h: number, rect: DOMRect}} */
   g.viewSize = function () {
     const rect = g.svgEl.getBoundingClientRect();
     return { w: rect.width || g.container.clientWidth || 0, h: rect.height || g.container.clientHeight || 0, rect: rect };
@@ -32,6 +43,13 @@ export function attachView(g) {
     g.applyTransform();
   };
 
+  /**
+   * Zoom by `factor`, keeping the world point under screen point (px,py) fixed.
+   * @param {number} px - screen-space anchor x
+   * @param {number} py - screen-space anchor y
+   * @param {number} factor - zoom multiplier (>1 in, <1 out)
+   * @returns {void}
+   */
   g.zoomAround = function (px, py, factor) {
     const wx = (px - g.tx) / g.k, wy = (py - g.ty) / g.k;
     const nk = clamp(g.k * factor, g.minK, MAX_K);
@@ -44,6 +62,10 @@ export function attachView(g) {
   };
 
   // Flash a node (search hit / current). Draw-state + expiry; the rAF loop fades it.
+  /**
+   * @param {string} id
+   * @returns {void}
+   */
   g.flash = function (id) {
     const n = g.layout.nodes.get(id) || (g.extPos && g.extPos.get(id));
     if (!n) return;
@@ -52,6 +74,11 @@ export function attachView(g) {
     g.requestDraw();
   };
 
+  /**
+   * Centre the viewport on node `id` and flash it.
+   * @param {string} id
+   * @returns {boolean} whether the node exists in the layout and was focused
+   */
   g.focus = function (id) {
     const n = g.layout.nodes.get(id);
     if (!n) return false;
@@ -64,12 +91,22 @@ export function attachView(g) {
   };
 
   // Move the "current" highlight to a node (used when selecting on the map).
+  /**
+   * @param {string} id
+   * @returns {void}
+   */
   g.setCurrent = function (id) {
     g.currentId = id;
     g.buildMinimap();   // recolour the current dot
     g.requestDraw();
   };
 
+  /**
+   * Focus the best-matching node by title/id: exact match first, then
+   * prefix match, then substring match.
+   * @param {string} query
+   * @returns {string|null} the matched doc id, or null if none / query is blank
+   */
   g.search = function (query) {
     const q = (query || '').trim().toLowerCase();
     if (!q) return null;

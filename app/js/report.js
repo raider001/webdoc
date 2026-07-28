@@ -5,10 +5,22 @@
 // emailed anywhere - it does not need the WebDocs server or app to view.
 // All embedded content is HTML-escaped, so authored text can never inject
 // markup into the report.
+//
+// This is a STRING builder, not a live-DOM one - the finished document is
+// written to a Blob for download, so app/js/html.js's DOM-returning template
+// tag doesn't apply here. Plain JS template literals do the same job for
+// strings: every esc() call stays exactly where it was, just without the '+'
+// noise between them.
 // ---------------------------------------------------------------------------
 
 import { renderInline, renderMarkdown } from './commonmark.js';
 import { sanitizeToFragment } from './sanitize.js';
+
+/** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
+/** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
+/** @typedef {import('./requirements.js').TestStep} TestStep */
+/** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
+/** @typedef {import('./coverage-view.js').TestReportData} TestReportData */
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
@@ -26,8 +38,12 @@ function mdBlock(text) {
   d.appendChild(sanitizeToFragment(renderMarkdown(String(text == null ? '' : text))));
   return d.innerHTML;
 }
-// A test case's steps are [{action, expected}] — render each action + expected as
-// full markdown (the steps are structured data now, not table cells).
+/**
+ * A test case's steps are [{action, expected}] — render each action + expected as
+ * full markdown (the steps are structured data now, not table cells).
+ * @param {TestStep[]} steps
+ * @returns {string} HTML
+ */
 function stepsCell(steps) {
   if (!Array.isArray(steps) || !steps.length) return '<span class="muted">&mdash;</span>';
   return '<ol class="rsteps">' + steps.map(s =>
@@ -41,24 +57,38 @@ function fmtWhen(at) {
   return String(at);
 }
 const LABEL = { pass: 'Pass', fail: 'Fail', partial: 'Partial', untested: 'Untested' };
+// Inline (not a file reference - this report has no external assets) check/cross
+// glyphs for the evidence list, same shapes as icons/check.svg and icons/close.svg.
+const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12L10 17L19 7"/></svg>';
+const CROSS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6L18 18"/><path d="M18 6L6 18"/></svg>';
 function pill(status) {
   const st = status || 'untested';
   return '<span class="pill pill-' + st + '">' + esc(LABEL[st] || st) + '</span>';
 }
+/**
+ * @param {Map<string, CoverageStatus>|Object<string, CoverageStatus>} map
+ * @param {string} id
+ * @returns {CoverageStatus|undefined|null}
+ */
 function statusOf(map, id) {
   if (!map) return null;
   return map.get ? map.get(id) : map[id];
 }
+/**
+ * @param {string[]} ids
+ * @param {string} kind - CSS class suffix ('req'|'test')
+ * @returns {string} HTML
+ */
 function refList(ids, kind) {
   if (!ids || !ids.length) return '<span class="muted">&mdash;</span>';
   return ids.map(id => '<code class="ref ref-' + kind + '">' + esc(id) + '</code>').join(' ');
 }
 
-// data: { title, generatedAt, requirements, tests, reqStatus, testStatus, detail }
-//   requirements: [{ id, description, verifiedBy:[testId], ... }]
-//   tests:        [{ id, name, steps, verifies:[reqId], ... }]
-//   reqStatus/testStatus: Map id -> { status, pct }
-//   detail:       [{ id, auto:[{name,pass,message}], manual:[{name,response,pass}], report }]
+/**
+ * Build a single self-contained, shareable Test Coverage Report as an HTML string.
+ * @param {TestReportData} data
+ * @returns {string}
+ */
 export function generateReportHtml(data) {
   const reqs = data.requirements || [];
   const tests = data.tests || [];
@@ -73,6 +103,12 @@ export function generateReportHtml(data) {
   const reqTotal = reqs.length, testTotal = tests.length;
   const verifiedPct = reqTotal ? Math.round((rc.pass / reqTotal) * 100) : 0;
 
+  /**
+   * @param {Object<string, number>} counts
+   * @param {number} total
+   * @param {string[]} order
+   * @returns {string} HTML
+   */
   function bar(counts, total, order) {
     if (!total) return '<div class="bar"><span class="seg seg-untested" style="width:100%"></span></div>';
     const segs = order.map(k => counts[k] ? '<span class="seg seg-' + k + '" style="width:' + (counts[k] / total * 100) + '%" title="' + esc(LABEL[k]) + ': ' + counts[k] + '"></span>' : '').join('');
@@ -114,11 +150,11 @@ export function generateReportHtml(data) {
     if (!d || (!d.auto.length && !d.manual.length && !d.report)) return '';
     const rows = [];
     d.auto.forEach(a => rows.push(
-      '<li class="' + (a.pass ? 'ev-pass' : 'ev-fail') + '"><span class="dot">' + (a.pass ? '✓' : '✗') + '</span>' +
+      '<li class="' + (a.pass ? 'ev-pass' : 'ev-fail') + '"><span class="dot">' + (a.pass ? CHECK_SVG : CROSS_SVG) + '</span>' +
       '<span class="ev-kind">auto</span> ' + esc(a.name) +
       (a.message ? '<div class="ev-msg">' + esc(a.message) + '</div>' : '') + '</li>'));
     d.manual.forEach(m => rows.push(
-      '<li class="' + (m.pass ? 'ev-pass' : 'ev-fail') + '"><span class="dot">' + (m.pass ? '✓' : '✗') + '</span>' +
+      '<li class="' + (m.pass ? 'ev-pass' : 'ev-fail') + '"><span class="dot">' + (m.pass ? CHECK_SVG : CROSS_SVG) + '</span>' +
       '<span class="ev-kind">manual</span> ' + esc(stripTags(m.name)) +
       (m.response ? '<div class="ev-msg">&rarr; ' + esc(stripTags(m.response)) + '</div>' : '') + '</li>'));
     const runLine = d.run ? '<p class="ev-run">Run' + (d.run.by ? ' by ' + esc(d.run.by) : '') + (d.run.at ? ' · ' + esc(fmtWhen(d.run.at)) : '') + '</p>' : '';
@@ -212,7 +248,8 @@ code{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:12.5p
 .ev-list{list-style:none;margin:0;padding:0}
 .ev-list li{padding:4px 0;border-bottom:1px solid var(--line);font-size:13px}
 .ev-list li:last-child{border-bottom:none}
-.dot{display:inline-block;width:16px;font-weight:700}
+.dot{display:inline-flex;align-items:center;width:16px}
+.dot svg{width:14px;height:14px}
 .ev-pass .dot{color:var(--pass)}.ev-fail .dot{color:var(--fail)}
 .ev-kind{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-right:4px}
 .ev-msg{margin:2px 0 2px 16px;color:var(--fail);font-family:ui-monospace,Consolas,monospace;font-size:12px}

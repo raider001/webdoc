@@ -4,10 +4,27 @@
 import { elem, append } from '../dom.js';
 import { smallBtn } from './ui.js';
 import { editable } from './richtext.js';
+import { plusIcon, minusIcon, closeIcon } from '../icons.js';
 
+/** @param {string} text @returns {HTMLElement} */
 function span(text) { return elem('span', null, text); }
 
 /* ---- table editor ---- */
+
+/**
+ * A table block. Cell values are inline HTML (rich text), not plain strings -
+ * serialize.js converts each cell to Markdown via htmlToMd on save.
+ * @typedef {Object} TableBlock
+ * @property {'table'} type
+ * @property {string[]} headers
+ * @property {string[]} aligns
+ * @property {string[][]} rows
+ */
+
+/**
+ * @param {TableBlock} b
+ * @returns {HTMLElement}
+ */
 export function tableEditor(b) {
   const box = elem('div', 'blk-tablebox');
 
@@ -17,10 +34,10 @@ export function tableEditor(b) {
       elem('tr', null, b.headers.map((h, ci) => cell(h, v => b.headers[ci] = v, true))),
       b.rows.map((row, ri) => elem('tr', null, row.map((c, ci) => cell(c, v => b.rows[ri][ci] = v, false)))));
     const controls = elem('div', 'blk-table-ctr',
-      smallBtn('+ Row', () => { b.rows.push(b.headers.map(() => '')); draw(); }),
-      smallBtn('+ Column', () => { b.headers.push('Column ' + (b.headers.length + 1)); b.aligns.push(''); b.rows.forEach(r => r.push('')); draw(); }),
-      b.rows.length > 0 && smallBtn('− Row', () => { b.rows.pop(); draw(); }),
-      b.headers.length > 1 && smallBtn('− Column', () => { b.headers.pop(); b.aligns.pop(); b.rows.forEach(r => r.pop()); draw(); }));
+      smallBtn([plusIcon(), ' Row'], () => { b.rows.push(b.headers.map(() => '')); draw(); }),
+      smallBtn([plusIcon(), ' Column'], () => { b.headers.push('Column ' + (b.headers.length + 1)); b.aligns.push(''); b.rows.forEach(r => r.push('')); draw(); }),
+      b.rows.length > 0 && smallBtn([minusIcon(), ' Row'], () => { b.rows.pop(); draw(); }),
+      b.headers.length > 1 && smallBtn([minusIcon(), ' Column'], () => { b.headers.pop(); b.aligns.pop(); b.rows.forEach(r => r.pop()); draw(); }));
     append(box, table, controls);
   }
 
@@ -28,6 +45,12 @@ export function tableEditor(b) {
   // links, `code`, and images - not just plain strings. The stored cell value is
   // inline HTML; serialize.js converts each cell via htmlToMd (GFM cells accept
   // inline markdown as long as it stays on one line and pipes are escaped).
+  /**
+   * @param {string} value - inline HTML
+   * @param {(value: string) => void} onChange
+   * @param {boolean} isHeader
+   * @returns {HTMLElement}
+   */
   function cell(value, onChange, isHeader) {
     return elem(isHeader ? 'th' : 'td', null, editable(value || '', 'tablecell', onChange, ''));
   }
@@ -37,6 +60,40 @@ export function tableEditor(b) {
 }
 
 /* ---- requirement widget ---- */
+
+/**
+ * One row of a requirement group: number + description (plain text) plus its
+ * trace-to references (comma-joined ids, e.g. "sys_2, fn_3").
+ * @typedef {Object} RequirementRow
+ * @property {string} no
+ * @property {string} description
+ * @property {string} traceTo
+ */
+
+/**
+ * @typedef {Object} ReqBlock
+ * @property {'requirement'} type
+ * @property {string} group
+ * @property {RequirementRow[]} rows
+ */
+
+/**
+ * A requirement (or in-progress row) offered by the Trace-To / Verifies
+ * reference picker's autocomplete.
+ * @typedef {Object} ReqRef
+ * @property {string} id
+ * @property {string} description
+ * @property {string} [docId]
+ * @property {string} [group]
+ */
+
+/** Every requirement known right now (saved ones plus this doc's in-progress rows). @typedef {() => ReqRef[]} GetReqs */
+
+/**
+ * @param {ReqBlock} b
+ * @param {GetReqs} getReqs
+ * @returns {HTMLElement}
+ */
 export function requirementWidget(b, getReqs) {
   const groupInput = elem('input', { value: b.group || '', placeholder: 'e.g. sys', onInput: () => b.group = groupInput.value.trim() });
   const table = elem('div');
@@ -50,10 +107,16 @@ export function requirementWidget(b, getReqs) {
         field(r.no, v => r.no = v, 'no'),
         field(r.description, v => r.description = v, 'wide'),
         traceToField(r, getReqs),
-        smallBtn('✕', () => { b.rows.splice(i, 1); if (!b.rows.length) b.rows.push({ no: '1', description: '', traceTo: '' }); draw(); }))),
-      elem('button', { class: 'blk-req-add', onClick: () => { b.rows.push({ no: String(b.rows.length + 1), description: '', traceTo: '' }); draw(); } }, '+ Requirement'));
+        smallBtn(closeIcon(), () => { b.rows.splice(i, 1); if (!b.rows.length) b.rows.push({ no: '1', description: '', traceTo: '' }); draw(); }))),
+      elem('button', { class: 'blk-req-add', onClick: () => { b.rows.push({ no: String(b.rows.length + 1), description: '', traceTo: '' }); draw(); } }, plusIcon(), ' Requirement'));
   }
 
+  /**
+   * @param {string} value
+   * @param {(value: string) => void} onChange
+   * @param {string} cls
+   * @returns {HTMLInputElement}
+   */
   function field(value, onChange, cls) {
     const input = elem('input', { class: 'req-f req-f-' + cls, value: value || '', onInput: () => onChange(input.value) });
     return input;
@@ -64,6 +127,28 @@ export function requirementWidget(b, getReqs) {
 }
 
 /* ---- test-case widget: key + name + Verifies picker + action/expected steps ---- */
+
+/**
+ * @typedef {Object} TestStep
+ * @property {string} action - markdown source
+ * @property {string} expected - markdown source
+ */
+
+/**
+ * @typedef {Object} TestCaseBlock
+ * @property {'testcase'} type
+ * @property {string} key
+ * @property {string} name
+ * @property {string[]} [verifies] - requirement/test ids this case verifies
+ * @property {TestStep[]} steps
+ */
+
+/**
+ * @param {TestCaseBlock} b
+ * @param {GetReqs} getReqs
+ * @param {string} [comp] - component id, for the "id: T_{comp}_{key}" preview
+ * @returns {HTMLElement}
+ */
 export function testCaseWidget(b, getReqs, comp) {
   const box = elem('div', 'blk-reqbox blk-tcbox');
   const preview = elem('div', 'blk-tc-preview');
@@ -86,16 +171,28 @@ export function testCaseWidget(b, getReqs, comp) {
       b.steps.map((s, i) => elem('div', 'req-row tc-erow',
         mdField(s.action, v => s.action = v, 'action (markdown ok)…'),
         mdField(s.expected, v => s.expected = v, 'expected response (markdown ok)…'),
-        smallBtn('✕', () => { b.steps.splice(i, 1); if (!b.steps.length) b.steps.push({ action: '', expected: '' }); draw(); }))),
-      elem('button', { class: 'blk-req-add', onClick: () => { b.steps.push({ action: '', expected: '' }); draw(); } }, '+ Step'));
+        smallBtn(closeIcon(), () => { b.steps.splice(i, 1); if (!b.steps.length) b.steps.push({ action: '', expected: '' }); draw(); }))),
+      elem('button', { class: 'blk-req-add', onClick: () => { b.steps.push({ action: '', expected: '' }); draw(); } }, plusIcon(), ' Step'));
   }
 
-  // A single-line text input bound to onChange.
+  /**
+   * A single-line text input bound to onChange.
+   * @param {string} value
+   * @param {(value: string) => void} onChange
+   * @param {string} [placeholder]
+   * @returns {HTMLInputElement}
+   */
   function input(value, onChange, placeholder) {
     const node = elem('input', { value: value || '', placeholder: placeholder || '', onInput: () => onChange(node.value) });
     return node;
   }
-  // A multi-line markdown source field (auto-grows to fit its content).
+  /**
+   * A multi-line markdown source field (auto-grows to fit its content).
+   * @param {string} value
+   * @param {(value: string) => void} onChange
+   * @param {string} [placeholder]
+   * @returns {HTMLTextAreaElement}
+   */
   function mdField(value, onChange, placeholder) {
     const textarea = elem('textarea', { class: 'req-f req-f-md', value: value || '', rows: 1, placeholder: placeholder || '' });
     const grow = () => { textarea.style.height = 'auto'; textarea.style.height = Math.max(30, textarea.scrollHeight) + 'px'; };
@@ -114,11 +211,23 @@ export function testCaseWidget(b, getReqs, comp) {
 let acDrop = null, acItems = [], acActive = -1;
 function closeAc() { if (acDrop) acDrop.hidden = true; acItems = []; acActive = -1; }
 
+/**
+ * @param {RequirementRow} r
+ * @param {GetReqs} getReqs
+ * @returns {HTMLElement}
+ */
 function traceToField(r, getReqs) {
   return refsField((r.traceTo || '').split(',').map(s => s.trim()).filter(Boolean),
     refs => { r.traceTo = refs.join(', '); }, getReqs, 'trace to…');
 }
 
+/**
+ * @param {string[]} initial
+ * @param {(refs: string[]) => void} onChange
+ * @param {GetReqs} getReqs
+ * @param {string} [placeholder]
+ * @returns {HTMLElement}
+ */
 function refsField(initial, onChange, getReqs, placeholder) {
   let refs = (initial || []).slice();
   const chips = elem('div', 'req-trace-chips');
@@ -132,7 +241,7 @@ function refsField(initial, onChange, getReqs, placeholder) {
     refs.forEach((ref, i) => {
       const remove = elem('button', { title: 'Remove', onClick: () => {
         refs.splice(i, 1); drawChips(); sync(); input.placeholder = refs.length ? '' : (placeholder || '');
-      } }, '✕');
+      } }, closeIcon());
       append(chips, elem('span', 'req-chip' + (known.has(ref) ? '' : ' req-chip-unknown'), ref, remove));
     });
   }

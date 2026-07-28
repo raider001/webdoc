@@ -1,60 +1,76 @@
-// md/blocks.js - PHASE 1: block structure. Produces a block tree of plain
-// objects { type, children:[], ... } plus a link-reference-definition map.
-// Open blocks are tracked as an array "path" from the document down to the tip.
-// Also runs the block post-passes: link-ref collection, table extraction, and
-// list tightness detection.
+// md/blocks.js - PHASE 1 block structure: the line-by-line parse loop
+// (parseDocument) building a block tree of { type, children:[], ... } objects +
+// a link-reference-definition map, with open blocks tracked as a "path" array
+// from the document to the tip. Scanning primitives -> ./patterns.js; post-passes
+// (ref-def collection + list tightness) -> ./blockpost.js; GFM tables -> ./tables.js.
 // ---------------------------------------------------------------------------
-import { scanDest, scanTitle, normLabel } from './scan.js';
+import {
+  reThematic, reATX, reFence, reBulletItem, reOrderedItem, reBlockquote, reSetext, reBlank,
+  htmlBlockKind, htmlBlockCloses,
+  leading, removeIndent, stripUpTo, stripCols, expandLeadingTabs
+} from './patterns.js';
+import { stripLeadingRefs, collectRefs, detectTightness } from './blockpost.js';
 import { extractTables } from './tables.js';
 
 /* ===========================================================================
    PHASE 1 - block structure
    Block object: { type, children:[], text?:string[], ... }
    =========================================================================== */
+
+/**
+ * The CommonMark/GFM block-tree node built by makeBlock() during PHASE 1
+ * parsing; walked by the ref-def and tightness post-passes (./blockpost.js),
+ * rewritten in place by the GFM table pass (./tables.js), and read leaf-by-leaf
+ * by the PHASE 2 HTML renderer (./render.js, ../commonmark.js). Deliberately
+ * distinct from the unrelated app/js/blocks.js fenced-block renderer registry.
+ * @typedef {Object} MdBlockNode
+ * @property {string} type
+ * @property {MdBlockNode[]} children
+ * @property {boolean} open
+ * @property {string[]} lines
+ * @property {boolean} lastLineBlank
+ * @property {number} [level] - heading only
+ * @property {string} [listType] - 'ordered'|'bullet', list only
+ * @property {string|number} [marker] - list: bullet char; item: content-indent column
+ * @property {number|null} [start] - list only; always present on list nodes, but only meaningful (non-null) when listType is 'ordered'
+ * @property {boolean} [tight] - list only
+ * @property {string} [taskPrefix] - paragraph only, GFM task-list checkbox HTML
+ * @property {string|number} [kind] - codeblock: 'fenced'|'indented'; htmlblock: 1-7
+ * @property {string} [fence] - fenced codeblock only
+ * @property {number} [fenceLen] - fenced codeblock only
+ * @property {number} [fenceIndent] - fenced codeblock only
+ * @property {string} [info] - fenced codeblock only
+ * @property {(string|null)[]} [aligns] - table only
+ * @property {string[]} [headerCells] - table only
+ * @property {string[][]} [bodyRows] - table only
+ * @property {number} [openedLine] - item only
+ */
+
+/**
+ * @param {string} type
+ * @param {Object<string, *>} [extra] - extra fields merged onto the new node (e.g. level, kind, marker)
+ * @returns {MdBlockNode}
+ */
 export function makeBlock(type, extra) {
   const b = { type: type, children: [], open: true, lines: [], lastLineBlank: false };
   if (extra) for (const k in extra) b[k] = extra[k];
   return b;
 }
 
-const reThematic = /^ {0,3}([-_*])(?:[ \t]*\1){2,}[ \t]*$/;
-const reATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
-const reFence = /^( {0,3})(`{3,}|~{3,})[ \t]*(.*)$/;
-const reBulletItem = /^( *)([-+*])( +|\t|$)(.*)$/;
-const reOrderedItem = /^( *)(\d{1,9})([.)])( +|\t|$)(.*)$/;
-const reBlockquote = /^ {0,3}> ?/;
-const reSetext = /^ {0,3}(=+|-+)[ \t]*$/;
-const reIndentedCode = /^ {4,}/;
-const reBlank = /^[ \t]*$/;
-const reLinkRefDef = /^ {0,3}\[/;
+/**
+ * The {doc, refs} pair tying the finished MdBlockNode tree to its
+ * link-reference-definition table; destructured by commonmark.js's public
+ * renderMarkdown() before rendering.
+ * @typedef {Object} ParsedDocument
+ * @property {MdBlockNode} doc
+ * @property {Object<string, import('./blockpost.js').RefDefinition>} refs
+ */
 
-// HTML block start conditions (types 1-7). Returns end-detector or null.
-function htmlBlockKind(line, canInterrupt) {
-  const l = line.replace(/^ {0,3}/, '');
-  if (/^<(?:script|pre|style|textarea)(?:[ \t>]|$)/i.test(l)) return 1;
-  if (/^<!--/.test(l)) return 2;
-  if (/^<\?/.test(l)) return 3;
-  if (/^<![A-Za-z]/.test(l)) return 4;
-  if (/^<!\[CDATA\[/.test(l)) return 5;
-  if (/^<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>/]|$)/i.test(l)) return 6;
-  if (!canInterrupt) {
-    const OPEN = '<[A-Za-z][A-Za-z0-9-]*(?:[ \\t]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \\t]*=[ \\t]*(?:[^"\'=<>`\\s]+|\'[^\']*\'|"[^"]*"))?)*[ \\t]*/?>';
-    const CLOSE = '</[A-Za-z][A-Za-z0-9-]*[ \\t]*>';
-    if (new RegExp('^(?:' + OPEN + '|' + CLOSE + ')[ \\t]*$').test(l)) return 7;
-  }
-  return 0;
-}
-function htmlBlockCloses(kind, line) {
-  switch (kind) {
-    case 1: return /<\/(?:script|pre|style|textarea)>/i.test(line);
-    case 2: return /-->/.test(line);
-    case 3: return /\?>/.test(line);
-    case 4: return />/.test(line);
-    case 5: return /\]\]>/.test(line);
-    default: return false; // 6,7 close on a blank line (handled by caller)
-  }
-}
-
+/**
+ * PHASE 1 entry point: parse Markdown source into a block tree + ref-def table.
+ * @param {string} src
+ * @returns {ParsedDocument}
+ */
 export function parseDocument(src) {
   const lines = src.replace(/\r\n?/g, '\n').replace(/\0/g, '�').split('\n');
   if (lines.length && lines[lines.length - 1] === '') lines.pop();
@@ -66,7 +82,6 @@ export function parseDocument(src) {
   for (let li = 0; li < lines.length; li++) {
     let raw = lines[li];
     let rest = raw;               // remaining unconsumed part of the line
-    let indent = 0;               // leading spaces already available
     let matched = 1;              // how many open blocks continue
     // Fresh line: every still-open block no longer "ends with a blank line".
     // markBlank() re-sets this for the blocks a blank line actually affects.
@@ -113,12 +128,10 @@ export function parseDocument(src) {
       }
     }
 
-    const tip = path[matched - 1];
-    let container = tip;
+    let container = path[matched - 1];
     // close deeper unmatched open containers later; for now keep the matched prefix
     // ---- 2. try to open new blocks ----
     let leaf = path[path.length - 1];
-    let blockClosedLazy = false;
 
     // Setext heading: an underline under an open (non-empty) paragraph converts it.
     if (matched === path.length - 1 && path[path.length - 1].type === 'paragraph' &&
@@ -356,88 +369,41 @@ export function parseDocument(src) {
   return { doc, refs };
 }
 
-/* ---- block helpers ---- */
-function leading(s) {
-  let spaces = 0, i = 0, col = 0;
-  while (i < s.length) {
-    if (s[i] === ' ') { spaces++; col++; i++; }
-    else if (s[i] === '\t') { const n = 4 - (col % 4); spaces += n; col += n; i++; }
-    else break;
-  }
-  return { spaces: spaces, offset: i };
-}
-function removeIndent(s, n) {
-  // remove up to n columns of leading whitespace
-  let col = 0, i = 0;
-  while (i < s.length && col < n) {
-    if (s[i] === ' ') { col++; i++; }
-    else if (s[i] === '\t') { col += 4 - (col % 4); i++; }
-    else break;
-  }
-  return s.slice(i);
-}
-function removeIndentTo(s, n) { return removeIndent(s, n); }
-function stripUpTo(s, n) {
-  let i = 0, col = 0;
-  while (i < s.length && col < n && (s[i] === ' ' || s[i] === '\t')) { col += s[i] === '\t' ? 4 - (col % 4) : 1; i++; }
-  return s.slice(i);
-}
-// Remove exactly n columns of leading whitespace, splitting a straddling tab.
-function stripCols(s, n) {
-  let i = 0, col = 0;
-  while (i < s.length && col < n) {
-    if (s[i] === '\t') { const w = 4 - (col % 4); if (col + w <= n) { col += w; i++; } else { return ' '.repeat(col + w - n) + s.slice(i + 1); } }
-    else if (s[i] === ' ') { col++; i++; }
-    else break;
-  }
-  return s.slice(i);
-}
-// Expand only the LEADING run of whitespace of `s`, measuring tab stops from
-// `startCol` so a tab after a list marker lands on the correct column.
-function expandLeadingTabs(s, startCol) {
-  let i = 0, col = startCol, out = '';
-  while (i < s.length && (s[i] === ' ' || s[i] === '\t')) {
-    if (s[i] === '\t') { const w = 4 - (col % 4); out += ' '.repeat(w); col += w; }
-    else { out += ' '; col++; }
-    i++;
-  }
-  return out + s.slice(i);
-}
-// True when `rest` is a list marker that would continue (as a sibling item) a
-// list already open in `path` - the deciding factor between "sibling item" and
-// "lazy paragraph continuation" for markers that cannot otherwise interrupt a
-// paragraph (e.g. an ordered marker whose number is not 1).
-function continuesOpenList(rest, path) {
-  if (leading(rest).spaces >= 4) return false;
-  const bm = reBulletItem.exec(rest) || reOrderedItem.exec(rest);
-  if (!bm) return false;
-  const isOrdered = bm.length === 6;
-  const content = isOrdered ? bm[5] : bm[4];
-  if (reBlank.test(content)) return false; // an empty item never continues a paragraph
-  const markerCh = isOrdered ? bm[3] : bm[2];
-  const wantType = isOrdered ? 'ordered' : 'bullet';
-  for (const b of path) {
-    if (b.type === 'list' && b.listType === wantType && b.marker === markerCh) return true;
-  }
-  return false;
-}
+/* ---- parser-state helpers (tightly bound to parseDocument) ---- */
+/** @param {MdBlockNode} b @returns {MdBlockNode|undefined} */
 function last(b) { return b.children[b.children.length - 1]; }
+/**
+ * @param {MdBlockNode} b
+ * @param {string} childType
+ * @returns {boolean}
+ */
 function canContain(b, childType) {
   if (b.type === 'document' || b.type === 'blockquote' || b.type === 'item') return childType !== 'item';
   if (b.type === 'list') return childType === 'item';
   return false;
 }
+/**
+ * @param {MdBlockNode} container
+ * @param {MdBlockNode[]} path - open blocks, document -> tip
+ * @returns {void}
+ */
 function maybeCloseParagraph(container, path) {
   if (last(container) && last(container).type === 'paragraph' && last(container).open) {
     closeBlock(last(container));
     if (path[path.length - 1].type === 'paragraph') path.pop();
   }
 }
-// Would `rest` begin a new block, ending the open paragraph? `interrupting` is
-// true only when the paragraph is the directly-matched container - the extra
-// "can't interrupt a paragraph" limits on list markers (empty content, or an
-// ordered start other than 1) apply only then. When a matching list is the
-// container instead, any marker of that list simply opens a sibling item.
+/**
+ * Would `rest` begin a new block, ending the open paragraph? `interrupting` is
+ * true only when the paragraph is the directly-matched container - the extra
+ * "can't interrupt a paragraph" limits on list markers (empty content, or an
+ * ordered start other than 1) apply only then. When a matching list is the
+ * container instead, any marker of that list simply opens a sibling item.
+ * @param {string} rest
+ * @param {MdBlockNode} leaf - the open paragraph
+ * @param {boolean} interrupting
+ * @returns {boolean}
+ */
 function startsNewBlock(rest, leaf, interrupting) {
   const sp = leading(rest).spaces;
   if (sp >= 4) return false; // indented code can't interrupt a paragraph
@@ -458,6 +424,34 @@ function startsNewBlock(rest, leaf, interrupting) {
   }
   return false;
 }
+/**
+ * True when `rest` is a list marker that would continue (as a sibling item) a
+ * list already open in `path` - the deciding factor between "sibling item" and
+ * "lazy paragraph continuation" for markers that cannot otherwise interrupt a
+ * paragraph (e.g. an ordered marker whose number is not 1).
+ * @param {string} rest
+ * @param {MdBlockNode[]} path - open blocks, document -> tip
+ * @returns {boolean}
+ */
+function continuesOpenList(rest, path) {
+  if (leading(rest).spaces >= 4) return false;
+  const bm = reBulletItem.exec(rest) || reOrderedItem.exec(rest);
+  if (!bm) return false;
+  const isOrdered = bm.length === 6;
+  const content = isOrdered ? bm[5] : bm[4];
+  if (reBlank.test(content)) return false; // an empty item never continues a paragraph
+  const markerCh = isOrdered ? bm[3] : bm[2];
+  const wantType = isOrdered ? 'ordered' : 'bullet';
+  for (const b of path) {
+    if (b.type === 'list' && b.listType === wantType && b.marker === markerCh) return true;
+  }
+  return false;
+}
+/**
+ * @param {MdBlockNode[]} path - open blocks, document -> tip
+ * @param {number} lineNo
+ * @returns {void}
+ */
 function markBlank(path, lineNo) {
   const leaf = path[path.length - 1];
   if (leaf.type === 'paragraph') { closeBlock(path.pop()); }
@@ -475,122 +469,13 @@ function markBlank(path, lineNo) {
   else if (t === 'item' && container.children.length === 0 && container.openedLine === lineNo) val = false;
   for (const b of path) b.lastLineBlank = val;
 }
+/** @param {MdBlockNode} b @returns {void} */
 function closeBlock(b) { b.open = false; }
+/**
+ * @param {MdBlockNode} para
+ * @returns {boolean} true if the paragraph is nothing but link reference definition(s)
+ */
 function isRefOnly(para) {
   const text = para.lines.join('\n');
   return /^ {0,3}\[[^\]]+\]:/.test(text) && !/\n\s*\S/.test(text.replace(/^ {0,3}\[[^\]]+\]:.*$/m, ''));
-}
-
-// Peel any leading link reference definitions off a paragraph, registering
-// them, and return whether inline content still remains (so the caller knows
-// if there is a heading/paragraph left to build). Used when a setext underline
-// arrives before the block post-pass has run.
-function stripLeadingRefs(para, refs) {
-  let text = para.lines.join('\n');
-  let consumed = true, guard = 0;
-  while (consumed && ++guard < 200) {
-    consumed = false;
-    const parsed = parseRefDef(text);
-    if (parsed) {
-      if (!(normLabel(parsed.label) in refs)) refs[normLabel(parsed.label)] = { url: parsed.url, title: parsed.title };
-      text = parsed.rest;
-      consumed = true;
-    }
-  }
-  para.lines = text === '' ? [] : text.split('\n');
-  if (text === '') para.type = 'empty';
-  return text !== '';
-}
-function collectRefs(block, refs) {
-  for (const child of block.children) {
-    if (child.type === 'paragraph') {
-      let text = child.lines.join('\n');
-      let consumed = true;
-      while (consumed) {
-        consumed = false;
-        const parsed = parseRefDef(text);
-        if (parsed) {
-          if (!(normLabel(parsed.label) in refs)) refs[normLabel(parsed.label)] = { url: parsed.url, title: parsed.title };
-          text = parsed.rest;
-          consumed = true;
-        }
-      }
-      child.lines = text === '' ? [] : text.split('\n');
-      if (text === '') child.type = 'empty';
-    } else if (child.children && child.children.length) {
-      collectRefs(child, refs);
-    }
-  }
-}
-function parseRefDef(text) {
-  const m = /^ {0,3}\[/.exec(text);
-  if (!m) return null;
-  let i = 1, label = '', depth = 1;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === '\\' && i + 1 < text.length) { label += c + text[i + 1]; i += 2; continue; }
-    if (c === ']') { i++; break; }
-    if (c === '[') return null;
-    label += c; i++;
-  }
-  if (text[i] !== ':') return null;
-  if (label.trim() === '') return null;
-  i++;
-  // optional whitespace incl up to one newline
-  while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++;
-  if (text[i] === '\n') { i++; while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++; }
-  // destination
-  const destRes = scanDest(text, i);
-  if (!destRes) return null;
-  let url = destRes.dest; i = destRes.pos;
-  // optional title (may be on next line)
-  let save = i, sawSpace = false;
-  while (i < text.length && (text[i] === ' ' || text[i] === '\t')) { i++; sawSpace = true; }
-  let newline = false;
-  if (text[i] === '\n') { newline = true; i++; while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++; }
-  let title = null;
-  const titleRes = (sawSpace || newline) ? scanTitle(text, i) : null;
-  if (titleRes) { title = titleRes.title; i = titleRes.pos; }
-  else i = save;
-  // rest of the line must be blank
-  let j = i;
-  while (j < text.length && (text[j] === ' ' || text[j] === '\t')) j++;
-  if (j < text.length && text[j] !== '\n') {
-    if (title !== null) { /* title made the line non-blank: retry without title */ title = null; i = save; j = i; while (j < text.length && (text[j] === ' ' || text[j] === '\t')) j++; if (j < text.length && text[j] !== '\n') return null; }
-    else return null;
-  }
-  const rest = text.slice(j).replace(/^\n/, '');
-  return { label: label, url: url, title: title, rest: rest };
-}
-
-// A block "ends with a blank line" if it, or (for lists/items) the tail of its
-// last descendant, was marked by a blank line during parsing.
-function tailIsBlank(block) {
-  let b = block, guard = 0;
-  while (b && ++guard < 1000) {
-    if (b.lastLineBlank) return true;
-    if (b.type === 'list' || b.type === 'item') b = b.children[b.children.length - 1];
-    else return false;
-  }
-  return false;
-}
-function detectTightness(block) {
-  for (const child of block.children) {
-    if (child.type === 'list') {
-      let tight = true;
-      const items = child.children;
-      for (let i = 0; i < items.length && tight; i++) {
-        const item = items[i];
-        // a non-final item ending with a blank line makes the list loose
-        if (tailIsBlank(item) && i < items.length - 1) { tight = false; break; }
-        // a blank line between two blocks within an item makes it loose
-        const subs = item.children;
-        for (let k = 0; k < subs.length; k++) {
-          if (tailIsBlank(subs[k]) && (i < items.length - 1 || k < subs.length - 1)) { tight = false; break; }
-        }
-      }
-      child.tight = tight;
-    }
-    if (child.children && child.children.length) detectTightness(child);
-  }
 }

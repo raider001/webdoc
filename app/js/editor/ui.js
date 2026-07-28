@@ -3,25 +3,50 @@
 // they live in one dependency-free place.
 import { elem } from '../dom.js';
 
-export function iconBtn(label, title, onClick) {
-  return elem('button', { class: 'blk-ico', title, onClick }, label);
+/**
+ * @param {Element} icon - an icons.js node, e.g. closeIcon()
+ * @param {string} title
+ * @param {(e: MouseEvent) => void} onClick
+ * @returns {HTMLElement}
+ */
+export function iconBtn(icon, title, onClick) {
+  return elem('button', { class: 'blk-ico', title, onClick }, icon);
 }
-export function smallBtn(label, onClick) {
-  return elem('button', { class: 'blk-small', onClick }, label);
+/**
+ * @param {string|Node|(string|Node)[]} content - text, an icons.js node, or a mix
+ * @param {(e: MouseEvent) => void} onClick
+ * @returns {HTMLElement}
+ */
+export function smallBtn(content, onClick) {
+  return elem('button', { class: 'blk-small', onClick }, content);
 }
+/** @param {string} text @returns {HTMLElement} */
 export function labelEl(text) {
   return elem('label', null, text);
 }
+/**
+ * @param {string} label
+ * @param {string} value
+ * @param {(value: string) => void} onChange
+ * @returns {HTMLElement}
+ */
 export function labeledInput(label, value, onChange) {
   const input = elem('input', { value, onInput: () => onChange(input.value) });
   return elem('div', 'meta-field', labelEl(label), input);
 }
+/**
+ * @param {string} label
+ * @param {string} value
+ * @param {(value: string) => void} onChange
+ * @returns {HTMLElement}
+ */
 export function labeledTextarea(label, value, onChange) {
   const textarea = elem('textarea', { rows: 3, value, onInput: () => onChange(textarea.value) });
   return elem('div', 'meta-field', labelEl(label), textarea);
 }
 
-// The list of block types offered by the "+ Add block" / insert menus.
+/** One entry in the "+ Add block" / insert menus. @typedef {{type: string, label: string}} BlockMenuItem */
+/** The list of block types offered by the "+ Add block" / insert menus. @type {BlockMenuItem[]} */
 const BLOCK_MENU = [
   { type: 'paragraph', label: 'Text' },
   { type: 'heading', label: 'Heading' },
@@ -37,6 +62,10 @@ const BLOCK_MENU = [
 ];
 
 let menuEl = null;
+/**
+ * @param {Element} anchor - the menu is positioned below this element
+ * @param {(type: string) => void} pick - called with the chosen block type
+ */
 export function openBlockMenu(anchor, pick) {
   if (menuEl) menuEl.remove();
   menuEl = elem('div', 'blk-menu',

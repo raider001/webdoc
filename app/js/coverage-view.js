@@ -11,8 +11,45 @@ import { generateReportHtml } from './report.js';
 import { createGraph } from './graph.js';
 import { showReport } from './coverage-report.js';
 
+/** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
+/** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
+/** @typedef {import('./coverage.js').CoverageResults} CoverageResults */
+/** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
+
+/**
+ * The single input object generateReportHtml() (report.js) takes to build the
+ * whole standalone, shareable HTML test report; assembled once by exportReport().
+ * @typedef {Object} TestReportData
+ * @property {string} title
+ * @property {string} generatedAt
+ * @property {RequirementEntry[]} requirements
+ * @property {TestCaseEntry[]} tests
+ * @property {Map<string, CoverageStatus>} reqStatus
+ * @property {Map<string, CoverageStatus>} testStatus
+ * @property {({id:string} & import('./coverage.js').TestEvidence & {run: import('./runner.js').TestRunMeta|null})[]} detail
+ */
+
+/**
+ * The small context object (`cov`) handed to coverage-report.js's panel
+ * builders, giving them the panel DOM, a live-results getter/setter, and
+ * callbacks to rebuild the graph or close the overlay - lets the detail-panel
+ * module stay decoupled from the overlay's own state.
+ * @typedef {Object} CovContext
+ * @property {HTMLElement} panel
+ * @property {HTMLElement} resizeHandle
+ * @property {() => CoverageResults} results
+ * @property {(r: CoverageResults) => void} setResults
+ * @property {() => void} renderGraph
+ * @property {() => void} close
+ */
+
 let covApi = null;
 let covTransform = null;   // last pan/zoom of the coverage map, persisted across reopen + rebuilds
+/**
+ * Wire up the full-screen Test Coverage overlay (button, legend, resize grip,
+ * detail panel) and expose close() through the shared `app` registry.
+ * @returns {void}
+ */
 export function setupCoverageView() {
   const btn = el('covBtn');
   const stage = elem('div');
@@ -29,6 +66,7 @@ export function setupCoverageView() {
   // Status legend, each entry a toggle that hides/shows nodes of that status
   // (and any edges that touch a hidden node), like the map's category legend.
   const statusOff = new Set();
+  /** Sync the current legend on/off filter to the canvas renderer. */
   function applyStatusFilter() {
     // Canvas draw-state (was per-node DOM display toggles): the renderer culls
     // hidden-status nodes and any edge touching one.
@@ -61,9 +99,11 @@ export function setupCoverageView() {
 
   let results = null;
 
-  // Build (or REBUILD) the graph from the current index + results. Called on open
-  // and again whenever a requirement<->test link changes, so the view (nodes AND
-  // edges) reflects an add/remove immediately.
+  /**
+   * Build (or REBUILD) the graph from the current index + results. Called on
+   * open and again whenever a requirement<->test link changes, so the view
+   * (nodes AND edges) reflects an add/remove immediately.
+   */
   const renderGraph = () => {
     const reqs = requirementList();
     if (!reqs.length) { if (covApi) { covApi.destroy(); covApi = null; } stage.innerHTML = '<p class="cov-empty">No requirements found to test.</p>'; return; }
@@ -94,6 +134,7 @@ export function setupCoverageView() {
     applyStatusFilter();   // keep any active legend filter across reopen/rebuild
   };
 
+  /** Open the coverage overlay, loading results and rendering the graph. */
   const open = async () => {
     if (app.closeMapView) app.closeMapView();     // only one overlay view at a time
     overlay.hidden = false;
@@ -103,6 +144,7 @@ export function setupCoverageView() {
     renderGraph();
     el('live').textContent = 'Opened the test coverage view. Click a requirement for its test report.';
   };
+  /** Close the coverage overlay, remembering its pan/zoom transform. */
   const close = () => {
     if (overlay.hidden) return;
     overlay.hidden = true;
@@ -110,9 +152,7 @@ export function setupCoverageView() {
     if (covApi) { covTransform = covApi.getTransform(); covApi.destroy(); covApi = null; }   // remember the view
   };
 
-  // Context handed to the detail-panel module (coverage-report.js): the panel to
-  // draw into, the live results (getter/setter - results is reassigned on reload),
-  // and the callbacks it needs to rebuild the graph + close the overlay.
+  /** @type {CovContext} */
   const cov = {
     panel: panel, resizeHandle: resizeHandle,
     results: () => results,
@@ -120,7 +160,7 @@ export function setupCoverageView() {
     renderGraph: renderGraph, close: close
   };
 
-  // Build and download a self-contained, shareable Test Coverage Report.
+  /** Build and download a self-contained, shareable Test Coverage Report. */
   async function exportReport() {
     const res = results || await loadResults(state.site && state.site.sources);
     const reqs = requirementList();

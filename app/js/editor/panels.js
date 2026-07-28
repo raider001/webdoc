@@ -2,8 +2,27 @@
 // standalone "new document" modal (choose source + web path).
 import { elem, append } from '../dom.js';
 import { labelEl, labeledInput, labeledTextarea } from './ui.js';
+import { closeIcon } from '../icons.js';
+
+/** @typedef {import('./serialize.js').DocMeta} DocMeta */
+/** @typedef {import('../authoring.js').NewDocModalOpts} NewDocModalOpts */
+
+/**
+ * One entry of the "Assumed knowledge" / "Recommended next" doc-picker lists;
+ * only `id` and `title` are read here, out of the fuller GraphDocNode shape
+ * (map-view.js) that callers actually pass in.
+ * @typedef {Object} DocPickerEntry
+ * @property {string} id
+ * @property {string} title
+ */
 
 /* ---- metadata panel (right side of the editor) ---- */
+/**
+ * @param {Partial<DocMeta>} meta - edited in place: title/description directly, assumes/next via docPicker
+ * @param {DocPickerEntry[]} allDocs
+ * @param {string} selfId - the document being edited, excluded from both pickers
+ * @returns {HTMLElement}
+ */
 export function metadataPanel(meta, allDocs, selfId) {
   return elem('aside', 'editor-meta',
     elem('h2', 'editor-meta-h', 'Document metadata'),
@@ -14,8 +33,15 @@ export function metadataPanel(meta, allDocs, selfId) {
   );
 }
 
-// A field that edits a list of document ids as removable chips, with a dropdown to
-// add another (every doc except this one). `arr` is edited in place.
+/**
+ * A field that edits a list of document ids as removable chips, with a
+ * dropdown to add another (every doc except this one).
+ * @param {string} label
+ * @param {string[]} arr - edited in place
+ * @param {DocPickerEntry[]} allDocs
+ * @param {string} selfId
+ * @returns {HTMLElement}
+ */
 function docPicker(label, arr, allDocs, selfId) {
   const chips = elem('div', 'meta-chips');
 
@@ -32,7 +58,7 @@ function docPicker(label, arr, allDocs, selfId) {
   function redraw() {
     chips.textContent = '';
     arr.forEach((id, i) => {
-      const remove = elem('button', { onClick: () => { arr.splice(i, 1); redraw(); } }, '✕');
+      const remove = elem('button', { onClick: () => { arr.splice(i, 1); redraw(); } }, closeIcon());
       append(chips, elem('span', 'meta-chip', id, remove));
     });
   }
@@ -41,8 +67,10 @@ function docPicker(label, arr, allDocs, selfId) {
   return elem('div', 'meta-field', elem('label', null, label), chips, select);
 }
 
-/* ---- new-document modal ----
-   opts: { sources:[{name,component}], exists(id)->bool, onCreate(id) } ---- */
+/* ---- new-document modal ---- */
+/**
+ * @param {NewDocModalOpts} opts
+ */
 export function openNewDocModal(opts) {
   const sourceSelect = elem('select');
   for (const s of opts.sources) append(sourceSelect, elem('option', { value: s.name }, s.name + '  (' + s.component + ')'));
@@ -63,8 +91,11 @@ export function openNewDocModal(opts) {
   );
   const scrim = elem('div', 'modal-scrim', modal);
 
-  // The composed id: <source>/<path>, with any leading/trailing slashes and the
-  // .md extension stripped. Empty when no path has been typed yet.
+  /**
+   * The composed id: <source>/<path>, with any leading/trailing slashes and
+   * the .md extension stripped. Empty when no path has been typed yet.
+   * @returns {string}
+   */
   function docId() {
     const path = pathInput.value.trim().replace(/^\/+|\/+$/g, '').replace(/\.md$/i, '');
     return path ? sourceSelect.value + '/' + path : '';
@@ -97,10 +128,23 @@ export function openNewDocModal(opts) {
   setTimeout(() => pathInput.focus(), 30);
 }
 
-/* ---- confirm dialog (reusable yes/no modal) ----
-   opts: { title, message, confirmLabel, cancelLabel, danger }
-   Returns a Promise that resolves true (confirmed) or false (cancelled).
-   Pass cancelLabel:null for a single-button acknowledgement (alert). */
+/* ---- confirm dialog (reusable yes/no modal) ---- */
+/**
+ * Options for confirmDialog's reusable yes/no modal; built at every
+ * delete/confirm callsite (authoring.js), including a cancelLabel:null
+ * single-button "alert" variant.
+ * @typedef {Object} ConfirmDialogOptions
+ * @property {string} [title]
+ * @property {string} [message]
+ * @property {string} [confirmLabel]
+ * @property {string|null} [cancelLabel] - null for a single-button acknowledgement (alert)
+ * @property {boolean} [danger]
+ */
+
+/**
+ * @param {ConfirmDialogOptions} [opts]
+ * @returns {Promise<boolean>} resolves true if confirmed, false if cancelled
+ */
 export function confirmDialog(opts) {
   opts = opts || {};
   return new Promise(resolve => {

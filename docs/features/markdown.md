@@ -1,5 +1,14 @@
 <!--meta
-{ "title": "Markdown & GFM", "description": "Full CommonMark plus GitHub-flavored tables, task lists, strikethrough and autolinks.", "assumes": ["Docs/overview"], "next": ["Docs/features/highlighting"] }
+{
+  "title": "Markdown & GFM",
+  "description": "Full CommonMark plus GitHub-flavored tables, task lists, strikethrough and autolinks.",
+  "assumes": [
+    "Docs/overview"
+  ],
+  "next": [
+    "Docs/features/highlighting"
+  ]
+}
 -->
 
 # Markdown & GFM
@@ -20,15 +29,15 @@ The renderer covers the full CommonMark block and inline grammar, plus four GFM
 extensions layered on top:
 
 - **CommonMark 0.31.2** — headings, paragraphs, lists, block quotes, code
-  (indented and fenced), thematic breaks, links, images, emphasis and HTML
-  blocks. Conformance sits at 99.5% of the official spec suite, as measured by
-  the in-repo conformance harness (`app/dev/conformance-full.html`).
+(indented and fenced), thematic breaks, links, images, emphasis and HTML
+blocks. Conformance sits at 99.5% of the official spec suite, as measured by
+the in-repo conformance harness (`app/dev/conformance-full.html`).
 - **Tables** — pipe tables with per-column alignment.
 - **Task lists** — `- [x]` / `- [ ]` checkboxes inside list items.
 - **Strikethrough** — `~~text~~`.
 - **Autolinks** — the GFM extension auto-detects and links bare `https://…`
-  URLs, `www.`-prefixed URLs and bare email addresses without any surrounding
-  markup, on top of CommonMark's own `<https://…>` angle-bracket autolinks.
+URLs, `www.`-prefixed URLs and bare email addresses without any surrounding
+markup, on top of CommonMark's own `<https://…>` angle-bracket autolinks.
 
 For how the two-phase parser and the separate sanitizer actually work, see
 [the CommonMark engine](Docs/design/parser). The next stop after this page is
@@ -40,7 +49,7 @@ blocks once the Markdown is parsed.
 Inline text mixes freely: you can write **bold**, *italic*, ***both at once***,
 `inline code`, and ~~struck-through~~ spans in the same sentence. Backticks
 protect their contents, so `**stars stay literal here**` is rendered verbatim.
-Autolinks such as <https://spec.commonmark.org/0.31.2/> are detected and linked
+Autolinks such as [https://spec.commonmark.org/0.31.2/](https://spec.commonmark.org/0.31.2/) are detected and linked
 without any extra markup, and ordinary links like
 [the map view](Docs/features/map) point at other documents by their id.
 
@@ -60,41 +69,39 @@ contents pane mirrors the document outline.
 Unordered, ordered and nested lists all parse, including mixed nesting:
 
 - Rendering
-  - Block phase (structure)
-  - Inline phase (emphasis, links, code)
+Block phase (structure)
+Inline phase (emphasis, links, code)
+- Block phase (structure)
+- Inline phase (emphasis, links, code)
 - Navigation
-  1. Document tree
-  2. On-this-page contents
-  3. Deep-link routing
+Document tree
+On-this-page contents
+Deep-link routing
+- Document tree
+- On-this-page contents
+- Deep-link routing
 - Highlighting
-  - Per-language tokenizers
+Per-language tokenizers
+- Per-language tokenizers
 
 Ordered lists keep their start value and can carry nested content of their own:
 
 1. Fetch the raw Markdown for the requested document.
-2. Extract requirement groups, then parse the remaining Markdown.
-3. Sanitize, number headings, decorate, and inject into the page.
+1. Extract requirement groups, then parse the remaining Markdown.
+1. Sanitize, number headings, decorate, and inject into the page.
 
 ## Task lists
 
 Checkbox items render as real (read-only) checkboxes:
 
-- [x] Parse CommonMark block structure
-- [x] Parse inline emphasis and links
-- [x] Add GFM tables, task lists, strikethrough, autolinks
-- [ ] Anything a documentation reader could still want
+- Parse CommonMark block structure
+- Parse inline emphasis and links
+- Add GFM tables, task lists, strikethrough, autolinks
+- Anything a documentation reader could still want
 
 ## Tables
 
 Pipe tables support left, center and right column alignment:
-
-| Feature        | Syntax             | Aligned |
-| :------------- | :----------------: | ------: |
-| Bold           | `**text**`         |     Yes |
-| Italic         | `*text*`           |     Yes |
-| Strikethrough  | `~~text~~`         |     Yes |
-| Inline code    | `` `text` ``       |     Yes |
-| Autolink       | `<https://…>`      |     Yes |
 
 ## Block quotes and thematic breaks
 
@@ -109,3 +116,9 @@ A thematic break separates one train of thought from the next:
 After the break, normal flow resumes. Combined, these primitives are enough to
 write anything from a one-paragraph note to a fully cross-linked specification —
 all in the same portable Markdown, rendered the same way everywhere.
+
+![image](image.png)
+
+| Column 1 | Column 2 |
+| --- | --- |
+| \*\*\*This \*\*\*is a test |  |

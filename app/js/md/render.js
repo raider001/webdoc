@@ -5,9 +5,24 @@ import { parseInlines } from './inline.js';
 import { esc, decodeInlineText } from './text.js';
 import { renderTable } from './tables.js';
 
+/** @typedef {import('./blocks.js').MdBlockNode} MdBlockNode */
+/** @typedef {import('./blockpost.js').RefDefinition} RefDefinition */
+
+/**
+ * PHASE 2 entry point: render a parsed document's block tree to an HTML string.
+ * @param {MdBlockNode} doc - the document root block, as returned by parseDocument
+ * @param {Object<string, RefDefinition>} refs
+ * @returns {string}
+ */
 export function renderTree(doc, refs) {
   return renderChildren(doc, refs, false);
 }
+/**
+ * @param {MdBlockNode} block
+ * @param {Object<string, RefDefinition>} refs
+ * @param {boolean} tight - whether the enclosing list is tight (suppresses paragraph <p> wrapping)
+ * @returns {string}
+ */
 function renderChildren(block, refs, tight) {
   let out = '';
   for (const child of block.children) {
@@ -16,6 +31,12 @@ function renderChildren(block, refs, tight) {
   }
   return out;
 }
+/**
+ * @param {MdBlockNode} b
+ * @param {Object<string, RefDefinition>} refs
+ * @param {boolean} tight
+ * @returns {string}
+ */
 function renderBlock(b, refs, tight) {
   switch (b.type) {
     case 'paragraph': {

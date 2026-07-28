@@ -11,7 +11,26 @@
 // diagram is not trapped: click or tab into the frame first, then the wheel
 // zooms; the +/- buttons always work.
 // ---------------------------------------------------------------------------
+import { plusIcon, minusIcon, fitIcon } from './icons.js';
 
+/**
+ * Tuning knobs for the pan/zoom viewport, all optional.
+ * @typedef {Object} PanZoomOptions
+ * @property {number} [height] - viewport frame height in px (default 440)
+ * @property {number} [minScale] - minimum zoom scale (default 0.05)
+ * @property {number} [maxScale] - maximum zoom scale (default 8)
+ * @property {number} [padding] - fraction of the frame `fit()` scales content to fill (default 0.94)
+ */
+
+/**
+ * Wrap `content` (typically a rendered SVG, or a div wrapping one) in a
+ * pan/zoom viewport: drag to pan, the +/- buttons (or the wheel once the
+ * frame is focused) to zoom, arrow keys to pan and 0 to fit, plus a one-time
+ * auto-fit once the frame is first measured after mounting.
+ * @param {HTMLElement|SVGElement} content - moved into the viewport's stage, not cloned
+ * @param {PanZoomOptions} [opts]
+ * @returns {HTMLElement} the viewport element, already containing `content` and its zoom controls
+ */
 export function createPanZoom(content, opts = {}) {
   const height = opts.height || 440;
   const minK = opts.minScale || 0.05;
@@ -37,6 +56,20 @@ export function createPanZoom(content, opts = {}) {
   const midX = () => viewport.clientWidth / 2;
   const midY = () => viewport.clientHeight / 2;
 
+  /**
+   * The unscaled (k=1) pixel size of the wrapped content, used by `fit()` to
+   * compute the fit-to-view scale.
+   * @typedef {Object} NaturalSize
+   * @property {number} w
+   * @property {number} h
+   */
+
+  /**
+   * An SVG's own viewBox size (exact, independent of the current scale) if it
+   * has one, otherwise its live bounding rect divided back out by the current
+   * scale `k`.
+   * @returns {NaturalSize}
+   */
   function naturalSize() {
     const svg = (content.tagName && content.tagName.toLowerCase() === 'svg')
       ? content : content.querySelector('svg');
@@ -46,7 +79,13 @@ export function createPanZoom(content, opts = {}) {
     return { w: r.width / (k || 1), h: r.height / (k || 1) };
   }
 
-  // Zoom by `factor`, keeping the point (ax,ay) in viewport coords anchored.
+  /**
+   * Zoom by `factor`, keeping the point (ax, ay) in viewport coords anchored.
+   * @param {number} factor
+   * @param {number} ax
+   * @param {number} ay
+   * @returns {void}
+   */
   function zoomAt(factor, ax, ay) {
     const nk = clamp(k * factor);
     const r = nk / k;
@@ -67,18 +106,25 @@ export function createPanZoom(content, opts = {}) {
 
   const controls = document.createElement('div');
   controls.className = 'pz-controls';
-  const button = (label, title, fn) => {
+  /**
+   * A small toolbar button that stops propagation so it never starts a pan.
+   * @param {Element} icon - an icons.js node, e.g. plusIcon()
+   * @param {string} title - tooltip / aria-label text
+   * @param {() => void} fn - invoked on click
+   * @returns {HTMLButtonElement}
+   */
+  const button = (icon, title, fn) => {
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'pz-btn'; b.textContent = label;
+    b.type = 'button'; b.className = 'pz-btn'; b.appendChild(icon);
     b.title = title; b.setAttribute('aria-label', title);
     b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
     b.addEventListener('pointerdown', (e) => e.stopPropagation()); // don't start a pan
     return b;
   };
   controls.append(
-    button('+', 'Zoom in', () => zoomAt(1.2, midX(), midY())),
-    button('−', 'Zoom out', () => zoomAt(1 / 1.2, midX(), midY())),
-    button('↺', 'Fit to view', fit)
+    button(plusIcon(), 'Zoom in', () => zoomAt(1.2, midX(), midY())),
+    button(minusIcon(), 'Zoom out', () => zoomAt(1 / 1.2, midX(), midY())),
+    button(fitIcon(), 'Fit to view', fit)
   );
   viewport.appendChild(controls);
 
@@ -95,6 +141,10 @@ export function createPanZoom(content, opts = {}) {
     x += e.clientX - px; y += e.clientY - py;
     px = e.clientX; py = e.clientY; apply();
   });
+  /**
+   * @param {PointerEvent} e
+   * @returns {void}
+   */
   const endPan = (e) => {
     if (!dragging) return;
     dragging = false; viewport.classList.remove('is-panning');

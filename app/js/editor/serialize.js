@@ -7,10 +7,66 @@
 import { renderMarkdown } from '../commonmark.js';
 import { sanitizeToFragment } from '../sanitize.js';
 
+/** @typedef {import('../editor.js').Block} Block */
+/** @typedef {import('../editor.js').ImageBlock} ImageBlock */
+/** @typedef {import('../editor.js').HrBlock} HrBlock */
+/** @typedef {import('../editor.js').CodeBlock} CodeBlock */
+/** @typedef {import('./widgets.js').TableBlock} TableBlock */
+/** @typedef {import('./widgets.js').ReqBlock} ReqBlock */
+/** @typedef {import('./widgets.js').TestCaseBlock} TestCaseBlock */
+
+/**
+ * The normalized document front-matter bundle read from / written to the
+ * <!--meta ...--> header. serializeDoc/parseDoc (this file) are the canonical
+ * write/read; editor.js's working `meta` object and editor/panels.js's
+ * metadataPanel share and mutate the same shape.
+ * @typedef {Object} DocMeta
+ * @property {string} title
+ * @property {string} description
+ * @property {string[]} assumes
+ * @property {string[]} next
+ */
+
+/**
+ * @typedef {Object} HeadingMdBlock
+ * @property {'heading'} type
+ * @property {number} level
+ * @property {string} text - Markdown source (already converted from HTML via htmlToMd)
+ */
+/**
+ * @typedef {Object} ParagraphMdBlock
+ * @property {'paragraph'} type
+ * @property {string} text - Markdown source
+ */
+/**
+ * @typedef {Object} QuoteMdBlock
+ * @property {'quote'} type
+ * @property {string} text - Markdown source
+ */
+/**
+ * @typedef {Object} ListMdBlock
+ * @property {'list'} type
+ * @property {boolean} ordered
+ * @property {string[]} items - Markdown source, one entry per list item
+ */
+/**
+ * What blockToMd()/serializeDoc() actually consume: editor.js's onSave already
+ * converts the four inline-HTML block types (heading/paragraph/quote/list) from
+ * their visual, HTML-holding Block form to Markdown source (text/items) before
+ * calling serializeDoc; every other block type is passed through unchanged and
+ * keeps its original Block shape. Deliberately distinct from both editor.js's
+ * HTML-based `Block` and md/blocks.js's parser-tree node `MdBlockNode`.
+ * @typedef {HeadingMdBlock|ParagraphMdBlock|QuoteMdBlock|ListMdBlock|CodeBlock|TableBlock|ImageBlock|HrBlock|ReqBlock|TestCaseBlock} MdSourceBlock
+ */
+
 /* ---- Inline HTML -> Markdown ---- */
 function escInline(s) {
   return s.replace(/([\\`*_[\]<>])/g, '\\$1');
 }
+/**
+ * @param {Node} node
+ * @returns {string}
+ */
 function inlineToMd(node) {
   let out = '';
   node.childNodes.forEach(n => {
@@ -40,12 +96,20 @@ function mdDest(url) {
   if (/[\s()<>]/.test(u)) return '<' + u.replace(/([\\<>])/g, '\\$1') + '>';
   return u;
 }
+/**
+ * @param {string} html
+ * @returns {string}
+ */
 export function htmlToMd(html) {
   const d = document.createElement('div'); d.innerHTML = html || '';
   return inlineToMd(d).trim();
 }
 
 /* ---- Blocks -> Markdown ---- */
+/**
+ * @param {MdSourceBlock} b
+ * @returns {string}
+ */
 function blockToMd(b) {
   switch (b.type) {
     case 'heading': return '#'.repeat(b.level) + ' ' + b.text;
@@ -90,6 +154,11 @@ function blockToMd(b) {
     default: return '';
   }
 }
+/**
+ * @param {Partial<DocMeta>} meta
+ * @param {MdSourceBlock[]} blocks
+ * @returns {string}
+ */
 export function serializeDoc(meta, blocks) {
   const m = {
     title: meta.title || 'Untitled',
@@ -103,6 +172,11 @@ export function serializeDoc(meta, blocks) {
 }
 
 /* ---- Existing document -> { meta, blocks } ---- */
+/**
+ * @param {string} rawBody
+ * @param {Partial<DocMeta>} [docMeta] - existing front-matter to preserve (a brand-new document passes {})
+ * @returns {{meta: DocMeta, blocks: Block[]}}
+ */
 export function parseDoc(rawBody, docMeta) {
   // Pull requirement groups out first (they are meta-wrapped tables) and leave
   // placeholders, so their positions survive; everything else renders to HTML.
@@ -184,16 +258,28 @@ export function parseDoc(rawBody, docMeta) {
   };
   return { meta, blocks };
 }
+/**
+ * @param {Element} el
+ * @returns {string}
+ */
 function stripNums(el) {
   const c = el.cloneNode(true);
   c.querySelectorAll('.secnum').forEach(s => s.remove());
   return c.innerHTML.trim();
 }
+/**
+ * @param {Element|null} code
+ * @returns {string}
+ */
 function langOf(code) {
   if (!code) return '';
   const m = /language-([\w+.#-]+)/.exec(code.className || '');
   return m ? m[1] : '';
 }
+/**
+ * @param {HTMLTableElement} table
+ * @returns {TableBlock}
+ */
 function tableBlock(table) {
   // innerHTML (not textContent): cells carry inline markup - <strong>, <a>, <code>,
   // <img> - which round-trips back to inline Markdown on save.
@@ -204,6 +290,10 @@ function tableBlock(table) {
 }
 
 /* ---- Block-model factory (new blocks from the "+ Add block" menu) ---- */
+/**
+ * @param {string} type - a BLOCK_MENU entry's `type` (editor/ui.js), or 'list-ordered'
+ * @returns {Block}
+ */
 export function newBlock(type) {
   if (type === 'list-ordered') return { type: 'list', ordered: true, itemsHtml: [''] };
   if (type === 'list') return { type: 'list', ordered: false, itemsHtml: [''] };

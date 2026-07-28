@@ -5,9 +5,25 @@
 // fetches the top matches. Ranked title-first by bm25 on the server.
 // ---------------------------------------------------------------------------
 
-// Returns a promise of [{ docId, title, snippet }]. `signal` (optional) is an
-// AbortController signal so the caller can cancel an in-flight request on the next
-// keystroke. A failed/aborted request resolves to [] (the caller shows empty state).
+/**
+ * One ranked match from the server's FTS5 index, as resolved by searchDocs() below.
+ * (The wire response from GET /api/index/search is `{ results: [{ id, title, snippet }] }`;
+ * searchDocs() unwraps `results` and renames `id` to `docId` for consumers.)
+ * @typedef {Object} SearchResult
+ * @property {string} docId
+ * @property {string} title
+ * @property {string} snippet
+ */
+
+/**
+ * Returns a promise of [{ docId, title, snippet }]. `signal` (optional) is an
+ * AbortController signal so the caller can cancel an in-flight request on the next
+ * keystroke. A failed/aborted request resolves to [] (the caller shows empty state).
+ * @param {string} query
+ * @param {number} [limit]
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<SearchResult[]>}
+ */
 export async function searchDocs(query, limit, signal) {
   const q = String(query || '').trim();
   if (!q) return [];

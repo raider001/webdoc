@@ -113,6 +113,11 @@ a:hover { text-decoration:underline; }
 .icon-btn:active { transform:translateY(0); box-shadow:none; }
 .icon-btn[aria-pressed="true"] { background:var(--accent-grad); border-color:transparent; color:#fff; box-shadow:0 4px 15px -3px var(--accent); }
 .icon-btn[aria-pressed="true"]:hover { color:#fff; filter:brightness(1.07); transform:translateY(-1px); }
+/* Icons from js/icons.js (and icons/*.svg): sized to the containing element's
+   own font-size, so the same icon fits every button/badge context without
+   per-usage width/height - each place that wants a bigger or smaller icon
+   already sets its own font-size for exactly this reason. */
+.ico { display:block; width:1em; height:1em; flex-shrink:0; }
 .ic-menu, .ic-menu::before, .ic-menu::after {
   display:block; width:16px; height:2px; background:currentColor; border-radius:2px; position:relative;
 }
@@ -136,7 +141,7 @@ a:hover { text-decoration:underline; }
   border-right:1px solid var(--border); background:var(--surface);
   overflow:auto; padding:20px 12px 40px 18px;
 }
-.toc-cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+.toc-cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); opacity:.9; margin:0 0 10px; }
 #tocList ol { list-style:none; margin:0; padding:0; }
 #tocList a {
   display:block; padding:5px 10px; border-radius:7px; color:var(--muted);
@@ -161,7 +166,8 @@ a:hover { text-decoration:underline; }
 /* ---- Footer --------------------------------------------------------------- */
 .app-footer {
   grid-row:3; display:flex; align-items:flex-start; gap:24px; justify-content:space-between;
-  flex-wrap:wrap; min-height:44px; padding:12px 24px; background:var(--surface);
+  flex-wrap:wrap; min-height:44px; padding:12px 24px;
+  background:linear-gradient(0deg, var(--surface-2), var(--surface));
   border-top:1px solid var(--border); font-size:13.5px; color:var(--muted);
 }
 .foot-group { min-width:0; }
@@ -169,24 +175,28 @@ a:hover { text-decoration:underline; }
 .foot-group.next { margin-left:auto; text-align:right; }
 .foot-cap {
   display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase;
-  color:var(--faint); margin-bottom:5px;
+  color:var(--accent); opacity:.9; margin-bottom:5px;
 }
 .foot-links { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:4px 16px; }
 .foot-group.next .foot-links { justify-content:flex-end; }
-.foot-links a { color:var(--accent); }
-.foot-missing { color:var(--faint); font-size:13px; cursor:help; }
+.foot-links a {
+  color:var(--accent);
+  background-image:var(--accent-grad); background-size:0 2px; background-repeat:no-repeat;
+  background-position:0 100%; text-decoration:none; transition:background-size var(--dur);
+}
+.foot-links a:hover { background-size:100% 2px; }
 
 /* ---- Drawer + scrim ------------------------------------------------------- */
 .scrim { position:fixed; inset:0; background:var(--scrim); z-index:40; }
 .drawer {
   position:fixed; top:0; left:0; z-index:50; width:min(88vw, var(--tree-w));
-  height:100dvh; background:var(--surface); border-right:1px solid var(--border);
-  box-shadow:var(--shadow); display:flex; flex-direction:column;
+  height:100dvh; background:linear-gradient(180deg, var(--surface-2), var(--surface)); border-right:1px solid var(--border);
+  box-shadow:var(--shadow-lg); display:flex; flex-direction:column;
   transform:translateX(0); transition:transform var(--dur) ease;
 }
 .drawer[hidden] { display:none; }
 .drawer-head { display:flex; align-items:center; justify-content:space-between; padding:14px 14px 8px; }
-.drawer-title { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+.drawer-title { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); opacity:.85; }
 .drawer-search { padding:0 14px 10px; }
 .drawer-search input { width:100%; }
 .tree { overflow:auto; padding:4px 8px 24px; }
@@ -203,8 +213,9 @@ a:hover { text-decoration:underline; }
 .tree a.doc-link {
   display:block; padding:5px 8px 5px 22px; border-radius:6px; color:var(--muted);
   font-size:14px; border-left:2px solid transparent;
+  transition:background var(--dur), color var(--dur), border-color var(--dur), transform var(--dur);
 }
-.tree a.doc-link:hover { background:var(--surface-2); color:var(--text); text-decoration:none; }
+.tree a.doc-link:hover { background:var(--surface-2); color:var(--text); text-decoration:none; transform:translateX(2px); }
 
 /* All-documents search results (drawer) */
 .search-results { overflow:auto; padding:6px 8px 24px; }
@@ -213,45 +224,64 @@ a:hover { text-decoration:underline; }
 .search-hit {
   display:flex; flex-direction:column; gap:2px; padding:7px 10px; border-radius:6px;
   color:var(--text); border-left:2px solid transparent;
+  transition:background var(--dur), border-color var(--dur), transform var(--dur);
 }
-.search-hit:hover { background:var(--surface-2); text-decoration:none; border-left-color:var(--accent); }
+.search-hit:hover { background:var(--surface-2); text-decoration:none; border-left-color:var(--accent); transform:translateX(2px); }
 .search-hit-title { font-size:14px; font-weight:500; }
 .search-hit-sub { font-size:12px; color:var(--muted); }
-.tree a.doc-link[aria-current="page"] { background:var(--accent-soft); color:var(--text); border-left-color:var(--accent); font-weight:600; }
-.tree .hit { display:none; }
-.tree.filtering .hit { display:block; }
-.tree.filtering details, .tree.filtering summary, .tree.filtering a.doc-link:not(.hit) { }
+.tree a.doc-link[aria-current="page"] { background:var(--accent-soft); color:var(--text); border-left-color:var(--accent); font-weight:600; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
 
 /* ---- Rendered markdown content ------------------------------------------- */
-.doc h1 { font-size:30px; line-height:1.2; margin:22px 0 8px; letter-spacing:-.01em; }
+.doc h1 { font-size:30px; line-height:1.2; margin:22px 0 8px; letter-spacing:-.01em; padding-bottom:4px; }
+/* Page title: a confident gradient underline. */
+.doc h1::after {
+  content:''; display:block; width:58px; height:4px; margin-top:14px; border-radius:4px;
+  background:var(--accent-grad); box-shadow:0 3px 12px -3px var(--accent);
+}
 .doc h2 { font-size:23px; margin:40px 0 6px; letter-spacing:-.01em; }
 .doc h3 { font-size:18px; margin:26px 0 4px; }
 .doc h4 { font-size:16px; margin:22px 0 4px; }
 .doc h5, .doc h6 { font-size:14px; margin:18px 0 4px; color:var(--muted); }
 .doc .secnum { color:var(--faint); font-variant-numeric:tabular-nums; margin-right:.5em; font-weight:600; }
-.doc h1 .secnum, .doc h2 .secnum { color:var(--accent); }
+.doc h1 .secnum, .doc h2 .secnum {
+  color:var(--accent);
+  background:var(--accent-grad); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
 .doc p { margin:12px 0; }
 .doc-lede { color:var(--muted); font-size:16.5px; line-height:1.5; margin:0 0 10px; }
 .doc ul, .doc ol { padding-left:24px; margin:12px 0; }
 .doc li { margin:5px 0; }
 .doc a { color:var(--accent); }
+/* In-body links: accent-coloured, with a gradient underline that grows on hover. */
+.doc a:not([data-external]):not(.doc-link-broken) {
+  background-image:var(--accent-grad); background-size:0 2px; background-repeat:no-repeat;
+  background-position:0 100%; text-decoration:none;
+  transition:background-size var(--dur), color var(--dur);
+}
+.doc a:not([data-external]):not(.doc-link-broken):hover { background-size:100% 2px; color:var(--accent-hover); }
 .doc code {
   background:var(--code-bg); border:1px solid var(--code-border); border-radius:4px;
   padding:.08em .38em; font-size:.88em; font-family:ui-monospace,"Cascadia Code",Consolas,monospace;
+  color:var(--accent-hover);
 }
 .doc pre {
   background:var(--code-bg); border:1px solid var(--code-border); border-radius:var(--radius);
-  padding:14px 16px; overflow-x:auto; margin:14px 0;
+  padding:14px 16px; overflow-x:auto; margin:14px 0; box-shadow:var(--shadow-sm);
 }
-.doc pre code { background:none; border:none; padding:0; font-size:13.5px; line-height:1.55; }
+.doc pre code { background:none; border:none; padding:0; font-size:13.5px; line-height:1.55; color:var(--code-text); }
 .doc blockquote {
-  margin:14px 0; padding:2px 16px; border-left:3px solid var(--border-strong);
-  color:var(--muted);
+  margin:14px 0; padding:10px 16px; border-left:0; border-radius:0 var(--radius) var(--radius) 0;
+  color:var(--text); background:linear-gradient(90deg, var(--accent-soft), transparent 92%); position:relative;
+}
+.doc blockquote::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:3px; background:var(--accent-grad);
 }
 .doc hr { border:none; border-top:1px solid var(--border); margin:32px 0; }
-.doc table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; }
+.doc table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow-sm); }
 .doc th, .doc td { border:1px solid var(--border); padding:8px 11px; text-align:left; }
-.doc th { background:var(--surface-2); }
+.doc th { background:linear-gradient(180deg, var(--surface-2), var(--surface)); font-weight:700; }
+.doc tbody tr { transition:background var(--dur); }
+.doc tbody tr:hover { background:color-mix(in srgb, var(--accent) 6%, transparent); }
 .doc img { max-width:100%; height:auto; }
 /* Block images (a screenshot on its own line becomes <p><img>) get a subtle
    frame so UI captures read as captures. */
@@ -293,14 +323,6 @@ a:hover { text-decoration:underline; }
   vertical-align:baseline; text-decoration:none;
 }
 .doc a.doc-link-broken { color:var(--recnext); text-decoration:underline dotted; cursor:help; }
-
-/* Interim renderer banner (removed once the full CommonMark engine lands). */
-.interim-banner {
-  max-width:var(--content-max); margin:16px auto 0; padding:10px 14px;
-  background:var(--warn-bg); border:1px solid var(--warn-border); border-left-width:3px;
-  border-radius:8px; color:var(--warn-text); font-size:13px;
-}
-.interim-banner strong { color:var(--warn-text); }
 
 .doc-error { max-width:var(--content-max); margin:40px auto; padding:20px;
   border:1px solid var(--border); border-left:3px solid var(--recnext); border-radius:8px;
@@ -344,70 +366,6 @@ a:hover { text-decoration:underline; }
 @keyframes index-slide { 0%{margin-left:-40%} 100%{margin-left:102%} }
 .index-loading-stat { margin-top:14px; font-size:13.5px; color:var(--text); font-variant-numeric:tabular-nums; }
 .index-loading-note { margin-top:6px; font-size:12px; color:var(--muted); line-height:1.4; }
-
-/* ============================================================================
-   Visual polish - the "pop": gradient accents, depth, and micro-interactions
-   layered over the functional base. All colour still comes from the theme tokens,
-   so light and dark both inherit it. Appended last so it wins the cascade.
-   ========================================================================== */
-
-/* Accent eyebrows on the section captions. */
-.toc-cap, .foot-cap { color:var(--accent); opacity:.9; }
-.drawer-title { color:var(--accent); opacity:.85; }
-
-/* Tree + search results: current/hover get the accent + a hair of motion. */
-.tree a.doc-link { transition:background var(--dur), color var(--dur), border-color var(--dur), transform var(--dur); }
-.tree a.doc-link:hover { transform:translateX(2px); }
-.tree a.doc-link[aria-current="page"] { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
-.search-hit { transition:background var(--dur), border-color var(--dur), transform var(--dur); }
-.search-hit:hover { transform:translateX(2px); }
-
-/* Page title: a confident gradient underline; section numbers go gradient. */
-.doc h1 { padding-bottom:4px; }
-.doc h1::after {
-  content:''; display:block; width:58px; height:4px; margin-top:14px; border-radius:4px;
-  background:var(--accent-grad); box-shadow:0 3px 12px -3px var(--accent);
-}
-.doc h1 .secnum, .doc h2 .secnum {
-  background:var(--accent-grad); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
-}
-
-/* In-body links: accent-coloured, with a gradient underline that grows on hover. */
-.doc a:not([data-external]):not(.doc-link-broken) {
-  background-image:var(--accent-grad); background-size:0 2px; background-repeat:no-repeat;
-  background-position:0 100%; text-decoration:none;
-  transition:background-size var(--dur), color var(--dur);
-}
-.doc a:not([data-external]):not(.doc-link-broken):hover { background-size:100% 2px; color:var(--accent-hover); }
-
-/* Inline code stands apart from prose with a touch of accent; blocks gain depth. */
-.doc code { color:var(--accent-hover); }
-.doc pre { box-shadow:var(--shadow-sm); }
-.doc pre code { color:var(--code-text); }
-
-/* Blockquotes: soft accent panel with a gradient rule down the side. */
-.doc blockquote {
-  border-left:0; padding:10px 16px; border-radius:0 var(--radius) var(--radius) 0; color:var(--text);
-  background:linear-gradient(90deg, var(--accent-soft), transparent 92%); position:relative;
-}
-.doc blockquote::before {
-  content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:3px; background:var(--accent-grad);
-}
-
-/* Tables: rounded frame, gradient header, hover rows. */
-.doc table { border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow-sm); }
-.doc th { background:linear-gradient(180deg, var(--surface-2), var(--surface)); font-weight:700; }
-.doc tbody tr { transition:background var(--dur); }
-.doc tbody tr:hover { background:color-mix(in srgb, var(--accent) 6%, transparent); }
-
-/* Footer + drawer: subtle gradient panels; footer links grow a gradient underline. */
-.app-footer { background:linear-gradient(0deg, var(--surface-2), var(--surface)); }
-.foot-links a {
-  background-image:var(--accent-grad); background-size:0 2px; background-repeat:no-repeat;
-  background-position:0 100%; text-decoration:none; transition:background-size var(--dur);
-}
-.foot-links a:hover { background-size:100% 2px; }
-.drawer { background:linear-gradient(180deg, var(--surface-2), var(--surface)); box-shadow:var(--shadow-lg); }
 
 @media (prefers-reduced-motion:reduce) {
   * , *::before, *::after { transition-duration:.001ms !important; animation-duration:.001ms !important; }

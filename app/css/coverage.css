@@ -6,24 +6,6 @@
   --cov-pass: #3fb950; --cov-fail: #f85149; --cov-partial: #d29922; --cov-untested: #58a6ff;
 }
 
-/* Requirement nodes coloured by rolled-up test status. */
-.graph-node-st-pass .graph-node-box     { stroke: var(--cov-pass); stroke-width: 2.5; fill: color-mix(in srgb, var(--cov-pass) 12%, var(--surface)); }
-.graph-node-st-fail .graph-node-box     { stroke: var(--cov-fail); stroke-width: 2.5; fill: color-mix(in srgb, var(--cov-fail) 14%, var(--surface)); }
-.graph-node-st-partial .graph-node-box  { stroke: var(--cov-partial); stroke-width: 2.5; fill: color-mix(in srgb, var(--cov-partial) 14%, var(--surface)); }
-.graph-node-st-untested .graph-node-box { stroke: var(--cov-untested); stroke-width: 2; stroke-dasharray: 4 3; fill: var(--surface); }
-
-.graph-node-cov { font-size: 11px; font-weight: 700; margin-top: 2px; }
-.graph-node-st-pass .graph-node-cov     { color: var(--cov-pass); }
-.graph-node-st-fail .graph-node-cov     { color: var(--cov-fail); }
-.graph-node-st-partial .graph-node-cov  { color: var(--cov-partial); }
-.graph-node-st-untested .graph-node-cov { color: var(--cov-untested); }
-.cov-overlay .graph-node-title { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; }
-/* Test-case nodes: titles are prose names (not ids), so drop the monospace, and
-   tint the box so a test reads differently from a requirement at a glance. */
-.cov-overlay .graph-node-kind-test .graph-node-title { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12.5px; font-weight: 600; }
-.cov-overlay .graph-node-kind-test .graph-node-box { stroke-dasharray: 1 0; }
-.cov-overlay .graph-node-kind-test .graph-node-cov::before { content: "test · "; color: var(--faint); font-weight: 400; }
-
 /* Test-case report panel (clicking a test node). */
 .tc-report-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tc-report-sub code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
@@ -39,12 +21,6 @@
 .tc-step-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin: 6px 0 2px; }
 .tc-step-exp { font-size: 12.5px; color: var(--muted); }
 .tc-step-actual { color: var(--text); font-size: 12.5px; margin-top: 5px; }
-/* Boxes are auto-sized to fit the largest requirement, so show the full id and
-   description instead of clamping them to two clipped lines. */
-.cov-overlay .graph-node-title, .cov-overlay .graph-node-desc {
-  -webkit-line-clamp: unset; display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere;
-}
-
 /* Status legend (bottom-left, like the map legend). Each entry is a toggle that
    filters the view to/from that status. */
 .cov-legend { position: absolute; left: 12px; bottom: 12px; z-index: 3; display: flex; flex-wrap: wrap; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12px; box-shadow: var(--shadow); }
@@ -72,35 +48,9 @@
 .cov-report-sec { margin-top: 14px; }
 .cov-report-sec h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
 .cov-report-empty { color: var(--faint); font-size: 12.5px; margin: 0; }
-.cov-test { display: grid; grid-template-columns: 18px 1fr; gap: 3px 6px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-.cov-test-dot { font-weight: 700; text-align: center; }
-.cov-test.is-pass .cov-test-dot { color: var(--cov-pass); }
-.cov-test.is-fail .cov-test-dot { color: var(--cov-fail); }
-.cov-test-msg { grid-column: 2; color: var(--cov-fail); font-size: 12px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 .cov-report-note { margin-top: 12px; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; font-size: 12.5px; color: var(--muted); }
 .cov-empty { padding: 48px; color: var(--muted); text-align: center; }
 
-/* Manual-test editor (inside the report panel). A requirement can hold several
-   named tests (cards); each card has pass/fail steps (rich-text step + response)
-   and notes. All text fields are WYSIWYG (.wysiwyg contenteditable). */
-.cov-mtest { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--bg); }
-.cov-mtest-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.cov-mtest-name { flex: 1; height: 30px; border: 1px solid var(--border); border-radius: 6px; padding: 0 9px; background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; }
-.cov-mtest-del { border: none; background: none; color: var(--faint); cursor: pointer; font-size: 13px; padding: 4px; }
-.cov-mtest-del:hover { color: var(--cov-fail); }
-
-.cov-medit-item { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin: 6px 0; background: var(--surface); }
-.cov-medit-line { display: grid; grid-template-columns: 26px 1fr 22px; gap: 6px; align-items: start; }
-.cov-medit-toggle { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-weight: 700; background: var(--bg); }
-.cov-medit-toggle.is-pass { color: var(--cov-pass); border-color: var(--cov-pass); background: color-mix(in srgb, var(--cov-pass) 12%, var(--bg)); }
-.cov-medit-toggle.is-fail { color: var(--cov-fail); border-color: var(--cov-fail); background: color-mix(in srgb, var(--cov-fail) 12%, var(--bg)); }
-.cov-medit-del { border: none; background: none; color: var(--faint); cursor: pointer; font-size: 11px; padding-top: 5px; }
-.cov-medit-del:hover { color: var(--cov-fail); }
-.cov-medit-add { margin-top: 6px; height: 28px; padding: 0 10px; border: 1px dashed var(--border-strong); background: none; color: var(--muted); border-radius: 6px; cursor: pointer; font-size: 12.5px; }
-.cov-medit-add:hover { border-color: var(--accent); color: var(--accent); }
-.cov-medit-addtest { margin-top: 8px; height: 32px; padding: 0 12px; border: 1px dashed var(--border-strong); background: none; color: var(--muted); border-radius: 7px; cursor: pointer; font-size: 13px; width: 100%; }
-.cov-medit-addtest:hover { border-color: var(--accent); color: var(--accent); }
-.cov-medit-rlabel { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin: 10px 0 4px; }
 .cov-medit-bar { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .cov-medit-status { font-size: 12px; color: var(--muted); }
 
@@ -110,12 +60,6 @@
 .wysiwyg:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .wysiwyg:empty::before { content: attr(data-ph); color: var(--faint); pointer-events: none; }
 .wysiwyg code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .92em; background: var(--surface-2); border-radius: 4px; padding: 1px 4px; }
-.cov-medit-step { min-width: 0; }
-.cov-medit-response { margin-top: 6px; background: var(--surface); color: var(--muted); font-size: 12.5px; }
-.cov-medit-report { color: var(--muted); }
-
-.cov-medit-note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); }
-
 /* Requirement panel: the test cases that verify it, + a search-to-link box. */
 .cov-vtest { display: flex; align-items: stretch; margin: 4px 0; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--bg); }
 .cov-vtest:hover { border-color: var(--accent); }
@@ -190,7 +134,7 @@ body.is-running { overflow: hidden; }
 .run-notes { min-height: 34px; }
 
 /* Per-test "Run" button on a test-case block in a document. */
-.tc-run { margin-left: auto; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px;
+.tc-run { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg); color: var(--muted); cursor: pointer; font-size: 12px; }
 .tc-run:hover { border-color: var(--accent); color: var(--accent); }
 

@@ -5,13 +5,38 @@
 // the view/edit callbacks are read off the shared context `g`. Sets g.destroy.
 import { DRAG_THRESHOLD, MINI_W, MINI_H } from './util.js';
 
+/** @typedef {import('../graph.js').GraphContext} GraphContext */
+
+/**
+ * Convert client (screen) pixel coordinates to world coordinates under the
+ * current pan/zoom transform.
+ * @param {GraphContext} g
+ * @param {number} clientX
+ * @param {number} clientY
+ * @returns {{wx: number, wy: number}}
+ */
 function toWorld(g, clientX, clientY) {
   const r = g.svgEl.getBoundingClientRect();
   return { wx: (clientX - r.left - g.tx) / g.k, wy: (clientY - r.top - g.ty) / g.k };
 }
 
+/**
+ * Wire up pointer/wheel/keyboard interaction on the canvas + chrome buttons,
+ * fit/restore the initial view, and set g.destroy.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 export function wireInteractions(g) {
   const listeners = [];
+  /**
+   * addEventListener + remember the registration so g.destroy can remove
+   * every listener later.
+   * @param {EventTarget} target
+   * @param {string} type
+   * @param {(e: Event) => void} fn
+   * @param {boolean|AddEventListenerOptions} [opt]
+   * @returns {void}
+   */
   function on(target, type, fn, opt) { target.addEventListener(type, fn, opt); listeners.push({ target: target, type: type, fn: fn, opt: opt }); }
 
   const svgEl = g.svgEl;   // the <canvas> (kept the name so the CSS/pan code is unchanged)
@@ -103,7 +128,7 @@ export function wireInteractions(g) {
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (g.selectedEdge && g.onDisconnect) {
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation();   // consume it here - edit mode's Delete is for links, never the document handler below
         const se = g.selectedEdge; g.clearSelectedEdge(); g.updateHint();
         g.onDisconnect(se.from, se.to, se.type);
       }
@@ -118,7 +143,7 @@ export function wireInteractions(g) {
   on(document, 'keydown', function (e) {
     if (e.key !== 'Delete') return;
     if (!g.onDelete) return;
-    if (g.editMode && (g.selectedEdge || g.pendingSource)) return;
+    if (g.editMode) return;   // edit-connections mode: Delete only ever removes a selected link, never a document
     const tag = (e.target && e.target.tagName) || '';
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;
     const id = g.currentId;

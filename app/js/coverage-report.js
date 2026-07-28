@@ -5,21 +5,65 @@
 // 400 lines. Everything the panel needs from the overlay (the panel element, the
 // live results, rebuild + close) arrives through the `cov` context object.
 import { elem, append } from './dom.js';
+import { html } from './html.js';
 import { state, app } from './app-shell.js';
 import { requirementList, testList, blockMarkdown } from './requirements.js';
 import { loadResults, computeTestStatus, testsFor, manualTests, connectAutomated, disconnectAutomated, rememberAutoUrl, fetchXUnitCatalog } from './coverage.js';
 import { sanitizeToFragment } from './sanitize.js';
+import { checkIcon, closeIcon, circleIcon, playIcon, externalLinkIcon } from './icons.js';
 
-const glyph = (status) => status === 'pass' ? '✓' : status === 'fail' ? '✕' : '○';
+/** @typedef {import('./coverage-view.js').CovContext} CovContext */
+/** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
+/** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
+/** @typedef {import('./requirements.js').TestStep} TestStep */
+/** @typedef {import('./coverage.js').AutoTestCatalogEntry} AutoTestCatalogEntry */
+/** @typedef {import('./coverage.js').AutoTestRef} AutoTestRef */
+
+const glyph = (status) => status === 'pass' ? checkIcon() : status === 'fail' ? closeIcon() : circleIcon();
 const statusDot = (status) => elem('span', 'cov-vtest-dot tc-result-' + status, glyph(status));
-// The panel's header row: a title + a close (✕) button that hides the panel.
+/**
+ * One recorded step: the numbered action + expected response, the pass/fail dot
+ * (once recorded) and the actual response (once run). The outer class carries
+ * the pass/fail tint, so it stays elem() - everything inside it is static shape.
+ * @param {TestStep} s - the step's action/expected definition
+ * @param {number} i - zero-based step index
+ * @param {{step?:string, response?:string, pass?:boolean|null}} [ex] - this step's recorded result, if any
+ * @returns {HTMLElement}
+ */
+function stepReport(s, i, ex) {
+  const hasResult = ex && typeof ex.pass === 'boolean';
+  const resultDot = hasResult && elem('span', 'tc-step-dot', ex.pass ? checkIcon() : closeIcon());
+  const actual = ex && ex.response && elem('div', 'tc-step-actual', 'Actual: ', sanitizeToFragment(ex.response));
+  const body = html`
+    <div class="tc-step-head">
+      <span class="tc-step-n">${i + 1}.</span>
+      <div class="tc-step-act tc-md">${blockMarkdown(s.action)}</div>
+      ${resultDot}
+    </div>
+    <div class="tc-step-exp"><div class="tc-step-lbl">Expected</div><div class="tc-md">${blockMarkdown(s.expected)}</div></div>
+    ${actual}
+  `;
+  return elem('div', 'tc-step' + (hasResult ? (ex.pass ? ' is-pass' : ' is-fail') : ''), body);
+}
+
+/**
+ * The panel's header row: a title + a close (✕) button that hides the panel.
+ * @param {string} title
+ * @param {HTMLElement} panel
+ * @returns {HTMLElement}
+ */
 function reportHead(title, panel) {
   return elem('div', 'cov-report-head',
     elem('h2', null, title),
-    elem('button', { class: 'cov-report-close', title: 'Close', onClick: () => { panel.hidden = true; } }, '✕'));
+    elem('button', { class: 'cov-report-close', title: 'Close', onClick: () => { panel.hidden = true; } }, closeIcon()));
 }
 
-// A node was selected: requirement -> its report; test case -> its test report.
+/**
+ * A node was selected: requirement -> its report; test case -> its test report.
+ * @param {string} id
+ * @param {CovContext} cov
+ * @returns {void}
+ */
 export function showReport(id, cov) {
   if (id && id.indexOf('T_') === 0) return showTestReport(id, cov);
   const panel = cov.panel;
@@ -30,13 +74,18 @@ export function showReport(id, cov) {
   append(panel,
     reportHead(id, panel),
     req && req.description && elem('p', 'cov-report-desc', req.description),
-    req && elem('a', { class: 'cov-report-link', href: '#/' + req.docId + '?req=' + id, onClick: () => cov.close() }, 'Open in its document ↗'),
+    req && elem('a', { class: 'cov-report-link', href: '#/' + req.docId + '?req=' + id, onClick: () => cov.close() }, 'Open in its document ', externalLinkIcon()),
     buildAutomated(id, cov),
     buildVerifyingTests(id, cov));
 }
 
-// Test-case node clicked: show its definition (action/expected), the recorded
-// result (actual/pass) and run metadata, plus a "Run this test" button.
+/**
+ * Test-case node clicked: show its definition (action/expected), the recorded
+ * result (actual/pass) and run metadata, plus a "Run this test" button.
+ * @param {string} id
+ * @param {CovContext} cov
+ * @returns {void}
+ */
 function showTestReport(id, cov) {
   const panel = cov.panel;
   const results = cov.results();
@@ -63,7 +112,7 @@ function showTestReport(id, cov) {
     });
     append(panel, line);
   }
-  if (t) append(panel, elem('a', { class: 'cov-report-link', href: '#/' + t.docId + '?test=' + id, onClick: () => cov.close() }, 'Open in its document ↗'));
+  if (t) append(panel, elem('a', { class: 'cov-report-link', href: '#/' + t.docId + '?test=' + id, onClick: () => cov.close() }, 'Open in its document ', externalLinkIcon()));
   if (run) {
     const when = run.at && !isNaN(new Date(run.at).getTime()) ? new Date(run.at).toLocaleString() : '';
     append(panel, elem('p', 'cov-report-note', 'Last run' + (run.by ? ' by ' + run.by : '') + (when ? ' · ' + when : '')));
@@ -71,27 +120,22 @@ function showTestReport(id, cov) {
 
   const steps = (t && t.steps) || [];
   const sec = elem('div', 'cov-report-sec', elem('h3', null, 'Steps (' + steps.length + ')'));
-  steps.forEach((s, i) => {
-    const ex = exSteps[i];
-    const hasResult = ex && typeof ex.pass === 'boolean';   // null = not recorded, don't paint it red
-    append(sec, elem('div', 'tc-step' + (hasResult ? (ex.pass ? ' is-pass' : ' is-fail') : ''),
-      elem('div', 'tc-step-head',
-        elem('span', 'tc-step-n', (i + 1) + '.'),
-        elem('div', 'tc-step-act tc-md', blockMarkdown(s.action)),
-        hasResult && elem('span', 'tc-step-dot', ex.pass ? '✓' : '✕')),
-      elem('div', 'tc-step-exp', elem('div', 'tc-step-lbl', 'Expected'), elem('div', 'tc-md', blockMarkdown(s.expected))),
-      ex && ex.response && elem('div', 'tc-step-actual', 'Actual: ', sanitizeToFragment(ex.response))));
-  });
+  steps.forEach((s, i) => append(sec, stepReport(s, i, exSteps[i])));   // exSteps[i]: null = not recorded, don't paint it red
   append(panel, sec, buildAutomated(id, cov));
 
   append(panel, elem('div', 'cov-medit-bar',
-    elem('button', { type: 'button', class: 'btn btn-primary', onClick: () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: id } })) }, '▷ Run this test')));
+    elem('button', { type: 'button', class: 'btn btn-primary', onClick: () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: id } })) }, playIcon(), ' Run this test')));
 }
 
-// The test cases that verify a requirement (its calculated Verified By): read-only
-// + clickable, plus a search box to LINK an existing test case (which adds this
-// requirement to that test's `verifies` in the test's doc). Test cases are authored
-// in documents / the editor, never here.
+/**
+ * The test cases that verify a requirement (its calculated Verified By): read-only
+ * + clickable, plus a search box to LINK an existing test case (which adds this
+ * requirement to that test's `verifies` in the test's doc). Test cases are authored
+ * in documents / the editor, never here.
+ * @param {string} reqId
+ * @param {CovContext} cov
+ * @returns {HTMLElement}
+ */
 function buildVerifyingTests(reqId, cov) {
   const results = cov.results();
   const h = elem('h3');
@@ -124,7 +168,7 @@ function buildVerifyingTests(reqId, cov) {
           stEl.textContent = ok ? 'Unlinked ' + tid : 'Unlink failed';
           if (ok) { draw(); cov.renderGraph(); } else rm.disabled = false;
         }
-      }, '✕');
+      }, closeIcon());
       append(list, elem('div', 'cov-vtest', openBtn, rm));
     });
   }
@@ -155,9 +199,14 @@ function buildVerifyingTests(reqId, cov) {
   return sec;
 }
 
-// The automated tests for a requirement / test: any the xUnit self-declares
-// (read-only) plus ones the user has CONNECTED (with a ✕ to disconnect), a
-// search over every discovered xUnit test, and an "add xUnit URL" field.
+/**
+ * The automated tests for a requirement / test: any the xUnit self-declares
+ * (read-only) plus ones the user has CONNECTED (with a ✕ to disconnect), a
+ * search over every discovered xUnit test, and an "add xUnit URL" field.
+ * @param {string} id
+ * @param {CovContext} cov
+ * @returns {HTMLElement}
+ */
 function buildAutomated(id, cov) {
   const results = cov.results();
   const h = elem('h3');
@@ -189,12 +238,12 @@ function buildAutomated(id, cov) {
       const rm = elem('button', {
         type: 'button', class: 'cov-vtest-rm', title: 'Disconnect this automated test',
         onClick: async () => { rm.disabled = true; stEl.textContent = 'Disconnecting…'; const ok = await disconnectAutomated(id, tc, state.site && state.site.sources); if (ok) reload(); else rm.disabled = false; }
-      }, '✕');
+      }, closeIcon());
       append(list, elem('div', 'cov-vtest', info, rm));
     });
     declared.forEach(a => append(list, elem('div', 'cov-vtest cov-auto-declared',
       elem('div', 'cov-vtest-open cov-auto-info',
-        elem('span', 'cov-vtest-dot tc-result-' + (a.pass ? 'pass' : 'fail'), a.pass ? '✓' : '✕'),
+        elem('span', 'cov-vtest-dot tc-result-' + (a.pass ? 'pass' : 'fail'), a.pass ? checkIcon() : closeIcon()),
         elem('span', 'cov-vtest-name', a.name),
         elem('span', 'cov-vtest-id', 'declared')))));
   }
@@ -210,7 +259,7 @@ function buildAutomated(id, cov) {
     items.forEach(c => append(drop, elem('div', {
       class: 'cov-vtest-opt',
       onMousedown: async (e) => { e.preventDefault(); drop.hidden = true; inp.value = ''; stEl.textContent = 'Connecting…'; const ok = await connectAutomated(id, c, state.site && state.site.sources); if (ok) reload(); }
-    }, elem('span', 'cov-vtest-optname', c.name), elem('span', 'cov-vtest-optid', (c.classname || c.suite || '') + ' ' + (c.pass ? '✓' : '✕')))));
+    }, elem('span', 'cov-vtest-optname', c.name), elem('span', 'cov-vtest-optid', (c.classname || c.suite || '') + ' ', c.pass ? checkIcon() : closeIcon()))));
     drop.hidden = false;
   }
   inp.addEventListener('input', openDrop);

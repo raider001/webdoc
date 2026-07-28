@@ -5,3 +5,5 @@
 # clean clone. To render diagrams locally, place the library here (e.g.
 # mermaid.min.js) and enable the plugin in config.json.
 app/thirdpartyrenderer/*.min.js
+.webdoc-index/
+__pycache__/

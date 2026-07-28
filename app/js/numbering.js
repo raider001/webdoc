@@ -2,6 +2,7 @@
 // A post-parse decoration on the sanitized DOM: the Markdown is never mutated,
 // so it has no bearing on CommonMark compliance. Content numbers and TOC
 // numbers come from a single pass, so they can never drift apart.
+import { elem, append } from './dom.js';
 
 function slugify(text) {
   return text.toLowerCase().trim()
@@ -11,8 +12,23 @@ function slugify(text) {
     .replace(/^-|-$/g, '');
 }
 
-// Walk headings in document order, inject "1.2.1"-style labels, assign stable
-// ids, and return a flat TOC array: [{ level, number, text, id }].
+/**
+ * One flattened table-of-contents entry, produced per heading by
+ * numberHeadings() in document order; buildTOC() renders an array of these
+ * into the nested-looking TOC list.
+ * @typedef {Object} TocEntry
+ * @property {number} level - heading level 1-6 (from the hN tag name)
+ * @property {string} number - dotted content number, e.g. "1.2.1"
+ * @property {string} text - heading textContent (numbering span excluded)
+ * @property {string} id - stable, collision-free element id assigned to the heading
+ */
+
+/**
+ * Walk headings in document order, inject "1.2.1"-style labels, assign stable
+ * ids, and return a flat TOC array.
+ * @param {ParentNode} root
+ * @returns {TocEntry[]}
+ */
 export function numberHeadings(root) {
   const heads = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
   const counters = [0, 0, 0, 0, 0, 0];
@@ -34,10 +50,7 @@ export function numberHeadings(root) {
     h.id = id;
     h.dataset.headingNumber = number;
 
-    const span = document.createElement('span');
-    span.className = 'secnum';
-    span.textContent = number + ' ';
-    h.insertBefore(span, h.firstChild);
+    h.insertBefore(elem('span', 'secnum', number + ' '), h.firstChild);
 
     toc.push({ level: L, number, text, id });
   });
@@ -45,35 +58,33 @@ export function numberHeadings(root) {
   return toc;
 }
 
-// Build a nested-looking TOC list from the flat array. Clicking an entry
-// scrolls the content pane to the heading without touching the router hash.
+/**
+ * Build a nested-looking TOC list from the flat array. Clicking an entry
+ * scrolls the content pane to the heading without touching the router hash.
+ * @param {TocEntry[]} toc
+ * @param {HTMLElement} contentEl
+ * @returns {HTMLElement}
+ */
 export function buildTOC(toc, contentEl) {
-  const ol = document.createElement('ol');
+  const ol = elem('ol');
   for (const item of toc) {
-    const li = document.createElement('li');
-    li.className = 'lvl-' + item.level;
-    const a = document.createElement('a');
-    a.href = '#' + item.id;
-    a.dataset.target = item.id;
-    a.innerHTML = '<span class="n">' + item.number + '</span>' + escapeText(item.text);
-    a.addEventListener('click', ev => {
-      ev.preventDefault();
-      const target = contentEl.querySelector('#' + cssEscape(item.id));
-      if (target) {
-        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        target.setAttribute('tabindex', '-1');
-        target.focus({ preventScroll: true });
+    const a = elem('a', {
+      href: '#' + item.id, 'data-target': item.id,
+      onClick: ev => {
+        ev.preventDefault();
+        const target = contentEl.querySelector('#' + cssEscape(item.id));
+        if (target) {
+          target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          target.setAttribute('tabindex', '-1');
+          target.focus({ preventScroll: true });
+        }
       }
-    });
-    li.appendChild(a);
-    ol.appendChild(li);
+    }, elem('span', 'n', item.number), item.text);   // item.text as a text node auto-escapes
+    append(ol, elem('li', 'lvl-' + item.level, a));
   }
   return ol;
 }
 
-function escapeText(s) {
-  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
-}
 function cssEscape(id) {
   return (window.CSS && CSS.escape) ? CSS.escape(id) : id.replace(/([^\w-])/g, '\\$1');
 }

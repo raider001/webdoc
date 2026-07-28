@@ -3,16 +3,29 @@
 // state) plus the edit-mode state machine (arming a connector, marking a source
 // node, selecting an edge, toggling edit mode). Everything hangs off context `g`.
 import { elem, append } from '../dom.js';
+import { plusIcon, minusIcon, fitIcon, editIcon, focusIcon, chevronDownIcon } from '../icons.js';
 
+/** @typedef {import('../graph.js').GraphContext} GraphContext */
+
+/**
+ * Build the overlay chrome (zoom controls, search box, legend / map-mode /
+ * connector pickers, edit-connections toggle + hint, new-document / focus
+ * buttons, minimap container, empty state) and install the edit-mode state
+ * machine (g.setConnector / g.markSource / g.clearPending /
+ * g.clearSelectedEdge / g.selectEdge / g.updateHint / g.setEditMode) onto the
+ * shared context.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 export function buildChrome(g) {
   const container = g.container;
 
-  const ctrlBtn = (label, aria) => elem('button', { type: 'button', class: 'graph-ctrl-btn', 'aria-label': aria, title: aria }, label);
+  const ctrlBtn = (icon, aria) => elem('button', { type: 'button', class: 'graph-ctrl-btn', 'aria-label': aria, title: aria }, icon);
 
   // ---- Zoom controls ----
-  g.btnIn = ctrlBtn('+', 'Zoom in');
-  g.btnOut = ctrlBtn('−', 'Zoom out'); // minus sign
-  g.btnFit = ctrlBtn('⤢', 'Fit to view');
+  g.btnIn = ctrlBtn(plusIcon(), 'Zoom in');
+  g.btnOut = ctrlBtn(minusIcon(), 'Zoom out');
+  g.btnFit = ctrlBtn(fitIcon(), 'Fit to view');
   container.appendChild(elem('div', 'graph-controls', g.btnIn, g.btnOut, g.btnFit));
 
   // ---- Search ----
@@ -24,6 +37,14 @@ export function buildChrome(g) {
   //      as connector pickers instead) ----
   const legendBtns = {};
   g.legendBtns = legendBtns;
+  /**
+   * One legend entry: toggles category `swatchCls`'s visibility, unless edit
+   * mode is on and it's prereq/recnext, in which case it picks the active
+   * connector instead.
+   * @param {string} swatchCls - edge category ('prereq'|'recnext'|'trace'|'pagelink'|'missing')
+   * @param {string} label
+   * @returns {HTMLElement}
+   */
   function legendToggle(swatchCls, label) {
     const b = elem('button', { type: 'button', class: 'graph-legend-item', 'data-kind': swatchCls, 'aria-pressed': 'true', title: 'Toggle ' + label },
       elem('span', 'graph-legend-swatch ' + swatchCls), label);
@@ -55,24 +76,28 @@ export function buildChrome(g) {
   // ---- Edit-connections toggle + hint (only when editable) ----
   g.editBtn = null; g.hintEl = null;
   if (g.editable && !g.opts.hideLegend) {
-    g.editBtn = elem('button', { type: 'button', class: 'graph-edit-toggle', 'aria-pressed': 'false', title: 'Draw or delete connections between documents', onClick: () => g.setEditMode(!g.editMode) }, '✎ Edit connections');
+    g.editBtn = elem('button', { type: 'button', class: 'graph-edit-toggle', 'aria-pressed': 'false', title: 'Draw or delete connections between documents', onClick: () => g.setEditMode(!g.editMode) }, editIcon(), ' Edit connections');
     g.hintEl = elem('div', { class: 'graph-edit-hint', hidden: true });
     append(container, g.editBtn, g.hintEl);
   }
 
   // ---- New-document button (doc map only; the app wires g.onCreate) ----
   if (g.onCreate) {
-    g.newBtn = elem('button', { type: 'button', class: 'graph-new-btn', title: 'Create a new document', onClick: () => g.onCreate() }, '＋ New document');
+    g.newBtn = elem('button', { type: 'button', class: 'graph-new-btn', title: 'Create a new document', onClick: () => g.onCreate() }, plusIcon(), ' New document');
     container.appendChild(g.newBtn);
   }
 
   // ---- Focus-mode toggle (doc map only; the app wires g.onFocusToggle) ----
   if (g.onFocusToggle) {
-    g.focusBtn = elem('button', { type: 'button', class: 'graph-focus-toggle' + (g.focusMode ? ' is-on' : ''), 'aria-pressed': g.focusMode ? 'true' : 'false', title: 'Focus mode: click a node to centre the map on it and its links (Esc resets)', onClick: () => g.onFocusToggle() }, '◎ Focus');
+    g.focusBtn = elem('button', { type: 'button', class: 'graph-focus-toggle' + (g.focusMode ? ' is-on' : ''), 'aria-pressed': g.focusMode ? 'true' : 'false', title: 'Focus mode: click a node to centre the map on it and its links (Esc resets)', onClick: () => g.onFocusToggle() }, focusIcon(), ' Focus');
     container.appendChild(g.focusBtn);
   }
 
   // ---- Edit-mode state machine ----
+  /**
+   * @param {string} type - 'prereq' | 'recnext'
+   * @returns {void}
+   */
   g.setConnector = function (type) {
     g.activeConnector = type;
     ['prereq', 'recnext'].forEach(k => {
@@ -85,6 +110,12 @@ export function buildChrome(g) {
   g.markSource = function (id) { g.pendingSource = id; g.requestDraw(); };
   g.clearPending = function () { g.pendingSource = null; g.requestDraw(); };
   g.clearSelectedEdge = function () { g.selectedEdge = null; g.requestDraw(); };
+  /**
+   * @param {string} from
+   * @param {string} to
+   * @param {string} type
+   * @returns {void}
+   */
   g.selectEdge = function (from, to, type) {
     g.clearPending();
     g.selectedEdge = { from: from, to: to, type: type };
@@ -107,6 +138,10 @@ export function buildChrome(g) {
       ? 'Prerequisite: click a document, then the one it assumes. (Or click a line + Delete.)'
       : 'Recommended next: click a document, then the one to read next. (Or click a line + Delete.)';
   };
+  /**
+   * @param {boolean} on
+   * @returns {void}
+   */
   g.setEditMode = function (on) {
     g.editMode = !!on;
     g.clearPending(); g.clearSelectedEdge();
@@ -138,6 +173,10 @@ export function buildChrome(g) {
 // Custom "Map by" dropdown: a button showing the current type's swatch + label, and
 // a popup list where each option carries its own coloured swatch (a native <select>
 // can't). Selecting a different type calls g.onMapMode to relayout.
+/**
+ * @param {GraphContext} g
+ * @returns {HTMLElement}
+ */
 function buildMapModeDropdown(g) {
   const swatch = (cls) => elem('span', 'graph-legend-swatch ' + (cls || 'all'));
   const cur = () => g.mapModes.find(m => m.value === g.mapMode) || g.mapModes[0];
@@ -147,7 +186,7 @@ function buildMapModeDropdown(g) {
   const btnLabel = elem('span', 'graph-mapmode-label',
     g.mapModes.map(m => elem('span', { class: m.value === g.mapMode ? 'is-cur' : null }, m.label)));
   const btn = elem('button', { type: 'button', class: 'graph-mapmode-btn', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' },
-    'Map: ', swatch(cur().swatch), btnLabel, elem('span', 'graph-mapmode-caret', '▾'));
+    'Map: ', swatch(cur().swatch), btnLabel, elem('span', 'graph-mapmode-caret', chevronDownIcon()));
 
   const menu = elem('div', { class: 'graph-mapmode-menu', role: 'listbox', hidden: true },
     g.mapModes.map(m => elem('button', {

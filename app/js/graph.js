@@ -23,14 +23,98 @@ import { wireInteractions } from './graph/interactions.js';
 // Re-exported for isolated unit testing of the layout math.
 export { buildModel, layoutGraph } from './graph/layout.js';
 
-// createGraph(container, docs, options)
-//   docs: [{ id, source, title, description, assumes:[id...], next:[id...] }]
-//   options: { currentId, onOpenDoc, onSelect, onActivate, onConnect, onDisconnect,
-//              onDelete, onCreate, focusMode, focusId, onFocusToggle, traceEdges,
-//              pageLinks, externalNodes, nodeStatus, nodeKind, autoSize, maxNodeW,
-//              maxNodeH, hideLegend, initialTransform }
-// Returns { destroy, focus, fit, search, setCurrent, setEditMode, setConnector,
-//           getTransform, getEditState }.
+/** @typedef {import('./catalog.js').Doc} Doc */
+/** @typedef {import('./requirements.js').DocEdgeRef} DocEdgeRef */
+/** @typedef {import('./doclinks.js').ExternalLinkNode} ExternalLinkNode */
+/** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
+/** @typedef {import('./graph/layout.js').GraphBuildModel} GraphBuildModel */
+/** @typedef {import('./graph/layout.js').LayoutNode} LayoutNode */
+/** @typedef {import('./graph/layout.js').GraphLayoutResult} GraphLayoutResult */
+
+/**
+ * The options object accepted by createGraph(): a large config/callback bag
+ * mixing doc-map-only features (onDelete/onCreate/mapModes/focus),
+ * coverage-view-only features (nodeStatus/nodeKind/autoSize), and edge data
+ * (traceEdges/pageLinks/externalNodes). This file defines/defaults every
+ * field; coverage-view.js is one concrete caller building an instance.
+ * @typedef {Object} GraphOptions
+ * @property {string|null} [currentId]
+ * @property {(id: string) => void} [onOpenDoc] - fallback used for onSelect/onActivate when they are not given
+ * @property {(id: string) => void} [onSelect] - single click / Enter
+ * @property {(id: string) => void} [onActivate] - double click
+ * @property {(from: string, to: string, type: string) => void} [onConnect]
+ * @property {(from: string, to: string, type: string) => void} [onDisconnect]
+ * @property {(id: string) => void} [onDelete]
+ * @property {() => void} [onCreate]
+ * @property {{value: string, label: string, swatch: string}[]} [mapModes]
+ * @property {string|null} [mapMode]
+ * @property {(mode: string) => void} [onMapMode]
+ * @property {boolean} [focusMode]
+ * @property {string|null} [focusId]
+ * @property {() => void} [onFocusToggle]
+ * @property {DocEdgeRef[]} [traceEdges]
+ * @property {DocEdgeRef[]} [pageLinks]
+ * @property {ExternalLinkNode[]} [externalNodes]
+ * @property {Map<string,CoverageStatus>|Object<string,CoverageStatus>|null} [nodeStatus] - mutable via setStatus
+ * @property {Map<string,string>|Object<string,string>|null} [nodeKind] - id -> 'req' | 'test' (coverage view)
+ * @property {boolean} [autoSize]
+ * @property {number} [maxNodeW]
+ * @property {number} [maxNodeH]
+ * @property {boolean} [hideLegend]
+ * @property {{tx: number, ty: number, k: number}|null} [initialTransform]
+ * @property {Map<string,{x:number,y:number}>|null} [animateFrom]
+ */
+
+/**
+ * The shared mutable context object `g` created by createGraph() and threaded
+ * through the whole graph pipeline (layout -> render -> view -> chrome ->
+ * interactions); each module both reads fields set by earlier stages and
+ * attaches its own functions/fields onto it. Far larger than listed here -
+ * this is the small stable core other modules key off.
+ * @typedef {Object} GraphContext
+ * @property {HTMLElement} container
+ * @property {GraphOptions} opts
+ * @property {GraphBuildModel} model
+ * @property {GraphLayoutResult} layout
+ * @property {number} tx
+ * @property {number} ty
+ * @property {number} k
+ * @property {HTMLCanvasElement} svgEl
+ * @property {CanvasRenderingContext2D} ctx
+ * @property {Object<string,*>} colors
+ * @property {Object<string,*>} vis
+ * @property {string|null} currentId
+ * @property {boolean} editMode
+ * @property {string} activeConnector
+ * @property {string|null} pendingSource
+ * @property {{from:string,to:string,type:string}|null} selectedEdge
+ * @property {Map<string,Object<string,*>>} extPos
+ * @property {(id: string) => (CoverageStatus|null)} statusOf
+ * @property {(id: string) => (string|null)} kindOf
+ */
+
+/**
+ * Build the pannable/zoomable document-relationship map for `docs` and wire up
+ * its full pipeline (model -> layout -> render -> view -> chrome ->
+ * interactions) inside `container`.
+ * @param {HTMLElement} container
+ * @param {Doc[]} docs
+ * @param {GraphOptions} [options]
+ * @returns {{
+ *   destroy: () => void,
+ *   focus: (id: string) => boolean,
+ *   fit: () => void,
+ *   search: (query: string) => (string|null),
+ *   setCurrent: (id: string) => void,
+ *   setEditMode: (on: boolean) => void,
+ *   setConnector: (type: string) => void,
+ *   getTransform: () => {tx: number, ty: number, k: number},
+ *   getEditState: () => {editMode: boolean, connector: string},
+ *   setStatus: (m: Map<string,CoverageStatus>|Object<string,CoverageStatus>) => void,
+ *   setStatusFilter: (hidden: string[]) => void,
+ *   getNodePositions: () => Map<string,{x:number,y:number}>
+ * }}
+ */
 export function createGraph(container, docs, options) {
   const opts = options || {};
   const g = { container: container, opts: opts };
@@ -141,4 +225,9 @@ export function createGraph(container, docs, options) {
 // Relayout animation: on canvas there are no per-node DOM transitions, so hand the
 // previous positions to the renderer's time-based tween (interpolated in the rAF
 // draw loop; see startTween in graph/render.js).
+/**
+ * @param {GraphContext} g
+ * @param {Map<string,{x:number,y:number}>} from - previous world position per node/external-node id
+ * @returns {void}
+ */
 function animateRelayout(g, from) { startTween(g, from); }

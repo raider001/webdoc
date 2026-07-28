@@ -12,7 +12,6 @@
 }
 .doc-edit-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
 .doc-edit-btn:active { transform: translateY(0); box-shadow: none; }
-.doc-edit-btn .ico { display: block; }
 body.is-editing .doc-edit-btn { display: none; }
 
 /* Floating "delete this document" button, stacked just below the edit pencil. */

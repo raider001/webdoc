@@ -11,6 +11,14 @@
 // behaves exactly as it did before this module existed.
 // ---------------------------------------------------------------------------
 
+/**
+ * Dynamically import each named renderer plugin from
+ * ../thirdpartyrenderer/<name>.js, tolerating any that are missing or throw.
+ * A plugin module registers its renderer(s) with blocks.js (registerBlockRenderer)
+ * as an import side effect.
+ * @param {string[]} names - plugin ids (bare file stems, from site config's "plugins" list)
+ * @returns {Promise<string[]>} the sanitized ids (from `names`) that loaded successfully
+ */
 export async function loadPlugins(names) {
   if (!Array.isArray(names) || !names.length) return [];
   const loaded = [];

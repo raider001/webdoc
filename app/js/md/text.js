@@ -7,14 +7,23 @@
    Escaping / small helpers
    =========================================================================== */
 const AMP = /[&<>"]/;
+/**
+ * Escape &, <, >, " for safe HTML text/attribute output.
+ * @param {string} s
+ * @returns {string}
+ */
 export function esc(s) {
   if (!AMP.test(s)) return s;
   return s.replace(/[&<>"]/g, c =>
     c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;');
 }
+/**
+ * Expand tabs to the next 4-column stop (for the whole line; content-preserving
+ * where tabs are inside code is handled by the block logic separately).
+ * @param {string} line
+ * @returns {string}
+ */
 export function expandTabs(line) {
-  // Expand tabs to the next 4-column stop (for the whole line; content-preserving
-  // where tabs are inside code is handled by the block logic separately).
   if (line.indexOf('\t') === -1) return line;
   let out = '', col = 0;
   for (let i = 0; i < line.length; i++) {
@@ -25,7 +34,11 @@ export function expandTabs(line) {
   return out;
 }
 
-// Percent-encode a URI for output while preserving any escapes it already has.
+/**
+ * Percent-encode a URI for output while preserving any escapes it already has.
+ * @param {string} uri
+ * @returns {string}
+ */
 export function normalizeUri(uri) {
   try { return encodeURI(decodeURIComponent(uri)).replace(/%25/g, '%'); }
   catch (e) { try { return encodeURI(uri); } catch (e2) { return uri; } }
@@ -75,6 +88,11 @@ const NAMED = {
   lfloor: '⌊', rfloor: '⌋', lang: '⟨', rang: '⟩', loz: '◊'
 };
 export const ENTITY_RE = /^&(#[Xx][0-9A-Fa-f]{1,6}|#\d{1,7}|[A-Za-z][A-Za-z0-9]{0,31});/;
+/**
+ * Decode one matched HTML entity reference (named or numeric).
+ * @param {string} m - the full matched entity text, e.g. "&amp;" or "&#39;"
+ * @returns {string|null} the decoded character(s), or null if the named entity is not recognized
+ */
 export function decodeEntity(m) {
   const body = m.slice(1, -1);
   if (body[0] === '#') {
@@ -86,8 +104,12 @@ export function decodeEntity(m) {
   }
   return Object.prototype.hasOwnProperty.call(NAMED, body) ? NAMED[body] : null;
 }
-// Decode entities + backslash escapes in a raw string (used for text runs).
 export const ESCAPABLE = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+/**
+ * Decode HTML entities and backslash escapes in a raw text run (used for text runs).
+ * @param {string} s
+ * @returns {string}
+ */
 export function decodeInlineText(s) {
   let out = '';
   for (let i = 0; i < s.length; i++) {

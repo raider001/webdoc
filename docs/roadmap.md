@@ -1,5 +1,10 @@
 <!--meta
-{ "title": "Development Roadmap", "description": "The stages in which WebDocs features were released, and what became available in each.", "assumes": ["Docs/overview"], "next": [] }
+{
+  "title": "Development Roadmap",
+  "description": "The stages in which WebDocs features were released, and what became available in each.",
+  "assumes": [],
+  "next": []
+}
 -->
 
 # Development Roadmap

@@ -4,9 +4,9 @@
   "description": "What WebDocs is: a zero-dependency reader that turns Markdown into a browsable, traceable documentation site.",
   "assumes": [],
   "next": [
-    "Docs/how-to",
     "Docs/design/architecture",
-    "Docs/features/markdown"
+    "Docs/features/markdown",
+    "Docs/roadmap"
   ]
 }
 -->

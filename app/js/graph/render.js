@@ -8,7 +8,18 @@
 // elements to toggle classes on anymore.
 import { LO, clamp, fmt } from './util.js';
 
+/** @typedef {import('../graph.js').GraphContext} GraphContext */
+/** @typedef {import('./layout.js').ModelGraphNode} ModelGraphNode */
+/** @typedef {import('./layout.js').LayoutNode} LayoutNode */
+/** @typedef {import('../coverage.js').CoverageStatus} CoverageStatus */
+
 // A test case is pass/fail/untested; a requirement shows its % passing.
+/**
+ * The status label shown under a node's title.
+ * @param {CoverageStatus} st
+ * @param {string} kind - 'test' | 'req' (g.kindOf(id))
+ * @returns {string}
+ */
 function covLabel(st, kind) {
   if (kind === 'test') return st.status === 'pass' ? 'Pass' : st.status === 'fail' ? 'Fail' : st.status === 'partial' ? 'Partial' : 'Untested';
   return (st.pct === null || st.pct === undefined) ? 'untested' : (st.pct + '% passing');
@@ -17,6 +28,10 @@ function covLabel(st, kind) {
 // Uniform auto-sizing (opts.autoSize, coverage view): pick ONE box size big enough
 // for the widest title + the content lines. Uses CANVAS text measurement - no DOM,
 // no forced reflow (the old version did ~2 reflows per node; this does none).
+/**
+ * @param {GraphContext} g
+ * @returns {{nodeW: number, nodeH: number}}
+ */
 export function computeNodeSize(g) {
   const ctx = document.createElement('canvas').getContext('2d');
   ctx.font = '600 13.5px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -39,6 +54,13 @@ export function computeNodeSize(g) {
 // then extend the layout bounds so fit()/minimap frame them too. Sets g.extPos and
 // g.nodePos (resolves either a doc node or an external node by id). (DOM-free math,
 // unchanged from the SVG renderer.)
+/**
+ * Sets g.extPos (id -> box) and g.nodePos (resolves either a doc node or an
+ * external node by id); extends layout.width/height so fit()/minimap frame
+ * the external boxes too.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 export function positionExternal(g) {
   const extPos = new Map();
   const layout = g.layout;
@@ -91,6 +113,12 @@ export function positionExternal(g) {
 // Colour tokens: read the live CSS variables ONCE (so canvas matches the theme).
 // A MutationObserver on <html data-theme> refreshes them + repaints on toggle.
 // ---------------------------------------------------------------------------
+/**
+ * @param {Element} el
+ * @returns {Object<string, *>} colour tokens read from `el`'s computed CSS
+ *   custom properties (with fallbacks), plus a nested `st` sub-object for
+ *   coverage-status colours
+ */
 function readColors(el) {
   const cs = getComputedStyle(el);
   const v = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
@@ -119,9 +147,20 @@ function readColors(el) {
   };
 }
 const CAT_DASH = { prereq: [], recnext: [6, 5], trace: [2, 3], pagelink: [5, 3] };
+/**
+ * @param {Object<string,*>} colors - readColors() result
+ * @param {string} cat - edge category ('prereq'|'recnext'|'trace'|'pagelink')
+ * @returns {string} CSS colour for that edge category
+ */
 function catColor(colors, cat) { return cat === 'recnext' ? colors.recnext : cat === 'trace' ? colors.trace : cat === 'pagelink' ? colors.pagelink : colors.prereq; }
 
 // Point on node n's border in the direction of (tx,ty) - for straight overlay edges.
+/**
+ * @param {LayoutNode} n
+ * @param {number} tx
+ * @param {number} ty
+ * @returns {{x: number, y: number}}
+ */
 function borderPoint(n, tx, ty) {
   const cx = n.x + n.w / 2, cy = n.y + n.h / 2;
   const dx = tx - cx, dy = ty - cy;
@@ -133,6 +172,13 @@ function borderPoint(n, tx, ty) {
 }
 
 // Wrap `text` to at most maxLines lines within maxW px (canvas ctx), ellipsizing.
+/**
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {string} text
+ * @param {number} maxW
+ * @param {number} maxLines
+ * @returns {string[]}
+ */
 function wrapLines(ctx, text, maxW, maxLines) {
   const words = String(text == null ? '' : text).split(/\s+/).filter(Boolean);
   if (!words.length) return [''];
@@ -157,6 +203,12 @@ function wrapLines(ctx, text, maxW, maxLines) {
 // loop and hit-test helpers. Called once per createGraph (graph.js keeps calling
 // this `renderScene`).
 // ---------------------------------------------------------------------------
+/**
+ * Build the canvas + spatial grid index + precomputed edge polylines, then
+ * install the draw loop and hit-test helpers. Called once per createGraph.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 export function renderScene(g) {
   const canvas = document.createElement('canvas');
   canvas.className = 'graph-svg';                 // reuse .graph-svg CSS (inset:0, cursor:grab)
@@ -245,10 +297,23 @@ export function renderScene(g) {
   draw(g);
 }
 
+/**
+ * Any one laid-out node (for its shared box size), or the LO default if the
+ * layout is empty.
+ * @param {GraphContext} g
+ * @returns {LayoutNode|{w: number, h: number}}
+ */
 function firstNode(g) { for (const n of g.layout.nodes.values()) return n; return { w: LO.nodeW, h: LO.nodeH }; }
 
 // Uniform grid over world space: cell ~ a few node-widths. Nodes are uniform boxes,
 // so a grid beats a quadtree (no big-vs-tiny pathology) and is trivially cheap.
+/**
+ * Build a uniform spatial grid over world space (cell size ~ a few node
+ * widths) mapping cell key -> node ids overlapping that cell, for O(visible)
+ * hit-testing and culling instead of scanning every node.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 function buildGrid(g) {
   const nodeW = (g.layout.nodes.size ? firstNode(g).w : LO.nodeW);
   const cell = Math.max(256, Math.round(nodeW * 1.5));
@@ -269,6 +334,14 @@ function buildGrid(g) {
 // index edges by endpoint node so the draw loop can pull only the edges touching a
 // VISIBLE node (O(visible), not O(all edges) - the difference between 50k edges
 // scanned every frame and a handful).
+/**
+ * Precompute every edge's world polyline + AABB + category once per layout
+ * (structural layout edges, requirement-trace edges, and doc page-link
+ * edges), and index them by endpoint node id (g.edgesByNode) so the draw loop
+ * can pull only the edges touching a visible node.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 function buildEdges(g) {
   const items = [];
   const byNode = new Map();
@@ -299,6 +372,16 @@ function buildEdges(g) {
   g.edgesByNode = byNode;
 }
 
+/**
+ * Distance from point (px,py) to the segment (ax,ay)-(bx,by).
+ * @param {number} px
+ * @param {number} py
+ * @param {number} ax
+ * @param {number} ay
+ * @param {number} bx
+ * @param {number} by
+ * @returns {number}
+ */
 function segDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const l2 = dx * dx + dy * dy;
@@ -310,6 +393,13 @@ function segDist(px, py, ax, ay, bx, by) {
 
 // FLIP-style relayout tween: interpolate node positions from `from` to their laid-out
 // spot over `dur` ms (replaces the old CSS-transform animation, DOM-only).
+/**
+ * FLIP-style relayout tween: interpolate node positions from `from` to their
+ * newly laid-out spot over ~620ms (replaces the old CSS-transform animation).
+ * @param {GraphContext} g
+ * @param {Map<string, {x: number, y: number}>} from - previous world position per node/external-node id
+ * @returns {void}
+ */
 export function startTween(g, from) {
   const items = [];
   g.layout.nodes.forEach((n, id) => { const o = from.get(id); if (o && (Math.abs(o.x - n.x) > 0.5 || Math.abs(o.y - n.y) > 0.5)) items.push({ id: id, ox: o.x, oy: o.y, nx: n.x, ny: n.y }); });
@@ -318,6 +408,13 @@ export function startTween(g, from) {
   g.tween = { items: items, start: performance.now(), dur: 620 };
   g.requestDraw();
 }
+/**
+ * Advance the active relayout tween one frame, writing per-node screen
+ * offsets into g.tweenOffset (eased with easeInOutCubic); clears g.tween/
+ * g.tweenOffset once it completes.
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 function stepTween(g) {
   const tw = g.tween; if (!tw) return;
   const t = Math.min(1, (performance.now() - tw.start) / tw.dur);
@@ -331,6 +428,14 @@ function stepTween(g) {
 // The frame. Cost tracks the viewport, not the corpus: cull to visible grid cells,
 // drop detail (labels, then edges) as the projected node size shrinks.
 // ---------------------------------------------------------------------------
+/**
+ * Paint one full frame: cull nodes to the viewport through the spatial grid,
+ * draw only the edges touching a visible node, then draw the visible nodes on
+ * top. Cost tracks what's on screen, not the corpus (viewport culling + a
+ * 3-tier level-of-detail keyed on projected node size).
+ * @param {GraphContext} g
+ * @returns {void}
+ */
 function draw(g) {
   g.dirty = false;
   const ctx = g.ctx, k = g.k, tx = g.tx, ty = g.ty, C = g.colors;
@@ -415,9 +520,32 @@ function draw(g) {
   ctx.textBaseline = 'middle';
   for (const vn of viz) drawNode(g, ctx, vn.id, vn.meta, vn.isExt, vn.st, vn.sx, vn.sy, vn.sw, vn.sh, tier);
 }
+/**
+ * @param {Map<string,{dx:number,dy:number}>|null} off - g.tweenOffset
+ * @param {string} id
+ * @param {'x'|'y'} ax
+ * @returns {number} the tween offset along that axis, or 0 if none
+ */
 function doff(off, id, ax) { if (!off) return 0; const d = off.get(id); return d ? (ax === 'x' ? d.dx : d.dy) : 0; }
+/**
+ * @param {GraphContext} g
+ * @param {{from: string, to: string}} e
+ * @returns {boolean} whether either endpoint is a missing (dangling-reference) node
+ */
 function touchesMissing(g, e) { const a = g.model.nodes.get(e.from), b = g.model.nodes.get(e.to); return (a && a.missing) || (b && b.missing); }
 
+/**
+ * Draw the arrowhead at an edge's head end (prereq edges point AT the
+ * prerequisite, i.e. the visually inverted end).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{x: number, y: number}[]} pts
+ * @param {{type: string, head: string}} e
+ * @param {number} k - current zoom scale
+ * @param {number} tx
+ * @param {number} ty
+ * @param {string} color
+ * @returns {void}
+ */
 function drawArrow(ctx, pts, e, k, tx, ty, color) {
   // effective head end: prereq points AT the prerequisite (inverted), like the SVG.
   let head = e.head; if (e.type === 'prereq') head = head === 'start' ? 'end' : 'start';
@@ -435,6 +563,23 @@ function drawArrow(ctx, pts, e, k, tx, ty, color) {
   ctx.fill();
 }
 
+/**
+ * Draw one node's box + border + text at its screen rect, at the given
+ * level-of-detail tier (0 far: a filled dot only; 1 mid: plain rect, title
+ * only if wide enough; 2 near: rounded box, title + coverage label + description).
+ * @param {GraphContext} g
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {string} id
+ * @param {ModelGraphNode|undefined} meta - undefined for an external-link node
+ * @param {boolean} isExt
+ * @param {CoverageStatus|null} st
+ * @param {number} sx
+ * @param {number} sy
+ * @param {number} sw
+ * @param {number} sh
+ * @param {number} tier - 0 | 1 | 2
+ * @returns {void}
+ */
 function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
   const C = g.colors;
   const isCurrent = !isExt && id === g.currentId;
@@ -503,7 +648,22 @@ function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
   }
 }
 
+/**
+ * @param {Object<string,*>} C - g.colors
+ * @param {string} s - a CoverageStatus.status value
+ * @returns {string}
+ */
 function statusColor(C, s) { return C.st[s] || C.muted; }
+/**
+ * Trace a rounded-rect path (caller does the fill/stroke).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {number} h
+ * @param {number} r
+ * @returns {void}
+ */
 function roundRect(ctx, x, y, w, h, r) {
   r = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
@@ -516,12 +676,23 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 // Approximate CSS color-mix: blend hex `a` toward hex `b` by (1-t)*a + t*... actually
 // return `a` at weight `w` over `b`. Falls back to a if parsing fails.
+/**
+ * @param {string} a
+ * @param {string} b
+ * @param {number} w - weight toward `a` (1 = pure a, 0 = pure b)
+ * @returns {string} an "rgb(r,g,b)" string, or `a` unchanged on parse failure
+ */
 function mix(a, b, w) {
   const pa = hex(a), pb = hex(b);
   if (!pa || !pb) return a;
   const c = (i) => Math.round(pa[i] * w + pb[i] * (1 - w));
   return 'rgb(' + c(0) + ',' + c(1) + ',' + c(2) + ')';
 }
+/**
+ * Parse a hex (#rgb / #rrggbb) or rgb(a)(...) color string to an [r,g,b] triple.
+ * @param {string} s
+ * @returns {[number,number,number]|null}
+ */
 function hex(s) {
   s = String(s).trim();
   const m = /^#?([0-9a-f]{6})$/i.exec(s) || /^#?([0-9a-f]{3})$/i.exec(s);
