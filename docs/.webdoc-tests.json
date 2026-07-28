@@ -1,0 +1,195 @@
+{
+  "R_WD_MAP_1": {
+    "steps": [
+      {
+        "step": "Open the map; nodes are laid out from document metadata",
+        "pass": true
+      }
+    ],
+    "report": "Verified visually against the 23-doc set."
+  },
+  "R_WD_MAP_2": {
+    "steps": [
+      {
+        "step": "Drag to pan, wheel to zoom, node search finds a doc",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_MAP_3": {
+    "steps": [
+      {
+        "step": "Prerequisite / recommended-next / requirement-trace / page-link edges are visually distinct",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_MAP_4": {
+    "steps": [
+      {
+        "step": "External link box shows a ? bubble and opens in a new tab",
+        "pass": true
+      }
+    ],
+    "report": "Fixed (was non-clickable) and re-verified."
+  },
+  "R_WD_MAP_5": {
+    "steps": [
+      {
+        "step": "Each legend item toggles its edge category",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_MAP_6": {
+    "steps": [
+      {
+        "step": "Single-click selects a node; it opens on returning to the reading view",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "T_WD_nav-tree": {
+    "run": {
+      "at": "2026-07-22T10:00:00.000Z",
+      "by": "demo"
+    },
+    "steps": [
+      {
+        "step": "Open the hamburger tree",
+        "response": "The tree panel opened",
+        "pass": true
+      },
+      {
+        "step": "Scan the tree",
+        "response": "Every folder and document appears once",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "T_WD_nav-contents": {
+    "run": {
+      "at": "2026-07-22T10:00:00.000Z",
+      "by": "demo"
+    },
+    "steps": [
+      {
+        "step": "Open a document",
+        "response": "On-this-page matched the headings",
+        "pass": true
+      },
+      {
+        "step": "Click a contents entry",
+        "response": "Scrolled to the heading",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "T_WD_nav-deeplink": {
+    "run": {
+      "at": "2026-07-22T12:45:52.583Z",
+      "by": "Bob"
+    },
+    "steps": [
+      {
+        "step": "Visit a `#/doc?req=ID` link",
+        "response": "The document loaded",
+        "pass": true
+      },
+      {
+        "step": "Observe the requirement row",
+        "response": "Scrolled into view but did not flash on one browser",
+        "pass": true
+      }
+    ],
+    "report": "Intermittent; under investigation."
+  },
+  "R_WD_REQ_1": {
+    "steps": [
+      {
+        "step": "Author a requirement group as a metadata-wrapped table",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_REQ_2": {
+    "steps": [
+      {
+        "step": "Ids compose as {component}_{group}_{no}",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_REQ_3": {
+    "steps": [
+      {
+        "step": "Trace-from is calculated and shown",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_REQ_4": {
+    "steps": [
+      {
+        "step": "Each trace links to the target requirement's document",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_THEME_1": {
+    "steps": [
+      {
+        "step": "A day theme and a night theme are both available",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_THEME_2": {
+    "steps": [
+      {
+        "step": "Set OS to dark, clear stored theme, load the site for the first time",
+        "response": "First paint rendered in light theme; corrected only after a reflow.",
+        "pass": false
+      }
+    ],
+    "report": "In one browser the OS dark preference wasn't picked up on the very first paint. Under investigation."
+  },
+  "R_WD_THEME_3": {
+    "steps": [
+      {
+        "step": "Remembers the reader's explicit choice across reloads",
+        "pass": true
+      }
+    ],
+    "report": ""
+  },
+  "R_WD_HL_2": {
+    "steps": [
+      {
+        "step": "Robot Framework sample highlights keywords and sections",
+        "pass": true
+      }
+    ],
+    "report": "Verified manually in-tool."
+  },
+  "R_WD_SEARCH_1": {
+    "steps": [
+      {
+        "step": "Confirm stuff happens",
+        "pass": false
+      }
+    ],
+    "report": ""
+  }
+}

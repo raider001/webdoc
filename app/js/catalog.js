@@ -3,14 +3,64 @@
 // files. Everything about "what documents exist" and "what they contain" is
 // worked out here, in the browser.
 
+/**
+ * One entry of site.json's `sources` array, describing a doc source folder;
+ * different consumers read different subsets of its fields (url for
+ * crawling, component for requirement-id prefixing, testResults for xUnit
+ * discovery). This is the canonical definition - referenced elsewhere via a
+ * type-only import.
+ * @typedef {Object} SourceConfig
+ * @property {string} name
+ * @property {string} url
+ * @property {string} [component]
+ * @property {string} [testResults]
+ */
+
+/**
+ * The parsed contents of /site.json.
+ * @typedef {Object} SiteConfig
+ * @property {string} siteTitle
+ * @property {string} defaultDoc
+ * @property {string} [theme]
+ * @property {SourceConfig[]} sources
+ */
+
+/**
+ * The canonical in-memory document record: starts as a bare directory-listing
+ * stub (discover()/makeDoc(), mirrored by app-shell.js's docFromId) and is
+ * filled in with parsed metadata/body by loadDoc(); this is the shape almost
+ * everything else in the app (graph, links, requirements, reader, editor) is
+ * keyed on. This is the canonical definition - referenced elsewhere via a
+ * type-only import.
+ * @typedef {Object} Doc
+ * @property {string} id
+ * @property {string} source
+ * @property {string} rel
+ * @property {string} url
+ * @property {string} name
+ * @property {Object<string, *>} [meta] - raw parsed frontmatter
+ * @property {string} [body]
+ * @property {string|null} [metaError]
+ * @property {string} [title]
+ * @property {string} [description]
+ * @property {string[]} [assumes]
+ * @property {string[]} [next]
+ * @property {boolean} [_loaded]
+ */
+
+/** @returns {Promise<SiteConfig>} */
 export async function loadSite() {
   const res = await fetch('/site.json', { cache: 'no-cache' });
   if (!res.ok) throw new Error('Could not load /site.json (' + res.status + ')');
   return res.json(); // { siteTitle, defaultDoc, theme, sources:[{name,url}] }
 }
 
-// Walk every source folder, collecting .md files. Returns a flat list of
-// { id, source, rel, url, name } with no content yet.
+/**
+ * Walk every source folder, collecting .md files. Returns a flat list of
+ * bare-stub Docs (id/source/rel/url/name only, no content yet).
+ * @param {SourceConfig[]} sources
+ * @returns {Promise<Doc[]>}
+ */
 export async function discover(sources) {
   const docs = [];
   for (const src of sources) {
@@ -20,6 +70,12 @@ export async function discover(sources) {
   return docs;
 }
 
+/**
+ * @param {string} sourceName
+ * @param {string} url - directory-listing URL to fetch
+ * @param {Doc[]} out - accumulator array, pushed into as .md files are found
+ * @returns {Promise<void>}
+ */
 async function walk(sourceName, url, out) {
   let listing;
   try {
@@ -38,6 +94,14 @@ async function walk(sourceName, url, out) {
   }
 }
 
+/**
+ * Builds a bare-stub Doc (no meta/body yet - see loadDoc) from a directory
+ * listing entry.
+ * @param {string} sourceName
+ * @param {string} url
+ * @param {string} name
+ * @returns {Doc}
+ */
 function makeDoc(sourceName, url, name) {
   // url = /docs/<Source>/<rel...>.md  -> id = <Source>/<rel...>  (no extension)
   let rel = decodeURIComponent(url.replace(/^\/docs\//, ''));
@@ -49,6 +113,10 @@ function makeDoc(sourceName, url, name) {
 // in an HTML comment: <!--meta { ... } -->  at the very top of the file.
 const META_RE = /^﻿?\s*<!--\s*meta\b([\s\S]*?)-->\s*/i;
 
+/**
+ * @param {string} text - raw file contents
+ * @returns {{meta: Object<string, *>, body: string, metaError: string|null}}
+ */
 export function splitMeta(text) {
   const m = text.match(META_RE);
   if (!m) return { meta: {}, body: text, metaError: null };
@@ -61,7 +129,12 @@ export function splitMeta(text) {
   return { meta, body: text.slice(m[0].length), metaError };
 }
 
-// Fetch a single document's text and parse its metadata. Caches on the doc.
+/**
+ * Fetch a single document's text and parse its metadata. Caches on the doc
+ * (mutates and returns the same object; a no-op if already loaded).
+ * @param {Doc} doc
+ * @returns {Promise<Doc>}
+ */
 export async function loadDoc(doc) {
   if (doc._loaded) return doc;
   const res = await fetch(doc.url, { cache: 'no-cache' });
@@ -79,6 +152,10 @@ export async function loadDoc(doc) {
   return doc;
 }
 
+/**
+ * @param {Doc} doc
+ * @returns {string}
+ */
 function fallbackTitle(doc) {
   const base = doc.name.replace(/\.md$/i, '').replace(/[-_]+/g, ' ');
   return base.replace(/\b\w/g, c => c.toUpperCase());

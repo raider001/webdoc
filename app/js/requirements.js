@@ -1,706 +1,232 @@
-// requirements.js - Requirements traceability (see DESIGN.html §18).
-// ---------------------------------------------------------------------------
-// Zero dependencies. Pure ES module, same style as the rest of the app.
+// requirements.js - requirement groups AND test cases, with cross-document
+// tracing. Two kinds of metadata-wrapped Markdown table are recognised:
 //
-// Three responsibilities, all reusing capabilities the app already has:
-//   1. EXTRACT + INDEX - during the boot load-all pass, scan every document's
-//      RAW markdown for ```requirement fenced blocks (JSON bodies) and build one
-//      GLOBAL trace index (id -> node) with computed inverse links.
-//   2. CARDS - a post-sanitize DOM decoration (the same hook the syntax
-//      highlighter would use): replace `pre > code.language-requirement` with a
-//      styled, theme-aware card whose trace chips deep-link across documents.
-//   3. VIEWS - a library-wide overlay with a traceability matrix + coverage
-//      dashboard, plus deep-link support (#/<docId>?req=<ID>).
+//   <!--meta start {"requirement-group":"nav"}-->                  (requirements)
+//   | requirement-no | description | trace-to |
 //
-// SECURITY: every value shown comes from author JSON and is treated as
-// untrusted text. The DOM is built with createElement + textContent only;
-// author strings never touch innerHTML. Setting `.id` / `dataset.*` / `.href`
-// as DOM properties is injection-safe (no HTML parsing).
+//   <!--meta start {"test":"nav-tree","name":"...","verifies":["nav_1"]}-->  (a test case)
+//   | action | expected response |
+//
+// TAGGING: every requirement id starts with  R_ , every test id starts with  T_ .
+//   * Requirement id  R_{component}_{group}_{no}     e.g. R_WD_nav_1
+//   * Test id         T_{component}_{key}            e.g. T_WD_nav-tree
+//
+// A TEST CASE is its own table: the meta header carries its id/name and the
+// requirements it Verifies; each row is one step (an action + its expected
+// response). Tracing is authored ON THE TEST (`verifies`); the requirement's
+// "Verified By" column is the calculated inverse (a test may verify many
+// requirements, and a requirement may be verified by many tests).
+//
+// This file is the entry/barrel: it owns the GLOBAL index build (from the server)
+// + the list/deep-link API, and re-exports the public surface from the subsystem
+// under ./requirements/: store.js (shared maps + status), parse.js (raw markdown
+// -> block structures + ref resolution + the placeholder pass), render.js (block
+// structures -> the in-document tables).
 // ---------------------------------------------------------------------------
+import { index, testIndex, groupsByDoc, setComponentBySource, componentOf } from './requirements/store.js';
+import { extractGroups, resolveReqRef, cssSafe } from './requirements/parse.js';
 
-// ---- Global index ---------------------------------------------------------
-// INDEX = { byId: Map<id, node>, order: [id...], docIds: Set<docId> }
-// node  = { id, docId, fields, title, type, status, tags,
-//           parents, satisfiedBy, verifiedBy, relatedTo,   // raw refs
-//           children, verifies, satisfies }                // computed inverse
-let INDEX = null;
+export { setCoverageStatus } from './requirements/store.js';
+export { resolveRequirementRef, preprocessRequirements } from './requirements/parse.js';
+export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirements/render.js';
 
-function asStrArray(v) {
-  if (!Array.isArray(v)) return [];
-  return v.filter(x => x != null).map(x => String(x));
+/** @typedef {import('./catalog.js').Doc} Doc */
+/** @typedef {import('./catalog.js').SourceConfig} SourceConfig */
+/** @typedef {import('./requirements/parse.js').ReqOrTestBlock} ReqOrTestBlock */
+
+/**
+ * One test-case step: an action and its expected response. Same shape as the
+ * editor's own step objects (editor/widgets.js's TestStep) - structured data in
+ * the meta header now (any markdown allowed), though older docs kept steps in a
+ * table (requirements/parse.js's extractTestCase reads both forms).
+ * @typedef {import('./editor/widgets.js').TestStep} TestStep
+ */
+
+/**
+ * One requirement record (an R_ id). Built per-document by requirements/parse.js's
+ * extractReqGroup and, in fuller form (with resolved traceFrom/verifiedBy), from
+ * the server's global coverage index by buildRequirementIndex/requirementList.
+ * @typedef {Object} RequirementEntry
+ * @property {string} id
+ * @property {string} docId
+ * @property {string} component
+ * @property {string} group
+ * @property {string} no
+ * @property {string} description
+ * @property {string[]} traceTo
+ * @property {string[]} traceFrom
+ * @property {string[]} verifiedBy
+ */
+
+/**
+ * One test-case record (a T_ id). Built per-document by requirements/parse.js's
+ * extractTestCase and, in fuller form, from the server's global index by
+ * buildRequirementIndex/testList.
+ * @typedef {Object} TestCaseEntry
+ * @property {string} id
+ * @property {string} docId
+ * @property {string} component
+ * @property {string} key
+ * @property {string} name
+ * @property {TestStep[]} steps
+ * @property {string[]} verifiesRaw
+ * @property {string[]} verifies
+ */
+
+/**
+ * A plain doc-to-doc reference pair. The same {from,to} shape is independently
+ * produced twice - as requirement-trace edges (requirementTraceEdges, below) and
+ * as in-body page-link edges (doclinks.js) - and consumed identically by the graph.
+ * @typedef {Object} DocEdgeRef
+ * @property {string} from
+ * @property {string} to
+ */
+
+// Build the GLOBAL requirement/test index from the server's SQLite index (composed
+// ids + resolved trace-from / verified-by / verifies). This used to scan every doc
+// body at boot - the wall that capped the corpus. Now the server computes it and the
+// browser fetches a compact list; per-document block STRUCTURE (for the in-document
+// tables) is parsed on demand from the displayed doc only (prepareDocGroups).
+/**
+ * @param {Doc[]|null} docs - not read by this function; every current call site
+ *   passes null now that the index comes from the server instead of being built
+ *   by scanning docs (kept for call-site/API stability)
+ * @param {SourceConfig[]} sources
+ * @returns {Promise<void>}
+ */
+export async function buildRequirementIndex(docs, sources) {
+  index.clear();
+  testIndex.clear();
+  groupsByDoc.clear();
+  const cbs = {};
+  for (const s of sources || []) cbs[s.name] = s.component;
+  setComponentBySource(cbs);
+
+  let data = null;
+  try {
+    const res = await fetch('/api/index/coverage', { cache: 'no-cache' });
+    if (res.ok) data = await res.json();
+  } catch (e) { /* index unavailable -> empty (badges/map stay neutral) */ }
+  if (!data) return;
+  for (const r of data.requirements || []) {
+    index.set(r.id, {
+      id: r.id, docId: r.docId, component: r.component, group: r.group, no: r.no,
+      description: r.description || '', traceTo: (r.traceTo || []).slice(),
+      traceFrom: (r.traceFrom || []).slice(), verifiedBy: (r.verifiedBy || []).slice()
+    });
+  }
+  for (const t of data.tests || []) {
+    testIndex.set(t.id, {
+      id: t.id, docId: t.docId, component: t.component, key: t.key, name: t.name || t.id,
+      steps: t.steps || [], verifiesRaw: (t.verifies || []).slice(), verifies: (t.verifies || []).slice()
+    });
+  }
 }
 
-// Mirror the interim renderer's fence detection so the index and the rendered
-// cards always agree on what counts as a requirement block.
-function extractRequirementBlocks(body) {
-  const lines = String(body || '').replace(/\r\n?/g, '\n').split('\n');
-  const blocks = [];
-  let i = 0;
-  while (i < lines.length) {
-    const open = lines[i].match(/^\s*```(.*)$/);
-    if (open) {
-      const info = (open[1] || '').trim().split(/\s+/)[0].toLowerCase();
-      const buf = [];
-      i++;
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
-      i++; // consume the closing fence
-      if (info === 'requirement') blocks.push(buf.join('\n'));
-      continue;
+/**
+ * Parse the CURRENT document's requirement/test blocks from its (already-loaded)
+ * body and stash them for renderRequirements, enriched with the global trace-from /
+ * verified-by / verifies resolved by the server. Only the displayed doc is parsed.
+ * @param {string} body - raw markdown
+ * @param {string} docId
+ * @param {string} source - source name, for component lookup (see componentOf)
+ * @returns {ReqOrTestBlock[]}
+ */
+export function prepareDocGroups(body, docId, source) {
+  const component = componentOf(source);
+  const blocks = extractGroups(String(body || ''), { id: docId, source: source }, component);
+  for (const b of blocks) {
+    if (b.kind === 'req') {
+      for (const rec of b.rows) {
+        const g = index.get(rec.id);
+        if (g) { rec.traceFrom = g.traceFrom || []; rec.verifiedBy = g.verifiedBy || []; }
+      }
+    } else if (b.kind === 'test' && b.rec) {
+      const g = testIndex.get(b.rec.id);
+      if (g) b.rec.verifies = (g.verifies || []).slice();
     }
-    i++;
   }
+  groupsByDoc.set(docId, blocks);
   return blocks;
 }
 
-function nodeFromFields(fields, docId) {
-  const id = fields && fields.id != null ? String(fields.id) : '';
-  return {
-    id,
-    docId: docId || null,
-    fields: fields || {},
-    title: fields && fields.title != null ? String(fields.title) : id,
-    type: fields && fields.type != null ? String(fields.type) : 'requirement',
-    status: fields && fields.status != null ? String(fields.status) : '',
-    tags: asStrArray(fields && fields.tags),
-    parents: asStrArray(fields && fields.parents),
-    satisfiedBy: asStrArray(fields && fields.satisfiedBy),
-    verifiedBy: asStrArray(fields && fields.verifiedBy),
-    relatedTo: asStrArray(fields && fields.relatedTo),
-    children: [], verifies: [], satisfies: []
-  };
+/**
+ * Every known requirement (for the coverage rollup and the editor picker).
+ * @returns {RequirementEntry[]} sorted by id
+ */
+export function requirementList() {
+  return [...index.values()]
+    .map(r => ({
+      id: r.id, description: r.description || '', docId: r.docId, group: r.group,
+      component: r.component, no: r.no,
+      traceTo: (r.traceTo || []).slice(),
+      traceFrom: (r.traceFrom || []).slice(),
+      verifiedBy: (r.verifiedBy || []).slice()   // calculated test ids
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-// Build the one global index from the already-loaded document bodies.
-export function buildRequirementIndex(docs) {
-  const byId = new Map();
-  const order = [];
-  const docIds = new Set((docs || []).map(d => d.id));
-
-  for (const doc of docs || []) {
-    for (const raw of extractRequirementBlocks(doc.body)) {
-      let fields;
-      try {
-        fields = JSON.parse(raw);
-      } catch (e) {
-        console.warn('[requirements] Skipping malformed requirement block in "' + doc.id +
-          '": ' + (e && e.message ? e.message : e));
-        continue;
-      }
-      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
-        console.warn('[requirements] Requirement block in "' + doc.id + '" is not a JSON object; skipping.');
-        continue;
-      }
-      const node = nodeFromFields(fields, doc.id);
-      if (!node.id) {
-        console.warn('[requirements] Requirement block in "' + doc.id + '" has no "id"; skipping.');
-        continue;
-      }
-      if (byId.has(node.id)) {
-        console.warn('[requirements] Duplicate requirement id "' + node.id + '" (defined in "' +
-          byId.get(node.id).docId + '" and again in "' + doc.id + '"). Requirement ids must be ' +
-          'globally unique; keeping the first.');
-        continue;
-      }
-      byId.set(node.id, node);
-      order.push(node.id);
-    }
-  }
-
-  // Second pass: computed inverse links (only meaningful for req->req refs).
-  for (const id of order) {
-    const n = byId.get(id);
-    for (const p of n.parents)      { const t = byId.get(p); if (t) t.children.push(id); }
-    for (const v of n.verifiedBy)   { const t = byId.get(v); if (t) t.verifies.push(id); }
-    for (const s of n.satisfiedBy)  { const t = byId.get(s); if (t) t.satisfies.push(id); }
-  }
-
-  INDEX = { byId, order, docIds };
-  if (order.length) {
-    console.info('[requirements] Indexed ' + order.length + ' requirement(s) across the library.');
-  }
-  return INDEX;
+/**
+ * Every known test case (for the coverage rollup, graph, runner and editor).
+ * @returns {TestCaseEntry[]} sorted by id (verifiesRaw is omitted from this
+ *   projection - only the resolved verifies list is included)
+ */
+export function testList() {
+  return [...testIndex.values()]
+    .map(t => ({
+      id: t.id, name: t.name || '', key: t.key, docId: t.docId, component: t.component,
+      steps: (t.steps || []).map(s => ({ action: s.action, expected: s.expected })),
+      verifies: (t.verifies || []).slice()
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function hasRequirements() {
-  return !!(INDEX && INDEX.order.length);
+// Deep-link: scroll a requirement or test into view and flash it.
+function reveal(prefix, id) {
+  if (!id) return;
+  const el = document.getElementById(prefix + cssSafe(id));
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.add('req-flash');
+  setTimeout(() => el.classList.remove('req-flash'), 1600);
 }
+/** @param {string} reqId @returns {void} */
+export function revealRequirement(reqId) { reveal('req-', reqId); }
+/** @param {string} testId @returns {void} */
+export function revealTest(testId) { reveal('test-', testId); }
 
-// Resolve a trace target: a requirement id first, else a document id, else it
-// is a dangling reference (flagged, never fatal).
-function resolveRef(ref) {
-  const id = String(ref);
-  if (INDEX && INDEX.byId.has(id)) {
-    const n = INDEX.byId.get(id);
-    return { kind: 'req', id, docId: n.docId, node: n };
-  }
-  if (INDEX && INDEX.docIds.has(id)) return { kind: 'doc', id, docId: id };
-  return { kind: 'dangling', id };
-}
-
-// ---- Card rendering (post-sanitize DOM decoration) ------------------------
-
-// Called from renderDoc AFTER sanitize + numbering. Replaces every requirement
-// fenced block with a card built from trusted, parsed data.
-export function renderRequirements(rootEl) {
-  if (!rootEl) return;
-  const codes = rootEl.querySelectorAll('pre > code.language-requirement');
-  codes.forEach(code => {
-    const pre = code.parentElement;
-    if (!pre) return;
-    let fields;
-    try {
-      fields = JSON.parse(code.textContent);
-    } catch (e) {
-      // Robust to malformed JSON: leave the raw block visible, flag it, warn.
-      pre.classList.add('req-block-error');
-      pre.setAttribute('title', 'Malformed requirement JSON: ' + (e && e.message ? e.message : e));
-      console.warn('[requirements] Malformed requirement block on the current page: ' +
-        (e && e.message ? e.message : e));
-      return;
-    }
-    const id = fields && fields.id != null ? String(fields.id) : '';
-    // Prefer the indexed node (it carries the computed inverse links).
-    const node = (id && INDEX && INDEX.byId.get(id)) || nodeFromFields(fields, null);
-    pre.replaceWith(buildCard(node));
-  });
-}
-
-function buildCard(node) {
-  const card = document.createElement('section');
-  card.className = 'req-card';
-  card.dataset.reqId = node.id;                 // safe (property assignment)
-  if (node.id) card.id = 'req-' + node.id;      // safe; used as an anchor target
-  card.setAttribute('role', 'group');
-  card.setAttribute('aria-label', 'Requirement ' + node.id +
-    (node.title ? ': ' + node.title : ''));
-
-  // Header: id badge + pills
-  const head = document.createElement('div');
-  head.className = 'req-head';
-
-  const badge = document.createElement('span');
-  badge.className = 'req-id';
-  badge.textContent = node.id || '(no id)';
-  head.appendChild(badge);
-
-  const pills = document.createElement('span');
-  pills.className = 'req-pills';
-  if (node.type) {
-    const t = document.createElement('span');
-    t.className = 'req-pill req-pill-type';
-    t.dataset.type = node.type.toLowerCase();
-    t.textContent = node.type;
-    pills.appendChild(t);
-  }
-  if (node.status) {
-    const s = document.createElement('span');
-    s.className = 'req-pill req-pill-status';
-    s.dataset.status = node.status.toLowerCase();
-    s.textContent = node.status;
-    pills.appendChild(s);
-  }
-  head.appendChild(pills);
-  card.appendChild(head);
-
-  // Title
-  const title = document.createElement('p');
-  title.className = 'req-title';
-  title.textContent = node.title || node.id;
-  card.appendChild(title);
-
-  // Tags
-  if (node.tags.length) {
-    const tagRow = document.createElement('div');
-    tagRow.className = 'req-tags';
-    for (const tag of node.tags) {
-      const tg = document.createElement('span');
-      tg.className = 'req-tag';
-      tg.textContent = tag;
-      tagRow.appendChild(tg);
-    }
-    card.appendChild(tagRow);
-  }
-
-  // Trace-chip rows. sourceDocId decides same-doc vs cross-doc for each chip.
-  const src = node.docId;
-  const rows = document.createElement('div');
-  rows.className = 'req-traces';
-  addTraceRow(rows, 'Parents',      '↑', node.parents,     src);   // up arrow
-  addTraceRow(rows, 'Children',     '↓', node.children,    src);   // down arrow
-  addTraceRow(rows, 'Verified by',  '✓', node.verifiedBy,  src);   // check
-  addTraceRow(rows, 'Satisfied by', '▣', node.satisfiedBy, src);   // filled square
-  // Inverse links - populated for test / design requirements; only shown if present.
-  addTraceRow(rows, 'Verifies',     '✓', node.verifies,    src);
-  addTraceRow(rows, 'Satisfies',    '▣', node.satisfies,   src);
-  addTraceRow(rows, 'Related',      '↔', node.relatedTo,   src);   // left-right arrow
-  if (rows.childElementCount) card.appendChild(rows);
-
-  return card;
-}
-
-function addTraceRow(container, label, symbol, refs, sourceDocId) {
-  if (!refs || !refs.length) return;
-  const row = document.createElement('div');
-  row.className = 'req-trace-row';
-
-  const cap = document.createElement('span');
-  cap.className = 'req-trace-cap';
-  cap.textContent = symbol + ' ' + label;
-  row.appendChild(cap);
-
-  const chips = document.createElement('span');
-  chips.className = 'req-chips';
-  for (const ref of refs) chips.appendChild(buildChip(ref, sourceDocId));
-  row.appendChild(chips);
-
-  container.appendChild(row);
-}
-
-// A trace chip. Same-doc requirement -> in-page scroll; other-doc requirement
-// -> deep link; document target -> open that document; dangling -> flagged,
-// non-clickable, with a tooltip.
-function buildChip(ref, sourceDocId) {
-  const r = resolveRef(ref);
-
-  if (r.kind === 'dangling') {
-    const span = document.createElement('span');
-    span.className = 'req-chip req-chip-dangling';
-    span.textContent = '⚠ ' + r.id;           // warning sign
-    span.title = 'Dangling reference: “' + r.id +
-      '” does not resolve to a known requirement or document.';
-    span.setAttribute('role', 'note');
-    return span;
-  }
-
-  const a = document.createElement('a');
-  a.className = 'req-chip';
-  a.textContent = r.id;
-
-  if (r.kind === 'doc') {
-    a.classList.add('req-chip-doc');
-    a.href = '#/' + r.docId;
-    a.title = 'Document: ' + r.id;
-    return a;
-  }
-
-  // requirement target
-  a.title = r.node.title ? (r.id + ' — ' + r.node.title) : r.id;
-  const sameDoc = sourceDocId && r.docId && r.docId === sourceDocId;
-  const target = r.docId + '?req=' + encodeURIComponent(r.id);
-  a.href = '#/' + target;
-
-  if (sameDoc) {
-    // Scroll within the current page without a full re-render; keep the URL
-    // copyable via replaceState (does not fire hashchange, so no re-route).
-    a.addEventListener('click', ev => {
-      ev.preventDefault();
-      try { history.replaceState(null, '', '#/' + target); } catch (e) {}
-      revealRequirement(r.id);
-    });
-  }
-  // Cross-doc chips fall through to the normal hash router.
-  return a;
-}
-
-// ---- Deep-link reveal ------------------------------------------------------
-// Scroll a requirement's card into view and briefly highlight it.
-export function revealRequirement(reqId) {
-  if (!reqId) return;
-  const root = document.getElementById('content');
-  if (!root) return;
-  let target = null;
-  root.querySelectorAll('[data-req-id]').forEach(el => {
-    if (el.dataset.reqId === reqId) target = el;
-  });
-  if (!target) return;
-  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  target.classList.remove('req-flash');
-  void target.offsetWidth;            // restart the animation if re-triggered
-  target.classList.add('req-flash');
-  target.setAttribute('tabindex', '-1');
-  target.focus({ preventScroll: true });
-  window.setTimeout(() => target.classList.remove('req-flash'), 2200);
-}
-
-// Parse a requirement id out of a hash query string ("req=FR-012").
+// Pull ?req=<id> / ?test=<id> out of a hash-route query string.
+/** @param {string} query @returns {string|null} */
 export function reqFromQuery(query) {
   if (!query) return null;
-  try {
-    return new URLSearchParams(query).get('req');
-  } catch (e) {
-    const m = String(query).match(/(?:^|&)req=([^&]*)/);
-    return m ? decodeURIComponent(m[1]) : null;
-  }
+  const m = /(?:^|[?&])req=([^&]+)/.exec(query);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+/** @param {string} query @returns {string|null} */
+export function testFromQuery(query) {
+  if (!query) return null;
+  const m = /(?:^|[?&])test=([^&]+)/.exec(query);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
-// ---- Coverage statistics ---------------------------------------------------
-function computeStats() {
-  const nodes = INDEX ? INDEX.order.map(id => INDEX.byId.get(id)) : [];
-  const total = nodes.length;
-  let verified = 0, satisfied = 0, orphans = 0, dangling = 0;
-  const statusCounts = {};
-  const typeCounts = {};
-  const leavesNoVerif = [];
-
-  for (const n of nodes) {
-    if (n.verifiedBy.length) verified++;
-    if (n.satisfiedBy.length) satisfied++;
-    if (!n.parents.length) orphans++;
-    const st = n.status || '—';
-    statusCounts[st] = (statusCounts[st] || 0) + 1;
-    const ty = n.type || '—';
-    typeCounts[ty] = (typeCounts[ty] || 0) + 1;
-    for (const ref of [].concat(n.parents, n.satisfiedBy, n.verifiedBy, n.relatedTo)) {
-      if (resolveRef(ref).kind === 'dangling') dangling++;
-    }
-    // A leaf (no children) that is not itself a test and lacks verification.
-    if (!n.children.length && n.type.toLowerCase() !== 'test' && !n.verifiedBy.length) {
-      leavesNoVerif.push(n.id);
+/**
+ * Document -> document trace edges, for the map view's requirement-trace layer.
+ * @returns {DocEdgeRef[]}
+ */
+export function requirementTraceEdges() {
+  const seen = new Set();
+  const edges = [];
+  for (const rec of index.values()) {
+    for (const raw of rec.traceTo) {
+      const target = resolveReqRef(raw, rec);
+      if (!target) continue;
+      const toDoc = index.get(target).docId;
+      if (toDoc === rec.docId) continue;
+      const key = rec.docId + ' ' + toDoc;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push({ from: rec.docId, to: toDoc });
     }
   }
-
-  const pct = (num) => total ? Math.round((num / total) * 100) : 0;
-  return {
-    total, verified, satisfied, orphans, dangling,
-    pctVerified: pct(verified), pctSatisfied: pct(satisfied),
-    statusCounts, typeCounts, leavesNoVerif
-  };
-}
-
-// ---- Requirements view (overlay: matrix + coverage dashboard) -------------
-export function setupRequirementsView(opts) {
-  opts = opts || {};
-  const navigate = opts.navigate || function () {};
-  const btn = document.getElementById('reqBtn');
-  if (!btn) return;
-
-  // Hide the entry point entirely when the library has no requirements.
-  if (!hasRequirements()) { btn.hidden = true; return; }
-  btn.hidden = false;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'req-overlay';
-  overlay.id = 'reqOverlay';
-  overlay.hidden = true;
-  overlay.setAttribute('role', 'dialog');
-  overlay.setAttribute('aria-modal', 'true');
-  overlay.setAttribute('aria-label', 'Requirements traceability');
-  document.body.appendChild(overlay);
-
-  let lastFocus = null;
-
-  const goto = (idWithQuery) => { close(); navigate(idWithQuery); };
-
-  const open = () => {
-    lastFocus = document.activeElement;
-    overlay.textContent = '';
-    overlay.appendChild(buildView(goto));
-    overlay.hidden = false;
-    btn.setAttribute('aria-pressed', 'true');
-    const closeBtn = overlay.querySelector('#reqClose');
-    if (closeBtn) closeBtn.focus();
-    const live = document.getElementById('live');
-    if (live) live.textContent = 'Opened requirements traceability. Press Escape to close.';
-  };
-  const close = () => {
-    if (overlay.hidden) return;
-    overlay.hidden = true;
-    btn.setAttribute('aria-pressed', 'false');
-    if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
-    else btn.focus();
-  };
-
-  btn.addEventListener('click', () => (overlay.hidden ? open() : close()));
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && !overlay.hidden) { close(); }
-  });
-
-  return { open, close };
-}
-
-function buildView(goto) {
-  const view = document.createElement('div');
-  view.className = 'req-view';
-
-  // Head
-  const head = document.createElement('div');
-  head.className = 'req-view-head';
-  const h = document.createElement('h2');
-  h.className = 'req-view-title';
-  h.textContent = 'Requirements traceability';
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'icon-btn';
-  closeBtn.id = 'reqClose';
-  closeBtn.setAttribute('aria-label', 'Close requirements view');
-  closeBtn.textContent = '✕';
-  head.appendChild(h);
-  head.appendChild(closeBtn);
-  view.appendChild(head);
-  // The overlay owner wires Escape; also close on the button here.
-  closeBtn.addEventListener('click', () => {
-    const ov = document.getElementById('reqOverlay');
-    const btn = document.getElementById('reqBtn');
-    if (ov) ov.hidden = true;
-    if (btn) { btn.setAttribute('aria-pressed', 'false'); btn.focus(); }
-  });
-
-  view.appendChild(buildDashboard());
-  view.appendChild(buildMatrix(goto));
-  return view;
-}
-
-function statCard(label, value, opts) {
-  opts = opts || {};
-  const el = document.createElement('div');
-  el.className = 'req-stat' + (opts.warn ? ' req-stat-warn' : '');
-  const v = document.createElement('div');
-  v.className = 'req-stat-value';
-  v.textContent = String(value);
-  const l = document.createElement('div');
-  l.className = 'req-stat-label';
-  l.textContent = label;
-  el.appendChild(v);
-  el.appendChild(l);
-  if (opts.hint) el.title = opts.hint;
-  return el;
-}
-
-function buildDashboard() {
-  const s = computeStats();
-  const wrap = document.createElement('div');
-  wrap.className = 'req-dashboard';
-
-  const grid = document.createElement('div');
-  grid.className = 'req-stats';
-  grid.appendChild(statCard('requirements', s.total));
-  grid.appendChild(statCard('% verified', s.pctVerified + '%',
-    { hint: s.verified + ' of ' + s.total + ' have a verification' }));
-  grid.appendChild(statCard('% satisfied', s.pctSatisfied + '%',
-    { hint: s.satisfied + ' of ' + s.total + ' have a satisfier' }));
-  grid.appendChild(statCard('orphans', s.orphans, { hint: 'Requirements with no parent' }));
-  grid.appendChild(statCard('unverified leaves', s.leavesNoVerif.length,
-    { warn: s.leavesNoVerif.length > 0, hint: 'Leaf requirements (no children, non-test) lacking verification' }));
-  grid.appendChild(statCard('dangling refs', s.dangling,
-    { warn: s.dangling > 0, hint: 'Trace targets that resolve to neither a requirement nor a document' }));
-  wrap.appendChild(grid);
-
-  // Status breakdown
-  const brk = document.createElement('div');
-  brk.className = 'req-breakdown';
-  const cap = document.createElement('span');
-  cap.className = 'req-breakdown-cap';
-  cap.textContent = 'Status';
-  brk.appendChild(cap);
-  Object.keys(s.statusCounts).sort().forEach(st => {
-    const chip = document.createElement('span');
-    chip.className = 'req-pill req-pill-status';
-    chip.dataset.status = st.toLowerCase();
-    chip.textContent = st + ' · ' + s.statusCounts[st];
-    brk.appendChild(chip);
-  });
-  wrap.appendChild(brk);
-
-  return wrap;
-}
-
-function distinct(getter) {
-  const set = new Set();
-  if (INDEX) for (const id of INDEX.order) {
-    const vals = getter(INDEX.byId.get(id));
-    (Array.isArray(vals) ? vals : [vals]).forEach(v => { if (v) set.add(v); });
-  }
-  return Array.from(set).sort();
-}
-
-function buildMatrix(goto) {
-  const wrap = document.createElement('div');
-  wrap.className = 'req-matrix-wrap';
-
-  // Filters
-  const filters = document.createElement('div');
-  filters.className = 'req-filters';
-  const typeSel = labelledSelect(filters, 'Type', distinct(n => n.type));
-  const statusSel = labelledSelect(filters, 'Status', distinct(n => n.status));
-  const tagSel = labelledSelect(filters, 'Tag', distinct(n => n.tags));
-  wrap.appendChild(filters);
-
-  // Table
-  const scroller = document.createElement('div');
-  scroller.className = 'req-matrix-scroll';
-  const table = document.createElement('table');
-  table.className = 'req-matrix';
-
-  const thead = document.createElement('thead');
-  const htr = document.createElement('tr');
-  ['Requirement', 'Type', 'Status', 'Parents', 'Verified by', 'Satisfied by'].forEach(t => {
-    const th = document.createElement('th');
-    th.scope = 'col';
-    th.textContent = t;
-    htr.appendChild(th);
-  });
-  thead.appendChild(htr);
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  table.appendChild(tbody);
-  scroller.appendChild(table);
-  wrap.appendChild(scroller);
-
-  const empty = document.createElement('p');
-  empty.className = 'req-matrix-empty';
-  empty.textContent = 'No requirements match the current filters.';
-  empty.hidden = true;
-  wrap.appendChild(empty);
-
-  const render = () => {
-    tbody.textContent = '';
-    const tf = typeSel.value, sf = statusSel.value, gf = tagSel.value;
-    let shown = 0;
-    for (const id of INDEX.order) {
-      const n = INDEX.byId.get(id);
-      if (tf && n.type !== tf) continue;
-      if (sf && n.status !== sf) continue;
-      if (gf && !n.tags.includes(gf)) continue;
-      tbody.appendChild(buildMatrixRow(n, goto));
-      shown++;
-    }
-    empty.hidden = shown > 0;
-  };
-  typeSel.addEventListener('change', render);
-  statusSel.addEventListener('change', render);
-  tagSel.addEventListener('change', render);
-  render();
-
-  return wrap;
-}
-
-function labelledSelect(container, labelText, options) {
-  const lab = document.createElement('label');
-  lab.className = 'req-filter';
-  const span = document.createElement('span');
-  span.textContent = labelText;
-  const sel = document.createElement('select');
-  const any = document.createElement('option');
-  any.value = '';
-  any.textContent = 'All';
-  sel.appendChild(any);
-  for (const o of options) {
-    const opt = document.createElement('option');
-    opt.value = o;
-    opt.textContent = o;
-    sel.appendChild(opt);
-  }
-  lab.appendChild(span);
-  lab.appendChild(sel);
-  container.appendChild(lab);
-  return sel;
-}
-
-function buildMatrixRow(n, goto) {
-  const tr = document.createElement('tr');
-
-  // Requirement (id + title) - clickable, deep-links to the card
-  const idCell = document.createElement('td');
-  idCell.className = 'req-cell-id';
-  const link = document.createElement('a');
-  link.className = 'req-matrix-link';
-  link.href = '#/' + n.docId + '?req=' + encodeURIComponent(n.id);
-  const badge = document.createElement('span');
-  badge.className = 'req-id';
-  badge.textContent = n.id;
-  const ttl = document.createElement('span');
-  ttl.className = 'req-matrix-title';
-  ttl.textContent = n.title || '';
-  link.appendChild(badge);
-  link.appendChild(ttl);
-  link.addEventListener('click', ev => {
-    ev.preventDefault();
-    goto(n.docId + '?req=' + encodeURIComponent(n.id));
-  });
-  idCell.appendChild(link);
-  tr.appendChild(idCell);
-
-  // Type
-  const typeCell = document.createElement('td');
-  if (n.type) {
-    const p = document.createElement('span');
-    p.className = 'req-pill req-pill-type';
-    p.dataset.type = n.type.toLowerCase();
-    p.textContent = n.type;
-    typeCell.appendChild(p);
-  }
-  tr.appendChild(typeCell);
-
-  // Status
-  const statusCell = document.createElement('td');
-  if (n.status) {
-    const p = document.createElement('span');
-    p.className = 'req-pill req-pill-status';
-    p.dataset.status = n.status.toLowerCase();
-    p.textContent = n.status;
-    statusCell.appendChild(p);
-  }
-  tr.appendChild(statusCell);
-
-  // Parents
-  tr.appendChild(chipCell(n.parents, goto, false));
-
-  // Verified by - gap highlight for an unverified LEAF (no children, non-test);
-  // higher-level requirements are verified indirectly via their children.
-  const isTest = n.type.toLowerCase() === 'test';
-  const isGap = !isTest && n.verifiedBy.length === 0 && n.children.length === 0;
-  tr.appendChild(chipCell(n.verifiedBy, goto, isGap));
-
-  // Satisfied by
-  tr.appendChild(chipCell(n.satisfiedBy, goto, false));
-
-  return tr;
-}
-
-function chipCell(refs, goto, isGap) {
-  const td = document.createElement('td');
-  if (isGap) {
-    td.className = 'req-gap';
-    const g = document.createElement('span');
-    g.className = 'req-gap-label';
-    g.textContent = 'gap';
-    g.title = 'Coverage gap: no verification';
-    td.appendChild(g);
-    return td;
-  }
-  if (!refs || !refs.length) {
-    td.className = 'req-cell-empty';
-    td.textContent = '—';
-    return td;
-  }
-  for (const ref of refs) td.appendChild(overlayChip(ref, goto));
-  return td;
-}
-
-function overlayChip(ref, goto) {
-  const r = resolveRef(ref);
-  if (r.kind === 'dangling') {
-    const span = document.createElement('span');
-    span.className = 'req-chip req-chip-dangling';
-    span.textContent = '⚠ ' + r.id;
-    span.title = 'Dangling reference: “' + r.id + '” does not resolve.';
-    return span;
-  }
-  const a = document.createElement('a');
-  a.className = 'req-chip';
-  a.textContent = r.id;
-  if (r.kind === 'doc') {
-    a.classList.add('req-chip-doc');
-    a.href = '#/' + r.docId;
-    a.title = 'Document: ' + r.id;
-    a.addEventListener('click', ev => { ev.preventDefault(); goto(r.docId); });
-  } else {
-    a.href = '#/' + r.docId + '?req=' + encodeURIComponent(r.id);
-    a.title = r.node.title ? (r.id + ' — ' + r.node.title) : r.id;
-    a.addEventListener('click', ev => {
-      ev.preventDefault();
-      goto(r.docId + '?req=' + encodeURIComponent(r.id));
-    });
-  }
-  return a;
+  return edges;
 }

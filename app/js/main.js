@@ -1,15 +1,74 @@
 // main.js - application entry point. Wires the shell together:
 // theme, discovery, hash routing, the render pipeline, the drawer and search.
-import { loadSite, discover, loadDoc } from './catalog.js';
-import { renderMarkdown, INTERIM } from './markdown.js';
-import { sanitizeToFragment } from './sanitize.js';
-import { numberHeadings, buildTOC } from './numbering.js';
-import { renderTree, markActive, filterTree } from './tree.js';
-import { createGraph } from './graph.js';
-import { buildRequirementIndex, renderRequirements, revealRequirement, reqFromQuery, setupRequirementsView } from './requirements.js';
+import { loadSite, loadDoc } from './catalog.js';
+import { renderTree } from './tree.js';
+import { searchDocs } from './search.js';
+import { setupGraphButton } from './map-view.js';
+import { setLinkSearch } from './editor.js';
+import { loadResults } from './coverage.js';
+import { openRunner } from './runner.js';
+import { loadPlugins } from './plugins.js';
+import { buildRequirementIndex, revealRequirement, revealTest, reqFromQuery, testFromQuery, requirementList, testList, setCoverageStatus } from './requirements.js';
+import { state, el, combinedStatus, app, defaultId, getDoc } from './app-shell.js';
+import { setupCoverageView } from './coverage-view.js';
+import { renderDoc, setupDocSearch } from './reader.js';
+import { setupEditButtons } from './authoring.js';
+import { elem, append } from './dom.js';
+import { html } from './html.js';
+import { sunIcon, moonIcon } from './icons.js';
 
-const el = id => document.getElementById(id);
-const state = { site: null, docs: [], byId: new Map(), current: null, spy: null };
+/** @typedef {import("./catalog.js").SourceConfig} SourceConfig */
+/** @typedef {import("./coverage.js").CoverageResults} CoverageResults */
+/** @typedef {import("./requirements.js").TestCaseEntry} TestCaseEntry */
+
+/**
+ * The drawer's open/close handle returned by setupDrawer(); stashed as
+ * `appDrawer` and handed to setupDrawerSearch and app.closeDrawer.
+ * @typedef {Object} DrawerHandle
+ * @property {() => void} open
+ * @property {() => void} close
+ */
+
+/**
+ * Detail payload of the `webdoc:run-test` CustomEvent, dispatched by a
+ * document's per-test-case Run button and consumed by setupTestRun.
+ * @typedef {Object} RunTestEventDetail
+ * @property {string} testId
+ */
+
+/**
+ * The JSON body of GET /api/index/status, polled by waitForIndex while the
+ * server builds its first-run SQLite index.
+ * @typedef {Object} IndexStatus
+ * @property {string} state - e.g. 'building' | 'ready' | 'error'
+ * @property {number} pct - percent complete (0 while unknown)
+ * @property {number} docs - documents indexed so far (0 while unknown)
+ */
+
+/**
+ * The first-run index-build overlay's live DOM handle, held in the
+ * module-level `indexOverlay` while the overlay is shown.
+ * @typedef {Object} IndexOverlayHandle
+ * @property {HTMLElement} ov - the overlay root, appended to <body>
+ * @property {HTMLElement} track - the progress bar track (toggles .is-indeterminate)
+ * @property {HTMLElement} fill - the progress bar fill (width set to a percentage)
+ * @property {HTMLElement} stat - the status line text
+ */
+
+/**
+ * The options object built for a single ad-hoc test run (triggered by a
+ * document's per-test Run button) and handed to runner.js's openRunner, which
+ * reads every field back out to render the run screen and later save results.
+ * @typedef {Object} RunnerOpts
+ * @property {TestCaseEntry[]} tests
+ * @property {CoverageResults} results
+ * @property {SourceConfig[]} sources
+ * @property {() => void} onSaved
+ */
+
+// The drawer handle (open/close), created at boot; exposed to modules via app.closeDrawer.
+/** @type {DrawerHandle|null} */
+let appDrawer = null;
 
 // ---- Theme ----------------------------------------------------------------
 function setupTheme() {
@@ -17,7 +76,8 @@ function setupTheme() {
   const sync = () => {
     const dark = root.getAttribute('data-theme') === 'dark';
     btn.setAttribute('aria-pressed', String(dark));
-    btn.textContent = dark ? '☀' : '☾';
+    btn.textContent = '';
+    btn.appendChild(dark ? sunIcon() : moonIcon());
   };
   btn.addEventListener('click', () => {
     const dark = root.getAttribute('data-theme') === 'dark';
@@ -30,6 +90,7 @@ function setupTheme() {
 }
 
 // ---- Drawer ---------------------------------------------------------------
+/** @returns {DrawerHandle} */
 function setupDrawer() {
   const drawer = el('doc-tree'), scrim = el('scrim'), btn = el('hamburger');
   let lastFocus = null;
@@ -53,196 +114,52 @@ function setupDrawer() {
   return { open, close };
 }
 
-// ---- Rendering pipeline ---------------------------------------------------
-function renderDoc(doc) {
-  const content = el('content');
-  content.textContent = '';
-
-  if (INTERIM) {
-    const banner = document.createElement('div');
-    banner.className = 'interim-banner';
-    banner.innerHTML = '<strong>Interim renderer.</strong> Layout preview only — the full, ' +
-      'CommonMark-compliant engine (verified against spec.json) is the next phase and will ' +
-      'replace this without changing anything else.';
-    content.appendChild(banner);
-  }
-
-  const article = document.createElement('article');
-  article.className = 'doc';
-
-  // pipeline: parse -> sanitize (inert) -> adopt -> number + TOC
-  const html = renderMarkdown(doc.body || '');
-  article.appendChild(sanitizeToFragment(html));
-  content.appendChild(article);
-
-  // Surface the metadata description as a subtitle under the first heading.
-  if (doc.description) {
-    const lede = document.createElement('p');
-    lede.className = 'doc-lede';
-    lede.textContent = doc.description;
-    const h1 = article.querySelector('h1');
-    if (h1) h1.after(lede); else article.prepend(lede);
-  }
-
-  const toc = numberHeadings(article);
-  const tocList = el('tocList');
-  tocList.textContent = '';
-  tocList.appendChild(buildTOC(toc, content));
-
-  // Requirement cards: post-sanitize decoration, same pattern as numbering.
-  renderRequirements(article);
-
-  setupScrollSpy(article, tocList);
-
-  // header + footer chrome
-  document.title = doc.title + ' — ' + (state.site.siteTitle || 'Documentation');
-  el('crumbs').textContent = doc.id.split('/').join(' › ');
-  renderFooter(doc);
-  markActive(el('treeList'), doc.id);
-
-  content.scrollTop = 0;
-  content.focus({ preventScroll: true });
-  el('live').textContent = 'Loaded: ' + doc.title;
-}
-
-// Footer shows the current document's OWN metadata: every "assumed knowledge"
-// entry (read first) and every "recommended next" entry - each may be several.
-function renderFooter(doc) {
-  buildFootGroup(el('footPrev'), doc.assumes || [], '‹ Assumed knowledge', false);
-  buildFootGroup(el('footNext'), doc.next || [], 'Recommended next ›', true);
-}
-function buildFootGroup(container, ids, caption, isNext) {
-  container.textContent = '';
-  if (!ids || !ids.length) { container.hidden = true; return; }
-  container.hidden = false;
-
-  const cap = document.createElement('span');
-  cap.className = 'foot-cap';
-  cap.textContent = caption;
-  container.appendChild(cap);
-
-  const ul = document.createElement('ul');
-  ul.className = 'foot-links';
-  for (const id of ids) {
-    const li = document.createElement('li');
-    const target = state.byId.get(id);
-    if (target) {
-      const a = document.createElement('a');
-      a.href = '#/' + id;
-      a.textContent = target.title || id;
-      li.appendChild(a);
-    } else {
-      const span = document.createElement('span');
-      span.className = 'foot-missing';
-      span.title = 'Referenced document not found: ' + id;
-      span.textContent = '⚠ ' + id;
-      li.appendChild(span);
-    }
-    ul.appendChild(li);
-  }
-  container.appendChild(ul);
-}
-
-let spyObserver = null;
-function setupScrollSpy(article, tocList) {
-  if (spyObserver) spyObserver.disconnect();
-  const links = new Map();
-  tocList.querySelectorAll('a[data-target]').forEach(a => links.set(a.dataset.target, a));
-  spyObserver = new IntersectionObserver(entries => {
-    for (const e of entries) {
-      if (e.isIntersecting) {
-        tocList.querySelectorAll('a.active').forEach(a => a.classList.remove('active'));
-        const a = links.get(e.target.id);
-        if (a) a.classList.add('active');
-      }
-    }
-  }, { root: el('content'), rootMargin: '-8% 0px -80% 0px', threshold: 0 });
-  article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => spyObserver.observe(h));
-}
-
-// ---- In-document search (highlight + jump) --------------------------------
-function setupDocSearch() {
-  const input = el('docSearch');
+// ---- All-documents search (titles + headings) in the drawer ---------------
+/** @param {DrawerHandle} drawer */
+function setupDrawerSearch(drawer) {
+  const input = el('treeSearch');
+  const results = el('searchResults');
+  const tree = el('treeList');
+  let seq = 0, ctrl = null, timer = null;
   input.addEventListener('input', () => {
-    const article = el('content').querySelector('.doc');
-    if (!article) return;
-    clearHighlights(article);
     const q = input.value.trim();
-    if (q.length < 2) return;
-    const first = highlight(article, q);
-    if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (timer) clearTimeout(timer);
+    if (ctrl) { try { ctrl.abort(); } catch (e) {} ctrl = null; }
+    if (!q) { results.hidden = true; results.textContent = ''; tree.hidden = false; return; }
+    tree.hidden = true; results.hidden = false;
+    // Debounce keystrokes; AbortController cancels the in-flight request; a sequence
+    // guard drops out-of-order responses so results never flicker.
+    timer = setTimeout(async () => {
+      const mySeq = ++seq;
+      ctrl = new AbortController();
+      results.textContent = '';
+      append(results, elem('p', 'search-empty', 'Searching…'));
+      let hits = [];
+      try { hits = await searchDocs(q, 50, ctrl.signal); } catch (e) { hits = []; }
+      if (mySeq !== seq) return;   // superseded by a newer keystroke
+      results.textContent = '';
+      if (!hits.length) { append(results, elem('p', 'search-empty', 'No documents match “' + q + '”.')); return; }
+      for (const hit of hits) {
+        append(results, elem('a', {
+          class: 'search-hit', href: '#/' + hit.docId,
+          onClick: ev => { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return; ev.preventDefault(); navigate(hit.docId); drawer.close(); }
+        }, html`<span class="search-hit-title">${hit.title}</span>${hit.snippet && html`<span class="search-hit-sub">${hit.snippet}</span>`}`));
+      }
+    }, 200);
   });
 }
-function clearHighlights(root) {
-  root.querySelectorAll('mark.find').forEach(m => {
-    const t = document.createTextNode(m.textContent);
-    m.replaceWith(t);
-  });
-  root.normalize();
-}
-function highlight(root, q) {
-  const needle = q.toLowerCase();
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: n => (n.parentElement.closest('pre,code,mark') ? NodeFilter.FILTER_REJECT
-                                                              : NodeFilter.FILTER_ACCEPT)
-  });
-  const targets = [];
-  let node;
-  while ((node = walker.nextNode())) if (node.nodeValue.toLowerCase().includes(needle)) targets.push(node);
-  let firstMark = null;
-  for (const text of targets) {
-    const frag = document.createDocumentFragment();
-    let s = text.nodeValue, lower = s.toLowerCase(), i = 0, idx;
-    while ((idx = lower.indexOf(needle, i)) !== -1) {
-      if (idx > i) frag.appendChild(document.createTextNode(s.slice(i, idx)));
-      const mark = document.createElement('mark');
-      mark.className = 'find';
-      mark.textContent = s.slice(idx, idx + needle.length);
-      frag.appendChild(mark);
-      if (!firstMark) firstMark = mark;
-      i = idx + needle.length;
-    }
-    if (i < s.length) frag.appendChild(document.createTextNode(s.slice(i)));
-    text.replaceWith(frag);
-  }
-  return firstMark;
-}
 
-// ---- Map (document-relationship graph) ------------------------------------
-let graphApi = null;
-function setupGraphButton() {
-  const btn = el('graphBtn');
-  const overlay = document.createElement('div');
-  overlay.className = 'graph-overlay';
-  overlay.id = 'graphOverlay';
-  overlay.hidden = true;
-  const stage = document.createElement('div'); // becomes .graph-root, fills overlay
-  overlay.appendChild(stage);
-  document.body.appendChild(overlay);
-
-  const open = () => {
-    overlay.hidden = false;
-    btn.setAttribute('aria-pressed', 'true');
-    if (graphApi) graphApi.destroy();
-    graphApi = createGraph(stage, state.docs, {
-      currentId: state.current && state.current.id,
-      onOpenDoc: (id) => { close(); navigate(id); }
-    });
-    el('live').textContent = 'Opened the document map. Press Escape to close.';
-  };
-  const close = () => {
-    if (overlay.hidden) return;
-    overlay.hidden = true;
-    btn.setAttribute('aria-pressed', 'false');
-    if (graphApi) { graphApi.destroy(); graphApi = null; }
-    el('content').focus({ preventScroll: true });
-  };
-
-  btn.addEventListener('click', () => (overlay.hidden ? open() : close()));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
-}
+// ---- Test coverage view -------------------------------------------------
+// The full-screen Test Coverage overlay lives in ./coverage-view.js
+// (setupCoverageView); it hangs its close() on app.closeCoverageView.
 
 // ---- Routing --------------------------------------------------------------
+/**
+ * Hash-route handler: resolves the current #/<id>?req=...&test=... route to a
+ * document (lazily loading it via getDoc/loadDoc), renders it, and reveals any
+ * deep-linked requirement or test.
+ * @returns {Promise<void>}
+ */
 async function route() {
   const hash = location.hash || '';
   if (!hash.startsWith('#/')) return; // ignore in-page anchors etc.
@@ -250,39 +167,135 @@ async function route() {
   const q = raw.indexOf('?');                      // split off ?req=<ID>
   const id = decodeURIComponent(q === -1 ? raw : raw.slice(0, q));
   const query = q === -1 ? '' : raw.slice(q + 1);
-  const doc = state.byId.get(id) || state.byId.get(defaultId());
+  const doc = getDoc(id) || getDoc(defaultId());   // lazy: id -> stub -> loadDoc on demand
   if (!doc) return showError('No documents found.');
   try {
     await loadDoc(doc);
     state.current = doc;
     renderDoc(doc);
-    const reqId = reqFromQuery(query);             // deep-link to a requirement
+    const reqId = reqFromQuery(query);             // deep-link to a requirement or test
     if (reqId) requestAnimationFrame(() => revealRequirement(reqId));
+    const testId = testFromQuery(query);
+    if (testId) requestAnimationFrame(() => revealTest(testId));
   } catch (e) {
     showError('Could not load "' + id + '": ' + e.message);
   }
 }
-function defaultId() {
-  return (state.site && state.site.defaultDoc) || (state.docs[0] && state.docs[0].id);
-}
 function showError(msg) {
   const content = el('content');
   content.textContent = '';
-  const box = document.createElement('div');
-  box.className = 'doc-error';
-  box.textContent = msg;
-  content.appendChild(box);
+  content.appendChild(elem('div', 'doc-error', msg));
 }
 function navigate(id) {
   if (location.hash === '#/' + id) route(); else location.hash = '#/' + id;
 }
 
+// Wire the shell's own handles onto the service registry so the feature modules
+// (map, coverage, authoring) can route, report errors and close the drawer without
+// importing main.js. The rest of the registry is set by those modules at load.
+app.navigate = navigate;
+app.showError = showError;
+app.closeDrawer = () => { if (appDrawer) appDrawer.close(); };
+
+/**
+ * Per-test "Run" from a test-case block in a document: listens for the
+ * `webdoc:run-test` CustomEvent ({@link RunTestEventDetail}), loads results,
+ * opens the runner for that one test (via a {@link RunnerOpts}), and refreshes
+ * badges after saving.
+ */
+function setupTestRun() {
+  document.addEventListener('webdoc:run-test', async (e) => {
+    const id = e.detail && e.detail.testId;
+    const t = testList().find(x => x.id === id);
+    if (!t) return;
+    const res = await loadResults(state.site && state.site.sources);
+    openRunner({
+      tests: [t], results: res, sources: state.site && state.site.sources,
+      onSaved: () => {
+        setCoverageStatus(combinedStatus(requirementList(), testList(), res));
+        if (state.current) renderDoc(state.current);
+      }
+    });
+  });
+}
+
+// ---- First-run index build progress ---------------------------------------
+// While the server builds its SQLite index for the first time on a large corpus,
+// the /api/index/* endpoints aren't ready - so show a progress bar (driven by
+// /api/index/status) instead of a blank app. Warm restarts report "ready" at once,
+// so this returns immediately and nothing is shown.
+/** @type {IndexOverlayHandle|null} */
+let indexOverlay = null;
+function showIndexOverlay() {
+  if (indexOverlay) return;
+  const fill = elem('div', 'index-progress-fill');
+  const track = elem('div', 'index-progress is-indeterminate', fill);
+  const stat = elem('div', 'index-loading-stat', 'Scanning files…');
+  const brand = (state.site && state.site.siteTitle) || 'Documentation';
+  const ov = html`
+    <div class="index-loading">
+      <div class="index-loading-card">
+        <div class="index-loading-brand">${brand}</div>
+        <div class="index-loading-title">Preparing the document index…</div>
+        ${track}
+        ${stat}
+        <div class="index-loading-note">First-time indexing of this library. Later starts are near-instant.</div>
+      </div>
+    </div>
+  `.firstElementChild;
+  document.body.appendChild(ov);
+  el('live').textContent = 'Preparing the document index.';
+  indexOverlay = { ov: ov, track: track, fill: fill, stat: stat };
+}
+/** @param {IndexStatus} s */
+function updateIndexOverlay(s) {
+  if (!indexOverlay) return;
+  const pct = Math.max(0, Math.min(100, s.pct || 0));
+  const scanning = !pct && !s.docs;   // walk phase: total not known yet -> indeterminate
+  indexOverlay.track.classList.toggle('is-indeterminate', scanning);
+  if (!scanning) indexOverlay.fill.style.width = pct + '%';
+  indexOverlay.stat.textContent = scanning
+    ? 'Scanning files…'
+    : (Number(s.docs || 0).toLocaleString() + ' documents indexed · ' + pct + '%');
+}
+function hideIndexOverlay() {
+  if (!indexOverlay) return;
+  indexOverlay.ov.remove();
+  indexOverlay = null;
+}
+// Block boot until the server index is ready, showing progress if it's a cold build.
+/** @returns {Promise<void>} */
+async function waitForIndex() {
+  for (;;) {
+    let s;
+    try {
+      const r = await fetch('/api/index/status', { cache: 'no-cache' });
+      if (!r.ok) break;              // index disabled / unavailable -> proceed (app degrades gracefully)
+      s = await r.json();
+    } catch (e) { break; }
+    if (!s || s.state === 'ready' || s.state === 'error') break;
+    showIndexOverlay();
+    updateIndexOverlay(s);
+    await new Promise(res => setTimeout(res, 600));
+  }
+  hideIndexOverlay();
+}
+
 // ---- Boot -----------------------------------------------------------------
+/**
+ * Application entry point: wires theme/drawer/search/graph/coverage/authoring,
+ * loads site config and the server-backed requirement/test index, renders the
+ * initial tree, and resolves the starting route.
+ * @returns {Promise<void>}
+ */
 async function boot() {
   setupTheme();
-  const drawer = setupDrawer();
+  appDrawer = setupDrawer();
   setupDocSearch();
   setupGraphButton();
+  setupCoverageView();
+  setupEditButtons();
+  setupTestRun();
 
   try {
     state.site = await loadSite();
@@ -291,18 +304,32 @@ async function boot() {
   }
   el('brand').textContent = state.site.siteTitle || 'Documentation';
 
-  state.docs = await discover(state.site.sources || []);
-  // Load metadata for every doc once, so the tree, footer and search have titles.
-  await Promise.all(state.docs.map(d => loadDoc(d).catch(() => d)));
-  state.docs.forEach(d => state.byId.set(d.id, d));
+  // Load any opted-in renderer plugins (config "plugins"). Fault-tolerant: a
+  // missing plugin or absent library is skipped, never blocking boot.
+  await loadPlugins(state.site.plugins);
 
-  // Build the global requirement trace index from every loaded doc body, then
-  // wire the header entry point + the traceability view (matrix + coverage).
-  buildRequirementIndex(state.docs);
-  setupRequirementsView({ navigate });
+  // On a first-time cold index build, wait here with a progress bar (the tree /
+  // search / map all need the index). Warm starts pass through instantly.
+  await waitForIndex();
 
-  renderTree(el('treeList'), state.docs, id => { navigate(id); drawer.close(); });
-  el('treeSearch').addEventListener('input', e => filterTree(el('treeList'), state.docs, e.target.value));
+  // LAZY boot: do NOT discover + load every document body (the old ceiling). The
+  // global requirement/test index comes from the server's SQLite index; individual
+  // documents load on demand when viewed; the tree, all-docs search and the map are
+  // all server-backed. Boot cost is now flat regardless of corpus size.
+  state.docs = [];
+  await buildRequirementIndex(null, state.site.sources);
+  // Editor link autocomplete: server-backed title/id suggestions via the search index
+  // (scales past any client-held document list).
+  setLinkSearch(async q => (await searchDocs(q, 8)).map(h => ({ id: h.docId, title: h.title })));
+
+  // Test-coverage status, so requirement badges in the tables colour by pass/fail.
+  try {
+    const cov = await loadResults(state.site && state.site.sources);
+    setCoverageStatus(combinedStatus(requirementList(), testList(), cov));
+  } catch (e) { /* no results -> badges stay neutral */ }
+
+  await renderTree(el('treeList'), id => { navigate(id); appDrawer.close(); });
+  setupDrawerSearch(appDrawer);
 
   window.addEventListener('hashchange', route);
   if (!location.hash || !location.hash.startsWith('#/')) {

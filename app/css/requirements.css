@@ -1,206 +1,81 @@
 /* ============================================================================
-   Requirements traceability - cards, chips, deep-link highlight, and the
-   library-wide view (matrix + coverage dashboard). All colour comes from the
-   app tokens in app.css, so everything is theme-aware (light + dark) for free.
+   Requirement-group tables + cross-document trace links. All colour comes from
+   the app tokens in app.css, so it is theme-aware (light + dark) for free.
    ========================================================================== */
 
-/* ---- In-page requirement card -------------------------------------------- */
-.req-card {
-  margin: 18px 0;
-  padding: 14px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  scroll-margin-top: 24px;
-}
-.req-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.req-group { margin: 24px 0; }
 
-.req-head {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+.req-cap {
+  font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 8px;
 }
-.req-id {
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: 12.5px; font-weight: 700; letter-spacing: .02em;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 2px 8px;
+
+.req-error {
+  color: var(--recnext); background: var(--surface);
+  border: 1px solid var(--border); border-left: 3px solid var(--recnext);
+  border-radius: 6px; padding: 8px 12px; margin: 0 0 8px; font-size: 14px;
+}
+
+.req-scroll { overflow-x: auto; }
+
+.req-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.req-tbl th, .req-tbl td {
+  border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top;
+}
+.req-tbl th { background: var(--surface-2); font-size: 12.5px; white-space: nowrap; }
+
+.req-idcell { white-space: nowrap; }
+.req-badge {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent);
+  border-radius: 5px; padding: 2px 7px;
+}
+
+.req-link {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px;
   white-space: nowrap;
 }
-.req-pills { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.req-missing {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px;
+  color: var(--faint); white-space: nowrap; cursor: help;
+}
+.req-none { color: var(--faint); }
 
-.req-pill {
-  font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
-  padding: 2px 9px; border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2); color: var(--muted);
-  white-space: nowrap;
-}
-/* Type accents */
-.req-pill-type[data-type="test"] {
-  border-style: dashed; color: var(--recnext); border-color: var(--recnext);
-}
-.req-pill-type[data-type="business"] { color: var(--text); border-color: var(--border-strong); }
-/* Status accents (unknown statuses fall back to the neutral default) */
-.req-pill-status[data-status="approved"] {
-  background: var(--accent-soft); color: var(--accent); border-color: var(--accent);
-}
-.req-pill-status[data-status="verified"] {
-  background: var(--accent-soft); color: var(--accent); border-color: var(--accent);
-}
-.req-pill-status[data-status="draft"] { font-style: italic; }
-.req-pill-status[data-status="proposed"] { color: var(--muted); }
-.req-pill-status[data-status="rejected"],
-.req-pill-status[data-status="deprecated"] {
-  background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-border);
-}
+/* Test cases: each is its own block-table of action / expected-response steps.
+   The caption carries the name, a monospace id, and the rolled-up Result pill. */
+.test-case { margin: 24px 0; }
+.tc-cap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; text-transform: none; letter-spacing: 0; font-size: 13px; }
+.tc-id { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; color: var(--faint); }
+.tc-verifies { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+.tc-verifies .req-link { font-size: 12.5px; }
+.test-steps-tbl .tc-stepno { width: 34px; text-align: center; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* Markdown rendered inside a test-step cell / panel — tidy the block margins so
+   a single paragraph sits flush, while lists/code-blocks keep sensible spacing. */
+.tc-md > :first-child { margin-top: 0; }
+.tc-md > :last-child { margin-bottom: 0; }
+.tc-md p { margin: 5px 0; }
+.tc-md ul, .tc-md ol { margin: 5px 0; padding-left: 20px; }
+.tc-md pre { margin: 6px 0; }
+.tc-md code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .92em; background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
+.tc-md pre code { background: none; padding: 0; }
 
-.req-title { margin: 8px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: var(--text); }
+.tc-link { color: var(--accent); }
+.tc-steps { white-space: normal; font-size: 13px; color: var(--muted); }
+.tc-result {
+  display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: .02em;
+  border-radius: 5px; padding: 2px 8px; white-space: nowrap;
+}
+.tc-result-pass     { background: color-mix(in srgb, var(--cov-pass, #1f9d57) 16%, transparent); color: var(--cov-pass, #1f9d57); }
+.tc-result-fail     { background: color-mix(in srgb, var(--cov-fail, #e0413f) 16%, transparent); color: var(--cov-fail, #e0413f); }
+.tc-result-partial  { background: color-mix(in srgb, var(--cov-partial, #c98a00) 18%, transparent); color: var(--cov-partial, #c98a00); }
+.tc-result-untested { background: transparent; color: var(--cov-untested, #3b7fd4); box-shadow: inset 0 0 0 1px var(--cov-untested, #3b7fd4); }
 
-.req-tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }
-.req-tag {
-  font-size: 11.5px; color: var(--muted);
-  background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: 5px; padding: 1px 7px;
+/* Deep-link flash when arriving via a trace link (#/<doc>?req=<id> or ?test=<id>). */
+tr.req-flash { animation: reqFlash 1.6s ease-out; }
+@keyframes reqFlash {
+  0% { background: var(--accent-soft); }
+  100% { background: transparent; }
 }
-.req-tag::before { content: "#"; color: var(--faint); }
-
-.req-traces { margin-top: 12px; display: grid; gap: 7px; }
-.req-trace-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.req-trace-cap {
-  flex: 0 0 108px; min-width: 108px;
-  font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--muted); font-weight: 600;
-}
-.req-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-
-/* ---- Trace chips (shared by cards and the matrix) ------------------------ */
-.req-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: 12px; line-height: 1.4;
-  padding: 2px 9px; border-radius: 999px;
-  background: var(--surface-2); color: var(--text);
-  border: 1px solid var(--border-strong);
-  text-decoration: none; white-space: nowrap; cursor: pointer;
-}
-a.req-chip:hover {
-  background: var(--accent-soft); border-color: var(--accent);
-  color: var(--accent); text-decoration: none;
-}
-a.req-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.req-chip-doc { font-style: normal; }
-.req-chip-doc::before { content: "\1F4C4"; font-family: inherit; margin-right: 1px; }
-.req-chip-dangling {
-  background: var(--warn-bg); color: var(--warn-text);
-  border: 1px dashed var(--warn-border); cursor: help;
-}
-
-/* Malformed requirement block that failed to parse (left visible, flagged). */
-pre.req-block-error {
-  border-left: 3px solid var(--recnext) !important;
-}
-
-/* ---- Deep-link highlight -------------------------------------------------- */
-@keyframes req-flash {
-  0%   { box-shadow: 0 0 0 3px var(--accent); background: var(--accent-soft); }
-  100% { box-shadow: 0 0 0 0 transparent; background: var(--surface); }
-}
-.req-flash { animation: req-flash 2.1s ease-out; }
 @media (prefers-reduced-motion: reduce) {
-  .req-flash { animation: none; box-shadow: 0 0 0 2px var(--accent); }
-}
-
-/* ---- Requirements view overlay ------------------------------------------- */
-.req-overlay {
-  position: fixed; inset: var(--header-h) 0 0 0; z-index: 25;
-  background: var(--bg); overflow: auto;
-}
-.req-overlay[hidden] { display: none; }
-.req-view { max-width: 1100px; margin: 0 auto; padding: 20px 24px 60px; }
-.req-view-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  margin-bottom: 18px;
-}
-.req-view-title { margin: 0; font-size: 22px; letter-spacing: -.01em; }
-
-/* Coverage dashboard */
-.req-dashboard {
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--surface); padding: 16px; margin-bottom: 20px;
-}
-.req-stats {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px;
-}
-.req-stat {
-  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 12px 14px; text-align: center;
-}
-.req-stat-value {
-  font-size: 26px; font-weight: 700; line-height: 1.1;
-  color: var(--accent); font-variant-numeric: tabular-nums;
-}
-.req-stat-label {
-  font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--muted); margin-top: 4px;
-}
-.req-stat-warn { border-color: var(--recnext); }
-.req-stat-warn .req-stat-value { color: var(--recnext); }
-
-.req-breakdown {
-  margin-top: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.req-breakdown-cap {
-  font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--faint); font-weight: 600;
-}
-
-/* Filters */
-.req-filters { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
-.req-filter { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-.req-filter select {
-  height: 32px; padding: 0 8px; font-size: 13px;
-  background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px;
-}
-
-/* Matrix table */
-.req-matrix-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
-.req-matrix { border-collapse: collapse; width: 100%; font-size: 13.5px; }
-.req-matrix th, .req-matrix td {
-  border-bottom: 1px solid var(--border); padding: 9px 12px;
-  text-align: left; vertical-align: top;
-}
-.req-matrix thead th {
-  position: sticky; top: 0; z-index: 1;
-  background: var(--surface-2); color: var(--text);
-  font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
-}
-.req-matrix tbody tr:hover { background: var(--surface); }
-.req-cell-id { min-width: 220px; }
-.req-matrix-link { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
-.req-matrix-link:hover { text-decoration: none; }
-.req-matrix-link:hover .req-matrix-title { text-decoration: underline; }
-.req-matrix-title { color: var(--text); }
-.req-matrix td .req-chip { margin: 1px 2px 1px 0; }
-.req-cell-empty { color: var(--faint); }
-.req-gap {
-  background: color-mix(in srgb, var(--recnext) 20%, transparent);
-}
-.req-gap-label {
-  font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--recnext); font-weight: 700;
-}
-.req-matrix-empty { color: var(--muted); padding: 16px 4px; }
-
-/* Fallback for browsers without color-mix: a solid tint still reads as a gap. */
-@supports not (background: color-mix(in srgb, red 20%, transparent)) {
-  .req-gap { background: var(--warn-bg); }
-}
-
-@media (max-width: 760px) {
-  .req-trace-cap { flex-basis: 100%; min-width: 0; }
-  .req-view { padding: 16px 14px 48px; }
+  tr.req-flash { animation: none; outline: 2px solid var(--accent); outline-offset: -2px; }
 }

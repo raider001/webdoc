@@ -13,6 +13,7 @@ const ALLOWED_TAGS = new Set([
   'em', 'strong', 'del', 'ins', 'sub', 'sup', 'mark', 'b', 'i',
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
   'figure', 'figcaption', 'div',
+  'details', 'summary', // collapsible disclosure (open attr allowed below)
   'input' // only a disabled checkbox survives (task lists) - enforced below
 ]);
 
@@ -30,11 +31,20 @@ const ALLOWED_ATTRS = {
   img: new Set(['src', 'alt', 'title']),
   input: new Set(['type', 'checked', 'disabled']),
   td: new Set(['colspan', 'rowspan']),
-  th: new Set(['colspan', 'rowspan', 'scope'])
+  th: new Set(['colspan', 'rowspan', 'scope']),
+  details: new Set(['open'])
 };
 
 const SAFE_URL = /^(https?:|mailto:|tel:|\/|\.\/|\.\.\/|#)/i;
 
+/**
+ * Whether a URL is safe to keep on an href/src attribute: allows relative/
+ * hash forms and an explicit http(s)/mailto/tel allowlist, and rejects any
+ * other explicit scheme (e.g. "javascript:", "data:") after stripping
+ * control characters/whitespace that could otherwise hide a scheme.
+ * @param {string} value
+ * @returns {boolean}
+ */
 function safeUrl(value) {
   // Remove control chars / whitespace that can hide a scheme (e.g. "java\tscript:").
   const v = String(value).replace(/[\u0000-\u0020\u007f-\u009f]+/g, '').trim();
@@ -43,6 +53,13 @@ function safeUrl(value) {
   return true; // relative path, no scheme
 }
 
+/**
+ * Replace `el` with its own children (used for elements that are unknown but
+ * harmless, so their content is kept while the wrapping tag itself is
+ * discarded).
+ * @param {Element} el
+ * @returns {void}
+ */
 function unwrap(el) {
   const parent = el.parentNode;
   if (!parent) { el.remove(); return; }
@@ -50,6 +67,17 @@ function unwrap(el) {
   parent.removeChild(el);
 }
 
+/**
+ * Enforce the allowlist policy on a single element in place: drop
+ * disallowed tags' whole subtree, unwrap unknown-but-harmless tags, strip
+ * any attribute not on that tag's ALLOWED_ATTRS list (plus every `on*`
+ * handler and unsafe href/src URL), narrow a surviving `class` down to a
+ * single language-* highlighting hint on code/pre, force any surviving
+ * checkbox `input` to `disabled`, and add `rel="noopener nofollow ugc"` to
+ * links. Assumes `el`'s children have already been scrubbed (see walk).
+ * @param {Element} el
+ * @returns {void}
+ */
 function scrubElement(el) {
   const tag = el.tagName.toLowerCase();
 
@@ -82,6 +110,14 @@ function scrubElement(el) {
   if (tag === 'a' && el.getAttribute('href')) el.setAttribute('rel', 'noopener nofollow ugc');
 }
 
+/**
+ * Depth-first sanitize pass over a live (inert-document) subtree: recurses
+ * into an element's children and scrubs each one (see scrubElement) only
+ * after its own children are already clean, and drops comment nodes
+ * outright.
+ * @param {Node} node
+ * @returns {void}
+ */
 function walk(node) {
   // Depth-first: scrub children before the element, so unwrap keeps clean subtrees.
   let child = node.firstChild;
@@ -97,8 +133,13 @@ function walk(node) {
   }
 }
 
-// Parse an HTML string inertly, sanitize it, and return a DocumentFragment
-// ready to append to the live document.
+/**
+ * Parse an HTML string inertly (via DOMParser, so scripts never run and
+ * resources never load), sanitize it against the allowlist policy above,
+ * and return a DocumentFragment ready to append to the live document.
+ * @param {string} html
+ * @returns {DocumentFragment}
+ */
 export function sanitizeToFragment(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   walk(doc.body);
