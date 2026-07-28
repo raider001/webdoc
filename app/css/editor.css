@@ -35,7 +35,7 @@ body.is-editing .app-footer { display: none; }
 .editor-blocks { max-width: 760px; margin: 0 auto; }
 .editor-meta { overflow: auto; border-left: 1px solid var(--border); background: var(--surface); padding: 20px 20px; }
 
-.btn { height: 32px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; font-size: 13px; transition: background var(--dur), border-color var(--dur), box-shadow var(--dur), transform var(--dur), filter var(--dur); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; font-size: 13px; white-space: nowrap; transition: background var(--dur), border-color var(--dur), box-shadow var(--dur), transform var(--dur), filter var(--dur); }
 .btn:hover { background: var(--surface-2); border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
 .btn:active { transform: translateY(0); box-shadow: none; }
 .btn-primary { background: var(--accent-grad); color: #fff; border-color: transparent; box-shadow: 0 3px 12px -3px var(--accent); }

@@ -124,7 +124,7 @@ function showTestReport(id, cov) {
   append(panel, sec, buildAutomated(id, cov));
 
   append(panel, elem('div', 'cov-medit-bar',
-    elem('button', { type: 'button', class: 'btn btn-primary', onClick: () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: id } })) }, playIcon(), ' Run this test')));
+    elem('button', { type: 'button', class: 'btn btn-primary', onClick: () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: id } })) }, playIcon(), 'Run this test')));
 }
 
 /**
