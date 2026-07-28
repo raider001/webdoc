@@ -1,0 +1,81 @@
+/* ============================================================================
+   Requirement-group tables + cross-document trace links. All colour comes from
+   the app tokens in app.css, so it is theme-aware (light + dark) for free.
+   ========================================================================== */
+
+.req-group { margin: 24px 0; }
+
+.req-cap {
+  font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 8px;
+}
+
+.req-error {
+  color: var(--recnext); background: var(--surface);
+  border: 1px solid var(--border); border-left: 3px solid var(--recnext);
+  border-radius: 6px; padding: 8px 12px; margin: 0 0 8px; font-size: 14px;
+}
+
+.req-scroll { overflow-x: auto; }
+
+.req-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.req-tbl th, .req-tbl td {
+  border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top;
+}
+.req-tbl th { background: var(--surface-2); font-size: 12.5px; white-space: nowrap; }
+
+.req-idcell { white-space: nowrap; }
+.req-badge {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent);
+  border-radius: 5px; padding: 2px 7px;
+}
+
+.req-link {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px;
+  white-space: nowrap;
+}
+.req-missing {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px;
+  color: var(--faint); white-space: nowrap; cursor: help;
+}
+.req-none { color: var(--faint); }
+
+/* Test cases: each is its own block-table of action / expected-response steps.
+   The caption carries the name, a monospace id, and the rolled-up Result pill. */
+.test-case { margin: 24px 0; }
+.tc-cap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; text-transform: none; letter-spacing: 0; font-size: 13px; }
+.tc-id { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; color: var(--faint); }
+.tc-verifies { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+.tc-verifies .req-link { font-size: 12.5px; }
+.test-steps-tbl .tc-stepno { width: 34px; text-align: center; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* Markdown rendered inside a test-step cell / panel — tidy the block margins so
+   a single paragraph sits flush, while lists/code-blocks keep sensible spacing. */
+.tc-md > :first-child { margin-top: 0; }
+.tc-md > :last-child { margin-bottom: 0; }
+.tc-md p { margin: 5px 0; }
+.tc-md ul, .tc-md ol { margin: 5px 0; padding-left: 20px; }
+.tc-md pre { margin: 6px 0; }
+.tc-md code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .92em; background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
+.tc-md pre code { background: none; padding: 0; }
+
+.tc-link { color: var(--accent); }
+.tc-steps { white-space: normal; font-size: 13px; color: var(--muted); }
+.tc-result {
+  display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: .02em;
+  border-radius: 5px; padding: 2px 8px; white-space: nowrap;
+}
+.tc-result-pass     { background: color-mix(in srgb, var(--cov-pass, #1f9d57) 16%, transparent); color: var(--cov-pass, #1f9d57); }
+.tc-result-fail     { background: color-mix(in srgb, var(--cov-fail, #e0413f) 16%, transparent); color: var(--cov-fail, #e0413f); }
+.tc-result-partial  { background: color-mix(in srgb, var(--cov-partial, #c98a00) 18%, transparent); color: var(--cov-partial, #c98a00); }
+.tc-result-untested { background: transparent; color: var(--cov-untested, #3b7fd4); box-shadow: inset 0 0 0 1px var(--cov-untested, #3b7fd4); }
+
+/* Deep-link flash when arriving via a trace link (#/<doc>?req=<id> or ?test=<id>). */
+tr.req-flash { animation: reqFlash 1.6s ease-out; }
+@keyframes reqFlash {
+  0% { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  tr.req-flash { animation: none; outline: 2px solid var(--accent); outline-offset: -2px; }
+}

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Documentation</title>
+<!-- Resolve theme before first paint (no flash of the wrong theme). -->
+<script>
+  (function () {
+    try {
+      var stored = localStorage.getItem('wd-theme');
+      var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/editor.css">
+<link rel="stylesheet" href="/css/coverage.css">
+<link rel="stylesheet" href="/css/graph.css">
+<link rel="stylesheet" href="/css/highlight.css">
+<link rel="stylesheet" href="/css/requirements.css">
+<link rel="stylesheet" href="/css/blocks.css">
+</head>
+<body data-app-ready="0">
+<a class="skip" href="#content">Skip to content</a>
+
+<header class="app-header">
+  <button id="hamburger" class="icon-btn" aria-label="Open document navigation"
+          aria-expanded="false" aria-controls="doc-tree">
+    <span class="ic-menu" aria-hidden="true"></span>
+  </button>
+  <a class="brand" id="brand" href="#/">Documentation</a>
+  <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+  <div class="spacer"></div>
+  <label class="doc-search">
+    <span class="visually-hidden">Search in current document</span>
+    <input id="docSearch" type="search" placeholder="Find in page…" autocomplete="off">
+  </label>
+  <button id="newDocBtn" class="icon-btn" aria-label="Create a new document" title="New document"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5V19"/><path d="M5 12H19"/></svg></button>
+  <button id="covBtn" class="icon-btn" aria-pressed="false" aria-label="Toggle test coverage view" title="Test coverage"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12L10 17L19 7"/></svg></button>
+  <button id="graphBtn" class="icon-btn" aria-pressed="false" aria-label="Toggle map view" title="Map"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6H16"/><path d="M7 8L11 16"/><path d="M17 8L13 16"/><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/></svg></button>
+  <button id="themeBtn" class="icon-btn" aria-pressed="false" aria-label="Switch theme" title="Day / night"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg></button>
+</header>
+
+<div class="app-body">
+  <aside id="toc" class="toc-pane" aria-label="On this page">
+    <p class="toc-cap">On this page</p>
+    <div id="tocList"></div>
+  </aside>
+  <main id="content" class="content-pane" tabindex="-1"></main>
+  <button id="editBtn" class="doc-edit-btn" aria-label="Edit this document" title="Edit this document"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3L21 7L8 20L3 21L4 16L17 3Z"/><path d="M14 6L18 10"/></svg></button>
+  <button id="deleteBtn" class="doc-edit-btn doc-delete-btn" aria-label="Delete this document" title="Delete this document"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
+</div>
+
+<footer class="app-footer">
+  <nav class="foot-group prev" id="footPrev" aria-label="Assumed knowledge" hidden></nav>
+  <nav class="foot-group next" id="footNext" aria-label="Recommended next" hidden></nav>
+</footer>
+
+<!-- Document tree drawer -->
+<div id="scrim" class="scrim" hidden></div>
+<nav id="doc-tree" class="drawer" aria-label="All documents" hidden>
+  <div class="drawer-head">
+    <span class="drawer-title">All documents</span>
+    <button id="drawerClose" class="icon-btn" aria-label="Close navigation"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6L18 18"/><path d="M18 6L6 18"/></svg></button>
+  </div>
+  <label class="drawer-search">
+    <span class="visually-hidden">Search all documents</span>
+    <input id="treeSearch" type="search" placeholder="Search all documents…" autocomplete="off">
+  </label>
+  <div id="treeList" class="tree" role="tree" aria-label="Documents"></div>
+  <div id="searchResults" class="search-results" aria-label="Search results" hidden></div>
+</nav>
+
+<div id="live" class="visually-hidden" aria-live="polite"></div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

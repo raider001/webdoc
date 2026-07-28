@@ -1,0 +1,373 @@
+/* ============================================================================
+   Web Document Tool - app stylesheet
+   All colour lives in tokens; [data-theme] selects the palette.
+   ========================================================================== */
+:root, :root[data-theme="light"] {
+  /* Soft off-white paper (not pure white) so the large reading / map / coverage
+     surfaces don't glare; chrome sits a shade deeper for hierarchy. */
+  --bg:#f5f6fc; --surface:#ebedf7; --surface-2:#e2e4f1; --surface-sunk:#d8dcec;
+  --text:#1b1d30; --muted:#565d76; --faint:#878da6;
+  --border:#dee1ef; --border-strong:#c7cbe0;
+  --accent:#5b5bf2; --accent-hover:#4a45e0; --accent-contrast:#ffffff; --accent-soft:#eae9fd;
+  --accent-2:#a855f7;
+  --accent-grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#a855f7 100%);
+  --prereq:#5b5bf2; --recnext:#ef6a2e;
+  --code-bg:#edeef8; --code-text:#2b2d4a; --code-border:#e1e3f2;
+  --focus-ring:#5b5bf2; --ring:0 0 0 3px rgba(91,91,242,.32); --selection:rgba(91,91,242,.18);
+  --shadow-sm:0 1px 2px rgba(48,44,120,.10), 0 2px 8px rgba(48,44,120,.07);
+  --shadow:0 4px 14px rgba(48,44,120,.10), 0 14px 36px -10px rgba(48,44,120,.16);
+  --shadow-lg:0 16px 48px -12px rgba(48,44,120,.28);
+  --glow-1:rgba(99,102,241,.11); --glow-2:rgba(168,85,247,.08);
+  --scrim:rgba(20,18,50,.42);
+  --warn-bg:#fff7ed; --warn-border:#f59e0b; --warn-text:#7c4a03;
+  --header-h:56px; --toc-w:260px; --tree-w:320px; --content-max:1064px;
+  --radius:10px; --radius-lg:14px; --dur:170ms;
+}
+:root[data-theme="dark"] {
+  --bg:#0b0d18; --surface:#141726; --surface-2:#1c2036; --surface-sunk:#232845;
+  --text:#e9ebf7; --muted:#a3a8c4; --faint:#6d7398;
+  --border:#262b44; --border-strong:#384064;
+  --accent:#8b8dff; --accent-hover:#a7a8ff; --accent-contrast:#0b0d18; --accent-soft:#1e2247;
+  --accent-2:#c084fc;
+  --accent-grad:linear-gradient(135deg,#818cf8 0%,#a78bfa 55%,#c084fc 100%);
+  --prereq:#8b8dff; --recnext:#ff9a5a;
+  --code-bg:#12152a; --code-text:#d7dbf5; --code-border:#262b44;
+  --focus-ring:#8b8dff; --ring:0 0 0 3px rgba(139,141,255,.40); --selection:rgba(139,141,255,.26);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.5);
+  --shadow:0 10px 34px rgba(0,0,0,.55);
+  --shadow-lg:0 18px 52px -8px rgba(0,0,0,.66);
+  --glow-1:rgba(129,140,248,.16); --glow-2:rgba(192,132,252,.12);
+  --scrim:rgba(2,3,12,.62);
+  --warn-bg:#2a1f0d; --warn-border:#b5730f; --warn-text:#f0c67a;
+}
+
+* { box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  margin:0; background:var(--bg); color:var(--text);
+  font:16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  display:grid; grid-template-rows:var(--header-h) 1fr auto; min-height:100dvh;
+}
+/* Ambient glow: two soft accent/violet washes pinned to the top corners. Sits on
+   the canvas (behind content via z-index:-1), pointer-transparent, subtle enough
+   not to touch reading contrast. */
+body::before {
+  content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(1100px 520px at 92% -10%, var(--glow-1), transparent 60%),
+    radial-gradient(880px 460px at 4% 2%, var(--glow-2), transparent 58%);
+}
+::selection { background:var(--selection); }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+:focus-visible { outline:none; box-shadow:var(--ring); border-radius:6px; }
+
+/* Thin, themed scrollbars for a more finished feel. */
+* { scrollbar-width:thin; scrollbar-color:var(--border-strong) transparent; }
+::-webkit-scrollbar { width:12px; height:12px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border-strong); border-radius:10px; border:3px solid transparent; background-clip:content-box; }
+::-webkit-scrollbar-thumb:hover { background:var(--faint); background-clip:content-box; }
+
+.visually-hidden {
+  position:absolute; width:1px; height:1px; margin:-1px; padding:0;
+  overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}
+.skip {
+  position:absolute; left:8px; top:-48px; z-index:60; background:var(--accent);
+  color:var(--accent-contrast); padding:8px 14px; border-radius:6px; transition:top var(--dur);
+}
+.skip:focus { top:8px; text-decoration:none; }
+
+/* ---- Header --------------------------------------------------------------- */
+.app-header {
+  grid-row:1; display:flex; align-items:center; gap:12px; padding:0 16px;
+  background:linear-gradient(180deg, var(--surface-2), var(--surface));
+  border-bottom:1px solid var(--border);
+  box-shadow:0 1px 0 var(--border), 0 10px 26px -20px rgba(30,20,80,.5);
+  z-index:30;
+}
+.brand {
+  display:inline-flex; align-items:center; gap:9px;
+  font-weight:800; font-size:16px; letter-spacing:-.01em; white-space:nowrap;
+  background:var(--accent-grad); -webkit-background-clip:text; background-clip:text;
+  -webkit-text-fill-color:transparent; transition:filter var(--dur);
+}
+/* Glowing brand dot - a tiny bit of identity in the corner. */
+.brand::before {
+  content:''; width:11px; height:11px; border-radius:50%; flex:none;
+  background:var(--accent-grad); box-shadow:0 0 0 3px var(--accent-soft), 0 0 13px 0 var(--accent);
+}
+.brand:hover { text-decoration:none; filter:brightness(1.12) saturate(1.08); }
+.crumbs { color:var(--muted); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.crumbs a { color:var(--muted); }
+.spacer { flex:1; }
+.icon-btn {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:38px; height:38px; padding:0; background:var(--bg); color:var(--text);
+  border:1px solid var(--border); border-radius:10px; font-size:15px; cursor:pointer;
+  transition:transform var(--dur), box-shadow var(--dur), background var(--dur), border-color var(--dur), color var(--dur);
+}
+.icon-btn:hover { background:var(--surface-2); border-color:var(--border-strong); transform:translateY(-1px); box-shadow:var(--shadow-sm); }
+.icon-btn:active { transform:translateY(0); box-shadow:none; }
+.icon-btn[aria-pressed="true"] { background:var(--accent-grad); border-color:transparent; color:#fff; box-shadow:0 4px 15px -3px var(--accent); }
+.icon-btn[aria-pressed="true"]:hover { color:#fff; filter:brightness(1.07); transform:translateY(-1px); }
+/* Icons from js/icons.js (and icons/*.svg): sized to the containing element's
+   own font-size, so the same icon fits every button/badge context without
+   per-usage width/height - each place that wants a bigger or smaller icon
+   already sets its own font-size for exactly this reason. */
+.ico { display:block; width:1em; height:1em; flex-shrink:0; }
+.ic-menu, .ic-menu::before, .ic-menu::after {
+  display:block; width:16px; height:2px; background:currentColor; border-radius:2px; position:relative;
+}
+.ic-menu::before, .ic-menu::after { content:""; position:absolute; left:0; }
+.ic-menu::before { top:-5px; } .ic-menu::after { top:5px; }
+.doc-search input, .drawer-search input {
+  height:36px; padding:0 12px; background:var(--bg); color:var(--text);
+  border:1px solid var(--border); border-radius:10px; font-size:13.5px; width:200px;
+  transition:border-color var(--dur), box-shadow var(--dur), background var(--dur);
+}
+.doc-search input::placeholder, .drawer-search input::placeholder { color:var(--faint); }
+.doc-search input:focus, .drawer-search input:focus { outline:none; border-color:var(--accent); box-shadow:var(--ring); }
+@media (max-width:820px){ .doc-search, .crumbs { display:none; } }
+
+/* ---- Body: two panes ------------------------------------------------------ */
+.app-body {
+  grid-row:2; display:grid; grid-template-columns:var(--toc-w) 1fr;
+  min-height:0; overflow:hidden;
+}
+.toc-pane {
+  border-right:1px solid var(--border); background:var(--surface);
+  overflow:auto; padding:20px 12px 40px 18px;
+}
+.toc-cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); opacity:.9; margin:0 0 10px; }
+#tocList ol { list-style:none; margin:0; padding:0; }
+#tocList a {
+  display:block; padding:5px 10px; border-radius:7px; color:var(--muted);
+  font-size:13.5px; line-height:1.35; border-left:2px solid transparent;
+  transition:background var(--dur), color var(--dur), border-color var(--dur), transform var(--dur);
+}
+#tocList a:hover { background:var(--surface-2); color:var(--text); text-decoration:none; transform:translateX(2px); }
+#tocList a.active {
+  color:var(--text); background:var(--accent-soft); border-left:2px solid var(--accent); font-weight:600;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+#tocList a .n { color:var(--faint); font-variant-numeric:tabular-nums; margin-right:6px; }
+#tocList a.active .n { color:var(--accent); }
+#tocList .lvl-2 a { padding-left:22px; }
+#tocList .lvl-3 a { padding-left:38px; }
+#tocList .lvl-4 a { padding-left:54px; }
+#tocList .lvl-5 a, #tocList .lvl-6 a { padding-left:70px; }
+
+.content-pane { overflow:auto; padding:0 0 100px; }
+.doc { max-width:var(--content-max); margin:0 auto; padding:8px 32px 0; }
+
+/* ---- Footer --------------------------------------------------------------- */
+.app-footer {
+  grid-row:3; display:flex; align-items:flex-start; gap:24px; justify-content:space-between;
+  flex-wrap:wrap; min-height:44px; padding:12px 24px;
+  background:linear-gradient(0deg, var(--surface-2), var(--surface));
+  border-top:1px solid var(--border); font-size:13.5px; color:var(--muted);
+}
+.foot-group { min-width:0; }
+.foot-group[hidden] { display:none; }
+.foot-group.next { margin-left:auto; text-align:right; }
+.foot-cap {
+  display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--accent); opacity:.9; margin-bottom:5px;
+}
+.foot-links { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:4px 16px; }
+.foot-group.next .foot-links { justify-content:flex-end; }
+.foot-links a {
+  color:var(--accent);
+  background-image:var(--accent-grad); background-size:0 2px; background-repeat:no-repeat;
+  background-position:0 100%; text-decoration:none; transition:background-size var(--dur);
+}
+.foot-links a:hover { background-size:100% 2px; }
+
+/* ---- Drawer + scrim ------------------------------------------------------- */
+.scrim { position:fixed; inset:0; background:var(--scrim); z-index:40; }
+.drawer {
+  position:fixed; top:0; left:0; z-index:50; width:min(88vw, var(--tree-w));
+  height:100dvh; background:linear-gradient(180deg, var(--surface-2), var(--surface)); border-right:1px solid var(--border);
+  box-shadow:var(--shadow-lg); display:flex; flex-direction:column;
+  transform:translateX(0); transition:transform var(--dur) ease;
+}
+.drawer[hidden] { display:none; }
+.drawer-head { display:flex; align-items:center; justify-content:space-between; padding:14px 14px 8px; }
+.drawer-title { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); opacity:.85; }
+.drawer-search { padding:0 14px 10px; }
+.drawer-search input { width:100%; }
+.tree { overflow:auto; padding:4px 8px 24px; }
+.tree details { margin:1px 0; }
+.tree summary {
+  list-style:none; cursor:pointer; padding:5px 8px; border-radius:6px;
+  font-size:14px; color:var(--text); display:flex; align-items:center; gap:6px;
+}
+.tree summary::-webkit-details-marker { display:none; }
+.tree summary::before { content:"▸"; color:var(--faint); font-size:11px; transition:transform var(--dur); }
+.tree details[open] > summary::before { transform:rotate(90deg); }
+.tree summary:hover { background:var(--surface-2); }
+.tree .group-children { padding-left:14px; border-left:1px solid var(--border); margin-left:8px; }
+.tree a.doc-link {
+  display:block; padding:5px 8px 5px 22px; border-radius:6px; color:var(--muted);
+  font-size:14px; border-left:2px solid transparent;
+  transition:background var(--dur), color var(--dur), border-color var(--dur), transform var(--dur);
+}
+.tree a.doc-link:hover { background:var(--surface-2); color:var(--text); text-decoration:none; transform:translateX(2px); }
+
+/* All-documents search results (drawer) */
+.search-results { overflow:auto; padding:6px 8px 24px; }
+.search-results[hidden] { display:none; }
+.search-empty { color:var(--muted); font-size:13.5px; padding:8px 10px; }
+.search-hit {
+  display:flex; flex-direction:column; gap:2px; padding:7px 10px; border-radius:6px;
+  color:var(--text); border-left:2px solid transparent;
+  transition:background var(--dur), border-color var(--dur), transform var(--dur);
+}
+.search-hit:hover { background:var(--surface-2); text-decoration:none; border-left-color:var(--accent); transform:translateX(2px); }
+.search-hit-title { font-size:14px; font-weight:500; }
+.search-hit-sub { font-size:12px; color:var(--muted); }
+.tree a.doc-link[aria-current="page"] { background:var(--accent-soft); color:var(--text); border-left-color:var(--accent); font-weight:600; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* ---- Rendered markdown content ------------------------------------------- */
+.doc h1 { font-size:30px; line-height:1.2; margin:22px 0 8px; letter-spacing:-.01em; padding-bottom:4px; }
+/* Page title: a confident gradient underline. */
+.doc h1::after {
+  content:''; display:block; width:58px; height:4px; margin-top:14px; border-radius:4px;
+  background:var(--accent-grad); box-shadow:0 3px 12px -3px var(--accent);
+}
+.doc h2 { font-size:23px; margin:40px 0 6px; letter-spacing:-.01em; }
+.doc h3 { font-size:18px; margin:26px 0 4px; }
+.doc h4 { font-size:16px; margin:22px 0 4px; }
+.doc h5, .doc h6 { font-size:14px; margin:18px 0 4px; color:var(--muted); }
+.doc .secnum { color:var(--faint); font-variant-numeric:tabular-nums; margin-right:.5em; font-weight:600; }
+.doc h1 .secnum, .doc h2 .secnum {
+  color:var(--accent);
+  background:var(--accent-grad); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+.doc p { margin:12px 0; }
+.doc-lede { color:var(--muted); font-size:16.5px; line-height:1.5; margin:0 0 10px; }
+.doc ul, .doc ol { padding-left:24px; margin:12px 0; }
+.doc li { margin:5px 0; }
+.doc a { color:var(--accent); }
+/* In-body links: accent-coloured, with a gradient underline that grows on hover. */
+.doc a:not([data-external]):not(.doc-link-broken) {
+  background-image:var(--accent-grad); background-size:0 2px; background-repeat:no-repeat;
+  background-position:0 100%; text-decoration:none;
+  transition:background-size var(--dur), color var(--dur);
+}
+.doc a:not([data-external]):not(.doc-link-broken):hover { background-size:100% 2px; color:var(--accent-hover); }
+.doc code {
+  background:var(--code-bg); border:1px solid var(--code-border); border-radius:4px;
+  padding:.08em .38em; font-size:.88em; font-family:ui-monospace,"Cascadia Code",Consolas,monospace;
+  color:var(--accent-hover);
+}
+.doc pre {
+  background:var(--code-bg); border:1px solid var(--code-border); border-radius:var(--radius);
+  padding:14px 16px; overflow-x:auto; margin:14px 0; box-shadow:var(--shadow-sm);
+}
+.doc pre code { background:none; border:none; padding:0; font-size:13.5px; line-height:1.55; color:var(--code-text); }
+.doc blockquote {
+  margin:14px 0; padding:10px 16px; border-left:0; border-radius:0 var(--radius) var(--radius) 0;
+  color:var(--text); background:linear-gradient(90deg, var(--accent-soft), transparent 92%); position:relative;
+}
+.doc blockquote::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:3px; background:var(--accent-grad);
+}
+.doc hr { border:none; border-top:1px solid var(--border); margin:32px 0; }
+.doc table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow-sm); }
+.doc th, .doc td { border:1px solid var(--border); padding:8px 11px; text-align:left; }
+.doc th { background:linear-gradient(180deg, var(--surface-2), var(--surface)); font-weight:700; }
+.doc tbody tr { transition:background var(--dur); }
+.doc tbody tr:hover { background:color-mix(in srgb, var(--accent) 6%, transparent); }
+.doc img { max-width:100%; height:auto; }
+/* Block images (a screenshot on its own line becomes <p><img>) get a subtle
+   frame so UI captures read as captures. */
+.doc p > img:only-child { display:block; margin:6px 0; border:1px solid var(--border); border-radius:8px; }
+.doc :target { scroll-margin-top:16px; }
+
+/* Collapsible disclosure (<details>/<summary>). */
+.doc details {
+  margin:14px 0; border:1px solid var(--border); border-radius:var(--radius);
+  background:var(--surface); overflow:hidden;
+}
+.doc details[open] { background:var(--surface); }
+.doc summary {
+  cursor:pointer; padding:10px 14px 10px 34px; position:relative;
+  font-weight:600; color:var(--text); list-style:none; user-select:none;
+  border-radius:var(--radius);
+}
+.doc summary::-webkit-details-marker { display:none; }
+.doc summary::marker { content:''; }
+.doc summary:hover { background:var(--surface-2); }
+.doc summary:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+/* Rotating chevron drawn from a border triangle. */
+.doc summary::before {
+  content:''; position:absolute; left:14px; top:50%;
+  width:0; height:0; border-style:solid; border-width:5px 0 5px 7px;
+  border-color:transparent transparent transparent var(--muted);
+  transform:translateY(-50%); transition:transform .15s ease;
+}
+.doc details[open] > summary::before { transform:translateY(-50%) rotate(90deg); }
+.doc details[open] > summary { border-bottom:1px solid var(--border); border-radius:var(--radius) var(--radius) 0 0; }
+/* Body: everything after the summary. */
+.doc details > summary ~ * { margin-left:14px; margin-right:14px; }
+.doc details > summary + * { margin-top:12px; }
+.doc details > :last-child { margin-bottom:12px; }
+
+/* External links (resolved by the renderer): a small outbound glyph. */
+.doc a[data-external]::after {
+  content:'↗'; font-size:.82em; margin-left:2px; color:var(--muted);
+  vertical-align:baseline; text-decoration:none;
+}
+.doc a.doc-link-broken { color:var(--recnext); text-decoration:underline dotted; cursor:help; }
+
+.doc-error { max-width:var(--content-max); margin:40px auto; padding:20px;
+  border:1px solid var(--border); border-left:3px solid var(--recnext); border-radius:8px;
+  background:var(--surface); }
+
+/* Map (graph) overlay - fills the area below the header; the graph engine's
+   own container styling (.graph-root) fills the stage child. */
+.graph-overlay { position:fixed; inset:var(--header-h) 0 0 0; z-index:20; background:var(--bg); }
+.graph-overlay[hidden] { display:none; }
+
+/* ---- Responsive ----------------------------------------------------------- */
+@media (max-width:760px) {
+  .app-body { grid-template-columns:1fr; }
+  .toc-pane {
+    border-right:none; border-bottom:1px solid var(--border); max-height:none;
+    padding:12px 16px;
+  }
+  .doc { padding:8px 16px 0; }
+}
+
+/* ---- First-run index build overlay (cold start only) ---------------------- */
+/* Shown while the server builds its SQLite index for the first time on a large
+   corpus. Warm restarts are near-instant, so this never appears then. */
+.index-loading {
+  position:fixed; inset:0; z-index:55;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--bg); padding:24px;
+}
+.index-loading-card {
+  width:min(440px, 88vw); padding:26px 30px 22px;
+  background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  box-shadow:var(--shadow); text-align:center;
+}
+.index-loading-brand { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); margin-bottom:10px; }
+.index-loading-title { font-size:15.5px; font-weight:600; color:var(--text); margin-bottom:18px; }
+.index-progress { height:8px; border-radius:6px; background:var(--surface-2); overflow:hidden; }
+.index-progress-fill { height:100%; width:0; border-radius:6px; background:var(--accent); transition:width .3s ease; }
+.index-progress.is-indeterminate .index-progress-fill {
+  width:38%; animation:index-slide 1.15s cubic-bezier(.4,0,.2,1) infinite;
+}
+@keyframes index-slide { 0%{margin-left:-40%} 100%{margin-left:102%} }
+.index-loading-stat { margin-top:14px; font-size:13.5px; color:var(--text); font-variant-numeric:tabular-nums; }
+.index-loading-note { margin-top:6px; font-size:12px; color:var(--muted); line-height:1.4; }
+
+@media (prefers-reduced-motion:reduce) {
+  * , *::before, *::after { transition-duration:.001ms !important; animation-duration:.001ms !important; }
+  html { scroll-behavior:auto; }
+}
