@@ -7,3 +7,4 @@
 app/thirdpartyrenderer/*.min.js
 .webdoc-index/
 __pycache__/
+.claude/
