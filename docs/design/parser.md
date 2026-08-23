@@ -4,8 +4,8 @@
 
 # The CommonMark Engine
 
-At the centre of WebDocs is a Markdown parser written entirely from scratch in
-vanilla JavaScript — no library, no dependency, no shortcuts. It implements
+At the centre of WebDocs is a Markdown parser written entirely from scratch —
+no library, no dependency, no shortcuts. It implements
 [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) plus the common
 GitHub-flavored extensions, and it passes **649 of the 652** examples in the
 official specification suite: **99.5%** conformance.

@@ -11,8 +11,8 @@ This page is the practical reference for the five things every author touches:
 the metadata header, headings and their automatic numbering, fenced code blocks,
 links, and requirement-group tables.
 
-Everything below is parsed and rendered in the browser by hand-written vanilla
-JavaScript. Nothing here depends on a plugin, a theme package, or a CDN.
+Everything below is parsed and rendered in the browser by hand-written code.
+Nothing here depends on a plugin, a theme package, or a CDN.
 
 ## Where files live and how ids work
 

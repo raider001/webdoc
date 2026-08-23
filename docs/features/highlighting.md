@@ -6,7 +6,7 @@
 
 Fenced code blocks are highlighted by WebDocs itself. There is no highlight.js,
 no Prism, and no network call — each supported language has a small,
-purpose-built tokenizer written in vanilla JavaScript. Tag a fence with a
+purpose-built tokenizer written from scratch. Tag a fence with a
 language and the matching tokenizer colours it:
 
     ```python

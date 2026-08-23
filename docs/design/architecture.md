@@ -124,8 +124,10 @@ the edit controls, the map mode selector, the coverage panels — was moved onto
 after hand-wiring DOM updates across those views became the largest single source
 of the reader's state bugs. Nothing else came with it. The parser, sanitizer,
 highlighters, the optional block-renderer plugin system, map renderer, search
-client, WYSIWYG editor, and theming layer are all still hand-written vanilla
-JavaScript, and no library replaced any of them.
+client, WYSIWYG editor, and theming layer are all still hand-written, and no
+library replaced any of them. They are written in TypeScript now rather than
+JavaScript, but that is a change of language, not of authorship: the same
+from-scratch code, with its types finally stated.
 
 That runtime is compiled in rather than fetched. `app/build/islands.js` — around
 142 kB raw, 40 kB gzipped, built from the components in `app/svelte/` — is
@@ -137,6 +139,19 @@ the test suite, which fails if the committed bundle drifts from its sources or i
 the package manifest's runtime `dependencies` object stops being empty; see
 [the system requirements](Docs/requirements/system) for the rows those tests
 verify.
+
+The same arrangement covers the rest of the browser code. The modules live in
+`src/js/` as TypeScript and are compiled into `app/js/` as JavaScript, which is
+what `app/index.html` actually loads — one source file becomes exactly one served
+module at the same path, with its import specifiers untouched, so the browser
+resolves the same module graph it always did. That output is committed too, for
+the same reason the bundle is.
+
+So there are two generated trees in the repository, and it is worth being blunt
+about what that costs: `app/js/` is no longer somewhere to edit. Changing browser
+behaviour means editing `src/js/` and running a build. Markdown, CSS and the
+server are unaffected — those are still edit-and-refresh, with no toolchain in
+sight.
 
 `serve.py` keeps the original rule outright: the Python standard library, with no
 package to install. Playwright, driven from Python, exists purely to run the

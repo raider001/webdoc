@@ -41,6 +41,56 @@ Neither defect is caught by anything the project currently owns. Both are caught
 
 ---
 
+## Status: FINISHED - full strict, every source TypeScript, pushed
+
+```
+pytest 173 · vitest 30 · tsc 0 at strict:true · svelte-check 0 (235 files) · eslint clean
+```
+
+Pushed to `origin/feature/svelte-uplift` (github.com/raider001/webdoc), 31 commits ahead of master in nine reviewable steps.
+
+**Every hand-written source in the project is TypeScript at `strict: true`.** Zero `any`, zero `as any`, zero `@ts-ignore`, four non-null assertions each carrying a comment naming the line that establishes its invariant.
+
+Two files remain `.js`, each with a blocker verified rather than assumed:
+- `eslint.config.js` - a `.ts` config needs `jiti`, which is not installed. ESLint 10.9.0 refuses it outright; adding a dependency for a file extension is a bad trade.
+- `svelte.config.js` - vite-plugin-svelte loads it with a bare `import()`, so type-stripping is Node's job, and Node only does it from 22.18/24. `package.json` engines promise `^20.19 || ^22.12`, where a `.ts` config is a startup syntax error. The file declares one boolean.
+
+### The strictness ladder, climbed one rung at a time
+
+| Rung | Errors | Outcome |
+|---|---|---|
+| 1 - `checkJs` on JSDoc | 597 | 0 |
+| 2 - `noImplicitAny` | 402 | 0 |
+| 3 - real `.ts` syntax | n/a | 57 modules + the Svelte tree |
+| 4 - `strictNullChecks` | 378 | 0 |
+| 5 - full `strict` | 29 | 0 |
+
+Climbing them separately was the point: each rung's errors stayed attributable instead of arriving as one undifferentiated pile.
+
+`graph/layout.ts` alone carried 98 of the nullability errors. All 98 were invariants the code already established, and that was **proven** rather than assumed - the previously emitted `layout.js` was diffed against the new one over 1,260 randomized cases (30 seeds x 7 sizes up to 700 nodes x 3 map modes x hierarchy and focus, with cycles, self-loops, dangling targets and multi-component graphs), comparing every node position, every routed edge polyline and all model metadata. Zero mismatches.
+
+### What the type system actually caught
+
+Not style. Real defects, each invisible to the configuration that preceded it:
+
+- A regex literal split across two lines in `editor/serialize.ts` - a hard `SyntaxError` that stopped `main.js` loading, so the whole app was dead. `node --check` returns 0 on it.
+- NaN centres for external-link nodes during a relayout tween in `graph/render.ts`.
+- `AppRegistry` never declaring `updateDocActions`, though it is assigned and called.
+- `authoring.ts` routing to `#/undefined` when no default document exists.
+- `main.ts` duck-typing `.restricted` off a caught value, when `catalog.ts` already exported an `isRestrictedError` predicate.
+- Two components typing an icon helper as `() => Element` when it genuinely returns `Element | null`.
+- Seven event handlers annotated `(e: MouseEvent)` that only ever called `preventDefault()`.
+- A `sys_10` violation: `npm install` without `--save-dev` twice moved packages into runtime `dependencies`, caught both times by the test written for exactly that.
+- One of the plan's own gates was **vacuous for seven phases** - `git diff --exit-code` on an untracked path returns 0, so the bundle-freshness test passed while checking nothing.
+
+### The trade, stated plainly
+
+Two generated trees are now committed: `app/js/` (57 modules + 57 `.d.ts`) and `app/build/islands.js`. That is what keeps `git clone && python serve.py` working with no Node and no network - and it costs the edit-and-refresh loop for browser code, which now means editing `src/js/` and running a build. Markdown, CSS and the server are unaffected.
+
+The hand-rolled engines were never replaced: the CommonMark parser (still 649/652 on the official spec), the sanitizer, the highlighters, the canvas graph, and the WYSIWYG editor. The framework took the chrome, not the engines. The editor's architecture was a stated non-goal throughout and remains vanilla by design.
+
+---
+
 ## Status: TypeScript conversion COMPLETE - all 57 modules are .ts
 
 Committed in five parts. `git log`:
