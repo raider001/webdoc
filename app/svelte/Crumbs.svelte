@@ -10,9 +10,12 @@
   app/index.html and stays there; a component cannot set attributes on the
   element it was mounted into.
 -->
-<script>
-  /** @type {{ docId?: string }} */
-  let { docId = '' } = $props();
+<script lang="ts">
+  interface Props {
+    docId?: string;
+  }
+
+  let { docId = '' }: Props = $props();
 
   const trail = $derived(docId ? docId.split('/').join(' › ') : '');
 </script>{trail}

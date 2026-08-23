@@ -12,19 +12,22 @@
   up, because the same list has to survive the overlay closing and reopening -
   see CoverageOverlay.svelte's module block.
 -->
-<script>
+<script lang="ts">
   /**
    * `off` is the list of status keys currently filtered OUT.
-   * @type {{ off: string[], onToggle: (key: string) => void }}
    */
-  let { off, onToggle } = $props();
+  interface Props {
+    off: string[];
+    onToggle: (key: string) => void;
+  }
+
+  let { off, onToggle }: Props = $props();
 
   /**
    * Key + label, in the order the legend has always shown them. The key doubles
    * as the swatch modifier class and as what coverage.js calls the status.
-   * @type {[string, string][]}
    */
-  const ENTRIES = [['pass', 'Passing'], ['fail', 'Failing'], ['partial', 'Partial'], ['untested', 'Untested']];
+  const ENTRIES: [string, string][] = [['pass', 'Passing'], ['fail', 'Failing'], ['partial', 'Partial'], ['untested', 'Untested']];
 </script>
 
 <div class="cov-legend">

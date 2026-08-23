@@ -2,15 +2,25 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "rootDir": "src/js",
-    "outDir": "app/js",
+    "rootDir": "src",
+    "outDir": "app",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2022",
     "removeComments": false,
     "sourceMap": false,
-    "declaration": false
+    "declaration": true,
+    "baseUrl": ".",
+    "paths": {
+      "/js/*": [
+        "src/js/*"
+      ]
+    }
   },
-  "include": ["src/js/**/*"],
-  "exclude": ["node_modules"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

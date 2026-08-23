@@ -11,20 +11,19 @@
   and AdminPanel is what turns that into a request and shows the outcome; the
   server re-checks every one of them regardless.
 -->
-<script>
+<script lang="ts">
+  import type { GroupSpec } from '/js/auth.js';
+  import type { AdminUser } from './stores/auth.svelte.js';
   import GroupChip from './GroupChip.svelte';
 
-  /** @typedef {import('./stores/auth.svelte.js').AdminUser} AdminUser */
+  type Props = {
+    user: AdminUser;
+    groups: GroupSpec[];
+    onUpdate: (patch: Record<string, unknown>) => void;
+    onDelete: () => void;
+  };
 
-  /**
-   * @type {{
-   *   user: AdminUser,
-   *   groups: import('/js/auth.js').GroupSpec[],
-   *   onUpdate: (patch: Record<string, unknown>) => void,
-   *   onDelete: () => void,
-   * }}
-   */
-  let { user, groups, onUpdate, onDelete } = $props();
+  let { user, groups, onUpdate, onDelete }: Props = $props();
 
   /**
    * Ticks this row has sent but the server has not confirmed yet, or null when
@@ -34,9 +33,8 @@
    * request must carry the first tick as well - the old row got that by
    * re-reading its own checkboxes before building the payload. `null` means
    * "nothing pending, believe the server".
-   * @type {string[]|null}
    */
-  let pending = $state(null);
+  let pending: string[] | null = $state(null);
 
   /** What the checkboxes show: the pending set if there is one, else the server's. */
   const chosen = $derived(pending || user.groups || []);
@@ -50,19 +48,13 @@
     pending = null;
   });
 
-  /**
-   * @param {string} name
-   * @param {boolean} on
-   * @returns {void}
-   */
-  function toggleGroup(name, on) {
+  function toggleGroup(name: string, on: boolean): void {
     const next = on ? [...chosen, name] : chosen.filter(g => g !== name);
     pending = next;
     onUpdate({ groups: next });
   }
 
-  /** @returns {void} */
-  function confirmDelete() {
+  function confirmDelete(): void {
     if (!window.confirm('Delete the account "' + user.username + '"? This cannot be undone.')) return;
     onDelete();
   }

@@ -26,7 +26,7 @@
   the runner into this component's import graph for a button most readers never
   press.
 -->
-<script>
+<script lang="ts">
   import { closeIcon, externalLinkIcon, playIcon } from '/js/icons.js';
   import { requirementList, testList } from '/js/requirements.js';
   import { computeTestStatus, manualTests } from '/js/coverage.js';
@@ -35,33 +35,47 @@
   import AutomatedTests from './AutomatedTests.svelte';
   import VerifyingTests from './VerifyingTests.svelte';
 
-  /** @typedef {import('/js/coverage.js').CoverageResults} CoverageResults */
+  import type { CoverageResults } from '/js/coverage.js';
 
   /**
    * `id` is null when nothing is selected. `onCloseView` closes the whole
    * overlay (the "open in its document" links route away, so the map must go);
    * `onDismiss` only hides this panel.
-   * @type {{
-   *   id: string|null,
-   *   results: CoverageResults,
-   *   version: number,
-   *   onDismiss: () => void,
-   *   onCloseView: () => void,
-   *   onOpenNode: (id: string) => void,
-   *   onChanged: () => void,
-   *   onReload: () => Promise<void>,
-   * }}
    */
-  let { id, results, version, onDismiss, onCloseView, onOpenNode, onChanged, onReload } = $props();
+  interface Props {
+    id: string | null;
+    results: CoverageResults;
+    version: number;
+    onDismiss: () => void;
+    onCloseView: () => void;
+    onOpenNode: (id: string) => void;
+    onChanged: () => void;
+    onReload: () => Promise<void>;
+  }
 
-  /** @type {HTMLElement|undefined} */
-  let panelEl = $state();
+  let { id, results, version, onDismiss, onCloseView, onOpenNode, onChanged, onReload }: Props = $props();
+
+  let panelEl = $state<HTMLElement | undefined>();
 
   /** Test ids are prefixed; that prefix is the whole of the routing decision. */
   const isTest = $derived(!!id && id.indexOf('T_') === 0);
 
-  const req = $derived(!id || isTest ? null : ((version, requirementList()).find(r => r.id === id) || null));
-  const test = $derived(!id || !isTest ? null : ((version, testList()).find(t => t.id === id) || null));
+  // `version` is read for its DEPENDENCY, never for its value - hence `void`,
+  // which says so and keeps TypeScript from reading the read as a mistake. Each
+  // read has to happen in the SAME derivation as the untrackable list call it
+  // guards, or a link or unlink would leave the panel showing the old answer.
+  // It stays BEHIND the early return, exactly where the comma operator had it:
+  // a derivation that already knows its answer is null has nothing to redo.
+  const req = $derived.by(() => {
+    if (!id || isTest) return null;
+    void version;
+    return requirementList().find(r => r.id === id) || null;
+  });
+  const test = $derived.by(() => {
+    if (!id || !isTest) return null;
+    void version;
+    return testList().find(t => t.id === id) || null;
+  });
 
   /**
    * The rolled-up result for a test node. computeTestStatus over a one-element
@@ -86,7 +100,11 @@
    * recorded", never as a failure.
    */
   const recorded = $derived.by(() => {
-    const ex = manualTests(record);
+    // The null check is new only in SHAPE. manualTests declares
+    // `ManualResultRecord` but opens with `if (!m) return []`, and this was
+    // always calling it with null for a requirement node or an unrun test; the
+    // guard says out loud what the callee was already doing.
+    const ex = record ? manualTests(record) : [];
     return ex.length ? (ex[0].steps || []) : [];
   });
 
@@ -104,33 +122,33 @@
    * report. Undefined when the index has no such requirement, which reproduces
    * the hand-built href verbatim rather than inventing a guard the old one
    * did not have.
-   * @param {string} rid
-   * @returns {string|undefined}
+   *
+   * Called from the markup, so the `version` read below still lands inside the
+   * template's own tracked evaluation - the same reason the comma operator put
+   * it here rather than at a call site.
    */
-  function reqDoc(rid) {
-    const rec = (version, requirementList()).find(r => r.id === rid);
+  function reqDoc(rid: string): string | undefined {
+    void version;
+    const rec = requirementList().find(r => r.id === rid);
     return rec ? rec.docId : undefined;
   }
 
   /**
    * Drag the panel's left edge. Bounded so it can neither collapse to nothing
    * nor swallow the map it is reporting on.
-   * @param {PointerEvent} ev
-   * @returns {void}
    */
-  function startResize(ev) {
+  function startResize(ev: PointerEvent): void {
     ev.preventDefault();
     if (!panelEl) return;
     const panel = panelEl;
-    const handle = /** @type {HTMLElement} */ (ev.currentTarget);
+    const handle = ev.currentTarget as HTMLElement;
     const startX = ev.clientX;
     const startW = panel.getBoundingClientRect().width;
     // Pointer capture keeps the drag alive over the canvas, which swallows
     // pointer events for panning. A browser that refuses is not a reason to fail
     // the drag, so the failure is ignored exactly as it always was.
     try { handle.setPointerCapture(ev.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
-    /** @param {PointerEvent} move */
-    const onMove = (move) => {
+    const onMove = (move: PointerEvent) => {
       panel.style.width = Math.min(window.innerWidth - 60, Math.max(320, startW + (startX - move.clientX))) + 'px';
     };
     const onUp = () => {
@@ -141,10 +159,7 @@
     handle.addEventListener('pointerup', onUp);
   }
 
-  /**
-   * @returns {void}
-   */
-  function runTest() {
+  function runTest(): void {
     document.dispatchEvent(new window.CustomEvent('webdoc:run-test', { detail: { testId: id } }));
   }
 </script>

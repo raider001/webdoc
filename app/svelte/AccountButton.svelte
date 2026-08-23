@@ -13,7 +13,7 @@
   attacker-chosen; initials() only ever produces text, and {label} renders it as
   a text node.
 -->
-<script>
+<script lang="ts">
   import { userIcon } from '/js/icons.js';
   import { icon } from './actions/icon.js';
   import { authView } from './stores/auth.svelte.js';
@@ -25,10 +25,8 @@
    * Up to two leading letters, upper-cased - "Ada Lovelace" -> "AL", "root" ->
    * "R". The '?' fallback matters: a display name of "!!!" has no letters at
    * all, and an empty button would look broken rather than anonymous.
-   * @param {string} name
-   * @returns {string}
    */
-  function initials(name) {
+  function initials(name: string): string {
     const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
     return parts.map(p => p[0] || '').join('').toUpperCase() || '?';
   }

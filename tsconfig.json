@@ -12,6 +12,9 @@
     "skipLibCheck": true,
     "types": [],
 
+    "baseUrl": ".",
+    "paths": { "/js/*": ["src/js/*"] },
+
     "strict": false,
     "noImplicitAny": true,
 
@@ -21,6 +24,6 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/js/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["app/thirdpartyrenderer/**", "node_modules"]
 }

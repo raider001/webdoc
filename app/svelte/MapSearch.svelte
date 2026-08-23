@@ -17,9 +17,12 @@
   - a bare <input type="search"> inside a form would submit, and this one is only
   not inside a form today.
 -->
-<script>
-  /** @type {{ onSearch: (query: string) => void }} */
-  let { onSearch } = $props();
+<script lang="ts">
+  interface Props {
+    onSearch: (query: string) => void;
+  }
+
+  let { onSearch }: Props = $props();
 </script>
 
 <div class="graph-search">

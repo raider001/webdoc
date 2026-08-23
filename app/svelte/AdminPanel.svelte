@@ -13,39 +13,44 @@
   rather than nesting inside it. The refresh to run once an account exists is
   handed over with the request.
 -->
-<script>
+<script lang="ts">
   import { listUsers, adminUser } from '/js/auth.js';
+  import type { AuthReply, GroupSpec } from '/js/auth.js';
+  import type { AdminUser } from './stores/auth.svelte.js';
   import Modal from './Modal.svelte';
   import UserRow from './UserRow.svelte';
 
-  /** @typedef {import('./stores/auth.svelte.js').AdminUser} AdminUser */
-  /** @typedef {import('/js/auth.js').GroupSpec} GroupSpec */
+  /**
+   * A type alias rather than an interface, deliberately: islands/auth.ts mounts
+   * this panel through a helper constrained to `Record<string, unknown>`, and only
+   * an object literal type gets the implicit index signature that satisfies.
+   */
+  type Props = {
+    onClose: () => void;
+    onAddAccount: (onCreated: () => void) => void;
+  };
 
-  /** @type {{ onClose: () => void, onAddAccount: (onCreated: () => void) => void }} */
-  let { onClose, onAddAccount } = $props();
+  let { onClose, onAddAccount }: Props = $props();
 
   /**
    * null is LOADING, not empty - a server that answers with no accounts at all
    * must read as an empty list, not as a spinner that never stops.
-   * @type {AdminUser[]|null}
    */
-  let users = $state(null);
-  /** @type {GroupSpec[]} */
-  let allGroups = $state([]);
+  let users: AdminUser[] | null = $state(null);
+  let allGroups: GroupSpec[] = $state([]);
   let failed = $state(false);
   let message = $state('');
-  /** @type {''|'is-error'|'is-ok'} */
-  let messageKind = $state('');
+  let messageKind: '' | 'is-error' | 'is-ok' = $state('');
 
-  /** @returns {Promise<void>} */
-  async function refresh() {
+  async function refresh(): Promise<void> {
     const data = await listUsers();
     if (!data) { failed = true; return; }
     failed = false;
-    // A documented downcast, not a silencer: listUsers() is typed as a
-    // passthrough of the server's JSON (`Object[]`), and AdminUser is the shape
-    // this screen actually reads out of it.
-    users = /** @type {AdminUser[]} */ (data.users);
+    // AdminUser is the shape this screen actually reads out of the server's
+    // rows, declared next to the mirror store so UserRow can name it too. The
+    // wire row carries more than that (the audit timestamps), so it satisfies
+    // the narrower type on its own and this stays a plain assignment.
+    users = data.users;
     allGroups = data.groups;
   }
 
@@ -54,10 +59,8 @@
    * a refused change usually means someone else already made a conflicting one,
    * and showing the reason next to stale rows is how an administrator ends up
    * fighting a list that is lying to them.
-   * @param {Promise<import('/js/auth.js').AuthReply>} promise
-   * @returns {Promise<void>}
    */
-  async function apply(promise) {
+  async function apply(promise: Promise<AuthReply>): Promise<void> {
     const r = await promise;
     messageKind = r.ok ? 'is-ok' : 'is-error';
     message = r.ok ? 'Saved.' : (r.error || 'That did not work.');

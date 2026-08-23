@@ -16,17 +16,21 @@
   The <ol> is rendered unconditionally, exactly as buildTOC() always returned one
   even for a document with no headings.
 -->
-<script>
-  /** @typedef {import('/js/numbering.js').TocEntry} TocEntry */
+<script lang="ts">
+  import type { TocEntry } from '/js/numbering.js';
 
-  /**
-   * `contentEl` is the reading pane the headings live in. It is a prop rather
-   * than a document.getElementById() call so the lookup stays scoped to the
-   * rendered article - the same scope buildTOC() searched - and so the component
-   * is testable without the app shell around it.
-   * @type {{ entries?: TocEntry[], contentEl: HTMLElement }}
-   */
-  let { entries = [], contentEl } = $props();
+  interface Props {
+    entries?: TocEntry[];
+    /**
+     * The reading pane the headings live in. It is a prop rather than a
+     * document.getElementById() call so the lookup stays scoped to the rendered
+     * article - the same scope buildTOC() searched - and so the component is
+     * testable without the app shell around it.
+     */
+    contentEl: HTMLElement;
+  }
+
+  let { entries = [], contentEl }: Props = $props();
 
   /**
    * Scroll to the heading and put focus on it, without touching the router hash
@@ -34,14 +38,10 @@
    * bar, open-in-new-tab). Identical to buildTOC()'s handler: smooth scroll,
    * then a tabindex="-1" + preventScroll focus so the next Tab continues from
    * the heading instead of jumping back to the top of the document.
-   * @param {MouseEvent} ev
-   * @param {TocEntry} entry
-   * @returns {void}
    */
-  function jump(ev, entry) {
+  function jump(ev: MouseEvent, entry: TocEntry): void {
     ev.preventDefault();
-    /** @type {HTMLElement|null} */
-    const target = contentEl.querySelector('#' + cssEscape(entry.id));
+    const target = contentEl.querySelector<HTMLElement>('#' + cssEscape(entry.id));
     if (!target) return;
     target.scrollIntoView({ block: 'start', behavior: 'smooth' });
     target.setAttribute('tabindex', '-1');
@@ -59,10 +59,8 @@
    *     class selectors and quietly match nothing.
    * Reached through `window.CSS` rather than the bare global so the shim is the
    * same one app/js/reader.js uses, and so no extra global is assumed.
-   * @param {string} id
-   * @returns {string}
    */
-  function cssEscape(id) {
+  function cssEscape(id: string): string {
     return (window.CSS && window.CSS.escape) ? window.CSS.escape(id) : id.replace(/([^\w-])/g, '\\$1');
   }
 </script>

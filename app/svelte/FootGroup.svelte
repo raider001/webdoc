@@ -14,11 +14,15 @@
   empty list, which is what makes that split safe: hidden or not, there is no
   stray caption to show.
 -->
-<script>
+<script lang="ts">
   import { state, titleFromId } from '/js/app-shell.js';
 
-  /** @type {{ caption: string, ids?: string[] }} */
-  let { caption, ids = [] } = $props();
+  interface Props {
+    caption: string;
+    ids?: string[];
+  }
+
+  let { caption, ids = [] }: Props = $props();
 
   /**
    * Lazy boot no longer preloads every document, so a target's real title is
@@ -29,10 +33,8 @@
    *
    * state.byId is a plain Map and not reactive, which is fine: this is read
    * during the render that `ids` triggers, and ids change on every navigation.
-   * @param {string} id
-   * @returns {string}
    */
-  function label(id) {
+  function label(id: string): string {
     const target = state.byId.get(id);
     return (target && target.title) || titleFromId(id);
   }

@@ -21,24 +21,25 @@
   that bar also holds the "Map by" dropdown, and a component that owned the box
   would have to own its neighbour too.
 -->
-<script>
+<script lang="ts">
   /**
    * `visibility` is the controller's per-category map, keyed the same way the
    * draw list is. A category it has never heard of reads as undefined, which is
    * not `false`, which is why "off" is tested as `=== false` rather than for
    * falsiness - an unknown key means "shown", not "hidden".
-   * @type {{
-   *   kinds: [string, string][],
-   *   visibility: Object<string, boolean>,
-   *   editMode: boolean,
-   *   connector: string,
-   *   onToggle: (kind: string) => void,
-   * }}
    */
-  let { kinds, visibility, editMode, connector, onToggle } = $props();
+  interface Props {
+    kinds: [string, string][];
+    visibility: Record<string, boolean>;
+    editMode: boolean;
+    connector: string;
+    onToggle: (kind: string) => void;
+  }
 
-  /** The two categories a reader can actually draw. @type {string[]} */
-  const CONNECTABLE = ['prereq', 'recnext'];
+  let { kinds, visibility, editMode, connector, onToggle }: Props = $props();
+
+  /** The two categories a reader can actually draw. */
+  const CONNECTABLE: string[] = ['prereq', 'recnext'];
 </script>
 
 {#each kinds as [kind, label] (kind)}

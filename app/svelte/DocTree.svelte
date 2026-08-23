@@ -8,17 +8,19 @@
   main.js. A mounted component cannot set attributes on the element it was
   mounted into, and the drawer's focus management is correct as it stands.
 -->
-<script>
-  import { fetchChildren } from '/js/tree.js';
+<script lang="ts">
+  import { fetchChildren, type TreeLevel } from '/js/tree.js';
   import { treeState } from './stores/tree.svelte.js';
   import DocLink from './DocLink.svelte';
   import TreeFolder from './TreeFolder.svelte';
 
-  /** @type {{ onSelect: (id: string) => void }} */
-  let { onSelect } = $props();
+  interface Props {
+    onSelect: (id: string) => void;
+  }
 
-  /** @type {{folders: string[], docs: {id: string, title?: string, locked?: boolean}[]}} */
-  let root = $state({ folders: [], docs: [] });
+  let { onSelect }: Props = $props();
+
+  let root: TreeLevel = $state({ folders: [], docs: [] });
   let loaded = $state(false);
 
   $effect(() => {

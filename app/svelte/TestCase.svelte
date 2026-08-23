@@ -24,9 +24,9 @@
   goes on the cell the markdown lands in.
 
   The result pill reads `covStatus.version` alongside statusOf() so recording a
-  run recolours it in place; see app/svelte/stores/coverage.svelte.js.
+  run recolours it in place; see app/svelte/stores/coverage.svelte.ts.
 -->
-<script>
+<script lang="ts">
   import { warningIcon, playIcon } from '/js/icons.js';
   import { statusOf, index } from '/js/requirements/store.js';
   import { cssSafe } from '/js/requirements/parse.js';
@@ -34,11 +34,16 @@
   import { fragment } from './actions/fragment.js';
   import { covStatus } from './stores/coverage.svelte.js';
 
+  import type { TestCaseDocBlock } from '/js/requirements/parse.js';
+
   /**
    * The parsed block, straight from requirements/store.js's groupsByDoc.
-   * @type {{ block: import('/js/requirements/parse.js').TestCaseDocBlock }}
    */
-  let { block } = $props();
+  interface Props {
+    block: TestCaseDocBlock;
+  }
+
+  let { block }: Props = $props();
 
   const HEADERS = ['#', 'Action', 'Expected response'];
 
@@ -49,8 +54,16 @@
    * The rolled-up result, live. `untested` is the floor rather than "no pill":
    * a test nobody has run is a fact worth stating, and the neutral pill is what
    * says so.
+   *
+   * covStatus.version is read for its DEPENDENCY, never for its value - hence
+   * `void`, which says so and keeps TypeScript from reading the read as a
+   * mistake. It has to happen inside THIS derivation, beside the untrackable
+   * statusOf(), or the pill would render once and then be stale forever.
    */
-  const cur = $derived((covStatus.version, statusOf(rec.id)));
+  const cur = $derived.by(() => {
+    void covStatus.version;
+    return statusOf(rec.id);
+  });
   const st = $derived(cur ? cur.status : 'untested');
   const resultLabel = $derived(
     st === 'pass' ? 'Pass' : st === 'fail' ? 'Fail' : st === 'partial' ? 'Partial' : 'Untested'
@@ -68,10 +81,8 @@
    * The requirement route a Verifies entry points at. Missing records degrade to
    * a dead '#' rather than throwing; see ReqTable.svelte's reqHref for why an
    * exception inside mount() is the worse failure.
-   * @param {string} id
-   * @returns {string}
    */
-  function reqHref(id) {
+  function reqHref(id: string): string {
     const target = index.get(id);
     return target ? '#/' + target.docId + '?req=' + encodeURIComponent(id) : '#';
   }
@@ -85,9 +96,8 @@
    * globals the components actually rely on, and adding one to that list for a
    * constructor `window` already carries would be a shared-config change for no
    * behavioural gain.
-   * @returns {void}
    */
-  function run() {
+  function run(): void {
     document.dispatchEvent(new window.CustomEvent('webdoc:run-test', { detail: { testId: rec.id } }));
   }
 </script>

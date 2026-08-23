@@ -16,13 +16,13 @@
   for why a component that produced its own HTML here would be either
   double-escaped or an XSS hole.
 
-  THE BADGE REPAINT. `covStatus.version` is read in the SAME expression as
+  THE BADGE REPAINT. `covStatus.version` is read in the SAME evaluation as
   statusOf() so that replacing the coverage-status map recolours every badge on
   the spot. statusOf() reads a plain Map in a plain module that Svelte cannot
   track; without the version read a badge would render once and then be wrong
-  for the rest of the session. See app/svelte/stores/coverage.svelte.js.
+  for the rest of the session. See app/svelte/stores/coverage.svelte.ts.
 -->
-<script>
+<script lang="ts">
   import { warningIcon } from '/js/icons.js';
   import { index, testIndex, statusOf } from '/js/requirements/store.js';
   import { resolveReqRef, cssSafe } from '/js/requirements/parse.js';
@@ -30,26 +30,32 @@
   import { fragment } from './actions/fragment.js';
   import { covStatus } from './stores/coverage.svelte.js';
 
-  /** @typedef {import('/js/requirements.js').RequirementEntry} RequirementEntry */
+  import type { RequirementEntry } from '/js/requirements.js';
+  import type { ReqGroupBlock } from '/js/requirements/parse.js';
 
   /**
    * One rendered reference in a trace cell. `id` is null when the authored
    * reference resolved to nothing, which is the "missing" chip rather than a
    * link - a broken trace has to be visible, not silently absent.
-   * @typedef {Object} TraceRef
-   * @property {string|null} id
-   * @property {string} raw - the reference exactly as authored, for the chip
-   * @property {string} href
-   * @property {string} cls
    */
+  interface TraceRef {
+    id: string | null;
+    /** the reference exactly as authored, for the chip */
+    raw: string;
+    href: string;
+    cls: string;
+  }
 
   /**
    * The parsed block, straight from requirements/store.js's groupsByDoc. Passed
    * whole rather than destructured into props so this component and the parser
    * cannot drift apart over what a group IS.
-   * @type {{ block: import('/js/requirements/parse.js').ReqGroupBlock }}
    */
-  let { block } = $props();
+  interface Props {
+    block: ReqGroupBlock;
+  }
+
+  let { block }: Props = $props();
 
   const HEADERS = ['Requirement', 'Description', 'Trace To', 'Trace From', 'Verified By'];
 
@@ -59,19 +65,15 @@
    * degrades to a dead '#' rather than throwing: this runs inside mount(), and an
    * exception here would abandon the rest of the article's tables, which is a far
    * worse failure than one link that goes nowhere.
-   * @param {string} id
-   * @returns {string}
    */
-  function reqHref(id) {
+  function reqHref(id: string): string {
     const rec = index.get(id);
     return rec ? '#/' + rec.docId + '?req=' + encodeURIComponent(id) : '#';
   }
   /**
    * A test case's route - a different document and a different query key.
-   * @param {string} id
-   * @returns {string}
    */
-  function testHref(id) {
+  function testHref(id: string): string {
     const rec = testIndex.get(id);
     return rec ? '#/' + rec.docId + '?test=' + encodeURIComponent(id) : '#';
   }
@@ -79,10 +81,8 @@
   /**
    * Trace To: resolved against THIS row (a bare `2` means the same group), so it
    * is the only cell that can produce a missing chip.
-   * @param {RequirementEntry} rec
-   * @returns {TraceRef[]}
    */
-  function traceTo(rec) {
+  function traceTo(rec: RequirementEntry): TraceRef[] {
     return rec.traceTo.map(raw => {
       const id = resolveReqRef(raw, rec);
       return { id: id, raw: raw, href: id ? reqHref(id) : '', cls: 'req-link' };
@@ -90,19 +90,15 @@
   }
   /**
    * Trace From: the calculated inverse, already composed ids from the server.
-   * @param {string[]} ids
-   * @returns {TraceRef[]}
    */
-  function reqRefs(ids) {
+  function reqRefs(ids: string[]): TraceRef[] {
     return (ids || []).map(id => ({ id: id, raw: id, href: reqHref(id), cls: 'req-link' }));
   }
   /**
    * Verified By: also calculated, but they are TEST ids - hence the extra
    * `tc-link` class the stylesheet colours differently.
-   * @param {string[]} ids
-   * @returns {TraceRef[]}
    */
-  function testRefs(ids) {
+  function testRefs(ids: string[]): TraceRef[] {
     return (ids || []).map(id => ({ id: id, raw: id, href: testHref(id), cls: 'req-link tc-link' }));
   }
 
@@ -112,13 +108,16 @@
    * class: directive so the class attribute is byte-identical to what
    * badgeStatus() produced - `req-badge` alone when coverage has not loaded.
    *
-   * Reads covStatus.version in the same expression as statusOf(); see the file
-   * header.
-   * @param {string} id
-   * @returns {string}
+   * Reads covStatus.version alongside statusOf(); see the file header.
    */
-  function badgeMod(id) {
-    const cur = (covStatus.version, statusOf(id));
+  function badgeMod(id: string): string {
+    // The version is read for its DEPENDENCY, never for its value - hence
+    // `void`, which is what states that and what keeps TypeScript from reading
+    // the read as a mistake. Both reads happen in this one call, so the rune is
+    // in the same dependency set as the untrackable statusOf() beside it and
+    // the badge repaints when the status map is replaced.
+    void covStatus.version;
+    const cur = statusOf(id);
     return cur ? ' req-badge-st-' + cur.status : '';
   }
 
@@ -126,10 +125,8 @@
    * Only a row that composed a REAL id is addressable. A group with no component
    * (an unconfigured source) or no group name produced ids nothing can link to,
    * and stamping those onto the DOM would create duplicate or nonsense anchors.
-   * @param {RequirementEntry} rec
-   * @returns {string|undefined}
    */
-  function rowId(rec) {
+  function rowId(rec: RequirementEntry): string | undefined {
     return (rec.component && rec.group) ? 'req-' + cssSafe(rec.id) : undefined;
   }
 </script>
@@ -139,7 +136,7 @@
   empty cell and a cell with nothing to say look different on purpose: the
   placeholder is how a reader knows the column was considered.
 -->
-{#snippet trace(/** @type {TraceRef[]} */ refs)}{#if refs.length}{#each refs as ref, i (i)}{#if i}, {/if}{#if ref.id}<a class={ref.cls} href={ref.href}>{ref.id}</a>{:else}<span class="req-missing" title="Not found: {ref.raw}"><span class="wd-mounted" use:icon={warningIcon}></span> {ref.raw}</span>{/if}{/each}{:else}<span class="req-none">—</span>{/if}{/snippet}
+{#snippet trace(refs: TraceRef[])}{#if refs.length}{#each refs as ref, i (i)}{#if i}, {/if}{#if ref.id}<a class={ref.cls} href={ref.href}>{ref.id}</a>{:else}<span class="req-missing" title="Not found: {ref.raw}"><span class="wd-mounted" use:icon={warningIcon}></span> {ref.raw}</span>{/if}{/each}{:else}<span class="req-none">—</span>{/if}{/snippet}
 
 <!--
   KEYED BY INDEX, deliberately. `block` is a parsed snapshot of one document and

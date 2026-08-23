@@ -16,26 +16,27 @@
   hidden and then that it contains a particular phrase, and an element that does
   not exist yet has neither property in a way a reader of that test would expect.
 -->
-<script>
+<script lang="ts">
   import { icon } from './actions/icon.js';
   import { editIcon } from '/js/icons.js';
-
-  /** @typedef {import('/js/graph.js').GraphChangeEvent} GraphChangeEvent */
+  import type { GraphChangeEvent } from '/js/graph.js';
 
   /**
    * The whole change event, not four unpacked fields: every one of them feeds
    * the same sentence, and passing them separately would invite a caller to send
    * a connector from one moment and a pending source from another.
-   * @type {{ state: GraphChangeEvent, onToggle: () => void }}
    */
-  let { state, onToggle } = $props();
+  interface Props {
+    state: GraphChangeEvent;
+    onToggle: () => void;
+  }
+
+  let { state, onToggle }: Props = $props();
 
   /**
    * The instruction under the toggle, for whatever the state machine is showing.
-   * @param {GraphChangeEvent} s
-   * @returns {string}
    */
-  function hintFor(s) {
+  function hintFor(s: GraphChangeEvent): string {
     if (!s.editMode) return '';
     if (s.selectedEdge) return 'Connection selected — press Delete to remove it.';
     if (s.pendingSourceTitle) {

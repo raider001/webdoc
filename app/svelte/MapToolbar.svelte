@@ -13,21 +13,22 @@
   become a different layout - the app answers by building a new one. There is
   nothing for the live instance to be told.
 -->
-<script>
+<script lang="ts">
   import { icon } from './actions/icon.js';
   import { plusIcon, minusIcon, fitIcon, focusIcon } from '/js/icons.js';
 
   /**
    * `onZoom` takes a FACTOR rather than a direction, matching the controller's
    * zoomBy() - so the two buttons differ by their argument and nothing else.
-   * @type {{
-   *   focusMode: boolean,
-   *   onZoom: (factor: number) => void,
-   *   onFit: () => void,
-   *   onFocusToggle: () => void,
-   * }}
    */
-  let { focusMode, onZoom, onFit, onFocusToggle } = $props();
+  interface Props {
+    focusMode: boolean;
+    onZoom: (factor: number) => void;
+    onFit: () => void;
+    onFocusToggle: () => void;
+  }
+
+  let { focusMode, onZoom, onFit, onFocusToggle }: Props = $props();
 
   /**
    * One zoom step. 1.25 in, its reciprocal out, so an in-then-out pair returns

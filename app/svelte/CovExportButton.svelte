@@ -12,9 +12,12 @@
   the affordance's explanation rather than clicking it (a test whose side effect
   is a file on disk fails differently on a different machine).
 -->
-<script>
-  /** @type {{ onExport: () => void }} */
-  let { onExport } = $props();
+<script lang="ts">
+  interface Props {
+    onExport: () => void;
+  }
+
+  let { onExport }: Props = $props();
 </script>
 
 <button

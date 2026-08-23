@@ -13,7 +13,7 @@
   sentence the server sends back (`result.error`). All of it is rendered as text
   through {expr}; nothing on this path may ever become markup.
 -->
-<script>
+<script lang="ts">
   // ALIASED, and it has to be. Svelte reads `$state` as a store subscription to
   // a local binding called `state` whenever one is in scope, so importing
   // app-shell's `state` under its own name turns every `$state(...)` in this
@@ -28,9 +28,16 @@
    * `onSignedIn` fires exactly once, when there is a real session. islands/auth.js
    * unmounts this component and removes its host in response - the wall never
    * removes itself, because it does not own the node it was mounted into.
-   * @type {{ onSignedIn: () => void }}
+   *
+   * A type alias rather than an interface, deliberately: islands/auth.ts mounts
+   * this component through a helper constrained to `Record<string, unknown>`, and
+   * only an object literal type gets the implicit index signature that satisfies.
    */
-  let { onSignedIn } = $props();
+  type Props = {
+    onSignedIn: () => void;
+  };
+
+  let { onSignedIn }: Props = $props();
 
   // ONE id prefix per instance. The old screen hard-coded #authUser / #authPass /
   // #authName, which already collided with the account panel's #pwCurrent-era
@@ -40,24 +47,20 @@
   const uid = $props.id();
 
   /**
-   * 'sign-in' or 'register'. Seeded from the mirror rather than derived from it:
-   * a server with no accounts at all opens on the register form, but the visitor
-   * may switch modes freely afterwards and the seed must not fight them.
-   * @type {'sign-in'|'register'}
+   * Seeded from the mirror rather than derived from it: a server with no accounts
+   * at all opens on the register form, but the visitor may switch modes freely
+   * afterwards and the seed must not fight them.
    */
-  let mode = $state(authView.needsBootstrap ? 'register' : 'sign-in');
+  let mode: 'sign-in' | 'register' = $state(authView.needsBootstrap ? 'register' : 'sign-in');
   let username = $state('');
   let password = $state('');
   let display = $state('');
   let busy = $state(false);
   let message = $state('');
-  /** @type {''|'is-error'|'is-ok'} */
-  let messageKind = $state('');
+  let messageKind: '' | 'is-error' | 'is-ok' = $state('');
 
-  /** @type {HTMLInputElement|undefined} */
-  let userBox = $state();
-  /** @type {HTMLInputElement|undefined} */
-  let passBox = $state();
+  let userBox: HTMLInputElement | undefined = $state();
+  let passBox: HTMLInputElement | undefined = $state();
 
   const registering = $derived(mode === 'register');
 
@@ -85,18 +88,13 @@
     return () => window.clearTimeout(t);
   });
 
-  /** @returns {void} */
-  function toggleMode() {
+  function toggleMode(): void {
     mode = registering ? 'sign-in' : 'register';
     message = '';
     messageKind = '';
   }
 
-  /**
-   * @param {SubmitEvent} ev
-   * @returns {Promise<void>}
-   */
-  async function onSubmit(ev) {
+  async function onSubmit(ev: SubmitEvent): Promise<void> {
     ev.preventDefault();
     if (busy) return;
     busy = true;

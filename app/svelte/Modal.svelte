@@ -13,26 +13,31 @@
   styles it by descent - and .modal-scrim / .modal / .modal-bar / .modal-field
   all live in app/css/editor.css, shared with the editor's own modals.
 -->
-<script>
-  /** @typedef {import('svelte').Snippet} Snippet */
+<script lang="ts">
+  import type { Snippet } from 'svelte';
 
   /**
    * `onClose` is the only way out. The component never removes itself: it is
    * mounted by islands/auth.js into a host element that islands/auth.js also
    * owns, so the code that created the host is the code that destroys it. A
    * component that unmounted itself would leave that host behind.
-   * @type {{ title: string, wide?: boolean, onClose: () => void, body: Snippet, bar: Snippet }}
    */
-  let { title, wide = false, onClose, body, bar } = $props();
+  type Props = {
+    title: string;
+    wide?: boolean;
+    onClose: () => void;
+    body: Snippet;
+    bar: Snippet;
+  };
+
+  let { title, wide = false, onClose, body, bar }: Props = $props();
 
   /**
    * Close on a click on the scrim itself, never on one that bubbled up out of
    * the box - the identity test is what tells "clicked the backdrop" apart from
    * "clicked something inside the dialog".
-   * @param {MouseEvent} ev
-   * @returns {void}
    */
-  function onScrim(ev) {
+  function onScrim(ev: MouseEvent): void {
     if (ev.target === ev.currentTarget) onClose();
   }
 
@@ -46,10 +51,8 @@
    * is stacked on the admin panel, both are listening on `document` and both
    * close. That is the behaviour modal() had, and it is the right one - the
    * stacked pair is one task, and Escape abandons it.
-   * @param {KeyboardEvent} ev
-   * @returns {void}
    */
-  function onKey(ev) {
+  function onKey(ev: KeyboardEvent): void {
     if (ev.key !== 'Escape') return;
     ev.preventDefault();
     ev.stopPropagation();

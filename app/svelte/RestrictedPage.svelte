@@ -13,22 +13,29 @@
   itself, because signing in from here is followed by a full page reload that
   must stay in the vanilla shell - see auth-ui.js.
 -->
-<script>
+<script lang="ts">
   import { lockIcon } from '/js/icons.js';
   import { icon } from './actions/icon.js';
   import GroupChip from './GroupChip.svelte';
 
   /**
-   * `detail` is the server's refusal body, forwarded by catalog.loadDoc.
-   * `signInRequired` distinguishes "nobody is signed in" from "you are, and it
-   * is still not yours" - two different sentences and two different offers.
-   * @type {{
-   *   docId: string,
-   *   detail?: { requiresGroups?: string[], signInRequired?: boolean, error?: string },
-   *   onSignIn: () => void,
-   * }}
+   * The server's refusal body, forwarded by catalog.loadDoc. `signInRequired`
+   * distinguishes "nobody is signed in" from "you are, and it is still not
+   * yours" - two different sentences and two different offers.
    */
-  let { docId, detail = {}, onSignIn } = $props();
+  type RefusalDetail = {
+    requiresGroups?: string[];
+    signInRequired?: boolean;
+    error?: string;
+  };
+
+  type Props = {
+    docId: string;
+    detail?: RefusalDetail;
+    onSignIn: () => void;
+  };
+
+  let { docId, detail = {}, onSignIn }: Props = $props();
 
   const groups = $derived(detail.requiresGroups || []);
   const needsSignIn = $derived(!!detail.signInRequired);

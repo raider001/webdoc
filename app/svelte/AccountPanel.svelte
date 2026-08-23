@@ -11,16 +11,24 @@
   vanilla shell. See auth-ui.js for why that reload cannot become a reactive
   transition.
 -->
-<script>
+<script lang="ts">
   import { changePassword } from '/js/auth.js';
   import { authView } from './stores/auth.svelte.js';
   import Modal from './Modal.svelte';
   import GroupChip from './GroupChip.svelte';
 
   /**
-   * @type {{ onClose: () => void, onManage: () => void, onSignOut: () => void }}
+   * A type alias rather than an interface, deliberately: islands/auth.ts mounts
+   * this panel through a helper constrained to `Record<string, unknown>`, and only
+   * an object literal type gets the implicit index signature that satisfies.
    */
-  let { onClose, onManage, onSignOut } = $props();
+  type Props = {
+    onClose: () => void;
+    onManage: () => void;
+    onSignOut: () => void;
+  };
+
+  let { onClose, onManage, onSignOut }: Props = $props();
 
   // Unique per instance: the panel and the create-user dialog can be on screen
   // together, and both used to hard-code their input ids.
@@ -40,14 +48,9 @@
   let next = $state('');
   let busy = $state(false);
   let message = $state('');
-  /** @type {''|'is-error'|'is-ok'} */
-  let messageKind = $state('');
+  let messageKind: '' | 'is-error' | 'is-ok' = $state('');
 
-  /**
-   * @param {SubmitEvent} ev
-   * @returns {Promise<void>}
-   */
-  async function onChange(ev) {
+  async function onChange(ev: SubmitEvent): Promise<void> {
     ev.preventDefault();
     busy = true;
     messageKind = '';

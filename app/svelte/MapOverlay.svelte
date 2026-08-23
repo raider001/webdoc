@@ -20,7 +20,7 @@
                  collection Svelte cannot see into. Every control paints itself
                  from this and from nothing else.
     `mapState` - what survives a rebuild and a reopen (the model, the layout
-                 token, the "Map by" mode, focus). See stores/map.svelte.js.
+                 token, the "Map by" mode, focus). See stores/map.svelte.ts.
 
   A REBUILD IS A NEW CONTROLLER, NEVER A PATCHED ONE. Anything that changes the
   LAYOUT - a different model, a different "Map by" mode, entering or leaving
@@ -35,7 +35,7 @@
   it destroys the old one, so a teardown would save the outgoing pan/zoom AFTER
   the incoming controller had already asked for it.
 -->
-<script>
+<script lang="ts">
   import { state as appState, app } from '/js/app-shell.js';
   import {
     mapState, mapBuildSeeds, rememberMapView, nextLayout,
@@ -48,12 +48,8 @@
   import GroupLegend from './GroupLegend.svelte';
   import EditControls from './EditControls.svelte';
   import MapEmpty from './MapEmpty.svelte';
-
-  /** @typedef {import('/js/graph.js').GraphController} GraphController */
-  /** @typedef {import('/js/graph.js').GraphChangeEvent} GraphChangeEvent */
-  /** @typedef {import('/js/graph.js').GraphInputDoc} GraphInputDoc */
-  /** @typedef {import('/js/graph.js').GraphOptions} GraphOptions */
-  /** @typedef {import('./actions/graph.js').GraphViewSnapshot} GraphViewSnapshot */
+  import type { GraphViewSnapshot } from './actions/graph.js';
+  import type { GraphController, GraphChangeEvent, GraphOptions } from '/js/graph.js';
 
   /**
    * `onRebuild` is map-view.js's buildDocGraph. Edit-connections writes change
@@ -61,9 +57,13 @@
    * fetches it is the vanilla shell's - handing that job back rather than
    * importing /js/map-view.js from here keeps one fetcher and no import cycle
    * through the bundle.
-   * @type {{ onClose: () => void, onRebuild: (animate?: boolean) => Promise<void> }}
    */
-  let { onClose, onRebuild } = $props();
+  interface Props {
+    onClose: () => void;
+    onRebuild: (animate?: boolean) => Promise<void>;
+  }
+
+  let { onClose, onRebuild }: Props = $props();
 
   /**
    * The "Map by" options. Their `swatch` names an edge category, so each option
@@ -90,12 +90,9 @@
 
   /**
    * Put an element the component made, but does not render, inside a node it
-   * does. The same seam actions/icon.js opens for icons.js's DOM factories.
-   * @param {HTMLElement} node
-   * @param {HTMLElement} child
-   * @returns {{destroy: () => void}}
+   * does. The same seam actions/icon.ts opens for icons.js's DOM factories.
    */
-  function adopt(node, child) {
+  function adopt(node: HTMLElement, child: HTMLElement): { destroy: () => void } {
     node.appendChild(child);
     return { destroy: () => child.remove() };
   }
@@ -105,26 +102,23 @@
    * renders from it - every handler below reaches for it from inside an event,
    * which is not a tracking context - and making it reactive would re-run the
    * params expression that builds the next controller every time one arrives.
-   * @type {GraphController|null}
    */
-  let api = null;
+  let api: GraphController | null = null;
   /**
    * Which GraphCanvas instance `api` belongs to. The {#key} swap creates the new
    * canvas before destroying the old one, so the outgoing instance's "gone"
    * report lands AFTER the incoming one's - without this check it would blank a
    * controller that is on screen.
-   * @type {object|null}
    */
-  let apiOwner = null;
+  let apiOwner: object | null = null;
 
   /**
    * The controller's last report. Seeded with the state a freshly built graph
    * has, so the chrome's first frame is right during the tick before the engine
    * module has finished loading - an unknown visibility key reads as "shown",
    * which is what an empty map means.
-   * @type {GraphChangeEvent}
    */
-  let change = $state({
+  let change: GraphChangeEvent = $state({
     editMode: false,
     connector: 'recnext',
     pendingSourceTitle: null,
@@ -140,12 +134,10 @@
    * Which categories the legend offers. Trace and page-link entries appear only
    * when the corpus actually has such edges - a toggle for something that cannot
    * be drawn is a control that does nothing.
-   * @type {[string, string][]}
    */
-  const legendKinds = $derived.by(() => {
+  const legendKinds = $derived.by((): [string, string][] => {
     const m = mapState.model;
-    /** @type {[string, string][]} */
-    const out = [['prereq', 'Prerequisite'], ['recnext', 'Recommended next']];
+    const out: [string, string][] = [['prereq', 'Prerequisite'], ['recnext', 'Recommended next']];
     if (m && m.traceEdges.length) out.push(['trace', 'Requirement trace']);
     if (m && m.pageLinks.length) out.push(['pagelink', 'Page link']);
     out.push(['missing', 'Missing']);
@@ -165,9 +157,8 @@
    * it - and it opens by harvesting the OUTGOING controller, which is still
    * alive at this moment and is the only thing that knows where the reader was
    * looking, where each node sat, and what the legend was showing.
-   * @returns {GraphOptions}
    */
-  function graphOptions() {
+  function graphOptions(): GraphOptions {
     if (api) rememberMapView(api.getTransform(), api.getNodePositions(), api.getEditState());
     const seeds = mapBuildSeeds();
     const focused = !!(mapState.focusMode && mapState.focusId);
@@ -223,11 +214,12 @@
    * Write one relationship edit through the app, then rebuild from the server.
    * The refetch is the point: the edit changed the on-disk header, and the map's
    * model comes from the server index, not from anything this component holds.
-   * @param {[string, string, ('assumes'|'next')]} edit - [fromId, toId, field]
-   * @param {('add'|'remove')} action
-   * @returns {Promise<void>}
+   * @param edit - [fromId, toId, field]
    */
-  async function relate(edit, action) {
+  async function relate(
+    edit: [string, string, ('assumes' | 'next')],
+    action: ('add' | 'remove'),
+  ): Promise<void> {
     if (!app.editDocRelation) return;
     const ok = await app.editDocRelation(edit[0], edit[1], edit[2], action);
     if (ok) await onRebuild(true);
@@ -235,11 +227,9 @@
 
   /**
    * GraphCanvas reporting in - a controller on create, null on teardown.
-   * @param {GraphController|null} next
-   * @param {object} owner - the reporting instance's identity
-   * @returns {void}
+   * @param owner - the reporting instance's identity
    */
-  function onReady(next, owner) {
+  function onReady(next: GraphController | null, owner: object): void {
     if (next) {
       api = next;
       apiOwner = owner;
@@ -254,36 +244,26 @@
     }
   }
 
-  /**
-   * @param {GraphChangeEvent} ev
-   * @returns {void}
-   */
-  function onChange(ev) { change = ev; }
+  function onChange(ev: GraphChangeEvent): void { change = ev; }
 
   /**
    * The outgoing controller's state, on the one path the build-time harvest
    * cannot cover: the overlay closing. Nothing builds after this, so this is the
    * only chance to remember where the reader was.
-   * @param {GraphViewSnapshot} view
-   * @returns {void}
    */
-  function onTeardown(view) { rememberMapView(view.transform, view.positions, view.editState); }
+  function onTeardown(view: GraphViewSnapshot): void {
+    rememberMapView(view.transform, view.positions, view.editState);
+  }
 
-  /**
-   * @param {string} kind - edge category
-   * @returns {void}
-   */
-  function toggleKind(kind) {
+  /** @param kind - edge category */
+  function toggleKind(kind: string): void {
     if (!api) return;
     if (change.editMode && (kind === 'prereq' || kind === 'recnext')) { api.setConnector(kind); return; }
     api.setVisibility(kind, change.visibility[kind] === false);
   }
 
-  /**
-   * @param {string} name - access group
-   * @returns {void}
-   */
-  function toggleGroup(name) {
+  /** @param name - access group */
+  function toggleGroup(name: string): void {
     if (!api) return;
     // Built as a NEW LIST, not by editing a Set. The controller takes any
     // iterable and copies it, and the Set in `change` is the controller's own
@@ -294,8 +274,8 @@
     api.setHiddenGroups(shown.includes(name) ? shown.filter(g => g !== name) : shown.concat(name));
   }
 
-  /** Toggle radial focus mode; leaving it returns to the hierarchy. @returns {void} */
-  function toggleFocus() {
+  /** Toggle radial focus mode; leaving it returns to the hierarchy. */
+  function toggleFocus(): void {
     mapState.focusMode = !mapState.focusMode;
     if (!mapState.focusMode) mapState.focusId = null;
     nextLayout(true, true);
@@ -307,8 +287,7 @@
   // guard the old permanent `document` listener had to write by hand, expressed
   // as a lifetime instead.
   $effect(() => {
-    /** @param {KeyboardEvent} ev */
-    const onKey = (ev) => {
+    const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       if (mapState.focusMode && mapState.focusId) {
         mapState.focusId = null;

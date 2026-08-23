@@ -2243,7 +2243,7 @@ function pa(e, t) {
 	O(o), ua(o, (e) => P(i, e), () => V(i)), R(() => K(s, `${n() ?? ""} ${a ?? ""}`)), G(e, o), A();
 }
 //#endregion
-//#region app/svelte/stores/tree.svelte.js
+//#region app/svelte/stores/tree.svelte.ts
 var ma = qn({
 	activeId: null,
 	expanded: {},
@@ -2261,7 +2261,7 @@ function _a(e) {
 	ma.expanded[e] = !ma.expanded[e];
 }
 //#endregion
-//#region app/svelte/actions/icon.js
+//#region app/svelte/actions/icon.ts
 function Q(e, t) {
 	let n = null;
 	function r(t) {
@@ -2407,7 +2407,7 @@ function Ta(e, t) {
 	}), G(e, i), A();
 }
 //#endregion
-//#region app/svelte/stores/search.svelte.js
+//#region app/svelte/stores/search.svelte.ts
 var Ea = qn({
 	query: "",
 	hits: [],
@@ -2470,7 +2470,7 @@ function Pa(e, t) {
 	}), G(e, n), A();
 }
 //#endregion
-//#region app/svelte/islands/tree.js
+//#region app/svelte/islands/tree.ts
 function Fa(e, t) {
 	wi(Ta, {
 		target: e,
@@ -2546,7 +2546,7 @@ function Ua(e, t) {
 	}), G(e, i), A();
 }
 //#endregion
-//#region app/svelte/stores/shell.svelte.js
+//#region app/svelte/stores/shell.svelte.ts
 var Wa = qn({
 	docId: "",
 	toc: [],
@@ -2563,7 +2563,7 @@ function qa(e, t) {
 	Wa.assumes = e || [], Wa.next = t || [];
 }
 //#endregion
-//#region app/svelte/islands/reader.js
+//#region app/svelte/islands/reader.ts
 function Ja(e, t) {
 	wi(za, {
 		target: e,
@@ -2604,7 +2604,7 @@ function Qa(e, t) {
 	});
 }
 //#endregion
-//#region app/svelte/stores/auth.svelte.js
+//#region app/svelte/stores/auth.svelte.ts
 var $a = qn({
 	enabled: !1,
 	user: null,
@@ -3058,7 +3058,7 @@ function Lo(e, t) {
 	}), G(e, a), A();
 }
 //#endregion
-//#region app/svelte/islands/auth.js
+//#region app/svelte/islands/auth.ts
 function Ro(e) {
 	let t = document.createElement(e);
 	return t.className = "wd-mounted", t;
@@ -3142,7 +3142,7 @@ function Ko(e, t, n) {
 	return { destroy: () => Oi(r) };
 }
 //#endregion
-//#region app/svelte/actions/fragment.js
+//#region app/svelte/actions/fragment.ts
 function qo(e, t) {
 	let n = [], r = null;
 	function i(t) {
@@ -3163,7 +3163,7 @@ function qo(e, t) {
 	};
 }
 //#endregion
-//#region app/svelte/stores/coverage.svelte.js
+//#region app/svelte/stores/coverage.svelte.ts
 var Jo = qn({ version: 0 }), Yo = !1;
 function Xo() {
 	Yo || (Yo = !0, ne(() => {
@@ -3251,7 +3251,8 @@ function os(e, t) {
 		}));
 	}
 	function c(e) {
-		let t = (Jo.version, re(e));
+		Jo.version;
+		let t = re(e);
 		return t ? " req-badge-st-" + t.status : "";
 	}
 	function l(e) {
@@ -3378,7 +3379,7 @@ function ms(e, t) {
 }
 U(["click"]);
 //#endregion
-//#region app/svelte/islands/requirements.js
+//#region app/svelte/islands/requirements.ts
 function hs(e, t) {
 	Xo();
 	let n = wi(os, {
@@ -3396,7 +3397,7 @@ function gs(e, t) {
 	return { destroy: () => Oi(n) };
 }
 //#endregion
-//#region app/svelte/actions/graph.js
+//#region app/svelte/actions/graph.ts
 var _s = null;
 function vs(e, t, n, r, i) {
 	let a = null, o = !0;
@@ -3453,7 +3454,7 @@ function Ts(e, t) {
 }
 U(["click"]);
 //#endregion
-//#region app/svelte/actions/richtext.js
+//#region app/svelte/actions/richtext.ts
 function Es(e, t) {
 	let n = null, r = !0;
 	return import("/js/editor.js").then(({ richText: i }) => {
@@ -3524,11 +3525,11 @@ function Ls(t, i) {
 	});
 	async function y(e) {
 		P(s, f(e), !0), P(o, "Disconnecting…");
-		let t = await he(i.id, e, g.site && g.site.sources);
+		let t = await he(i.id, e, g.site?.sources ?? []);
 		P(s, ""), t && await i.onReload();
 	}
 	async function b(e, t) {
-		e.preventDefault(), P(l, !1), P(c, ""), P(o, "Connecting…"), await me(i.id, t, g.site && g.site.sources) && await i.onReload();
+		e.preventDefault(), P(l, !1), P(c, ""), P(o, "Connecting…"), await me(i.id, t, g.site?.sources ?? []) && await i.onReload();
 	}
 	async function x() {
 		let e = V(u).trim();
@@ -3540,7 +3541,7 @@ function Ls(t, i) {
 			return;
 		}
 		let n = new Map([...a().autoCatalog || [], ...t].map((e) => [e.key, e]));
-		a().autoCatalog = [...n.values()], await ye(e, i.id, g.site && g.site.sources), P(u, ""), P(o, "Added " + t.length + " tests — search to connect."), P(l, !0);
+		a().autoCatalog = [...n.values()], await ye(e, i.id, g.site?.sources ?? []), P(u, ""), P(o, "Added " + t.length + " tests — search to connect."), P(l, !0);
 	}
 	function S(e) {
 		e.key === "Enter" && (e.preventDefault(), x());
@@ -3614,9 +3615,10 @@ var Rs = /* @__PURE__ */ W("<p class=\"cov-report-empty\">No test cases verify t
 function Hs(t, i) {
 	k(i, !0);
 	let a = /* @__PURE__ */ N(""), o = /* @__PURE__ */ N(""), s = /* @__PURE__ */ N(""), c = /* @__PURE__ */ N(!1), l = /* @__PURE__ */ j(() => {
-		let e = (i.version, le()).find((e) => e.id === i.reqId);
+		i.version;
+		let e = le().find((e) => e.id === i.reqId);
 		return e && e.verifiedBy || [];
-	}), u = /* @__PURE__ */ j(() => pe((i.version, de()), i.results));
+	}), u = /* @__PURE__ */ j(() => (i.version, pe(de(), i.results)));
 	function d(e) {
 		let t = V(u).get(e);
 		return t && t.status || "untested";
@@ -3625,12 +3627,13 @@ function Hs(t, i) {
 		return t === "pass" ? e : t === "fail" ? r : n;
 	}
 	function p(e) {
-		let t = (i.version, de()).find((t) => t.id === e);
+		i.version;
+		let t = de().find((t) => t.id === e);
 		return t ? t.name : e;
 	}
 	let m = /* @__PURE__ */ j(() => {
 		let e = new Set(V(l)), t = V(s).trim().toLowerCase();
-		return (i.version, de()).filter((n) => !e.has(n.id) && (!t || n.id.toLowerCase().includes(t) || (n.name || "").toLowerCase().includes(t))).slice(0, 8);
+		return i.version, de().filter((n) => !e.has(n.id) && (!t || n.id.toLowerCase().includes(t) || (n.name || "").toLowerCase().includes(t))).slice(0, 8);
 	});
 	async function g(e) {
 		if (!h.unlinkTestFromRequirement) return;
@@ -3698,12 +3701,12 @@ U([
 var Us = /* @__PURE__ */ W("<p class=\"cov-report-desc\"> </p>"), Ws = /* @__PURE__ */ W("<a class=\"cov-report-link\">Open in its document <span class=\"wd-mounted\"></span></a>"), Gs = /* @__PURE__ */ W("<!> <!> <!> <!>", 1), Ks = /* @__PURE__ */ W("<!><a> </a>", 1), qs = /* @__PURE__ */ W("<p class=\"cov-report-link\">Verifies: <!></p>"), Js = /* @__PURE__ */ W("<p class=\"cov-report-note\"> </p>"), Ys = /* @__PURE__ */ W("<p class=\"cov-report-desc tc-report-sub\"><code> </code> <span> </span></p> <!> <!> <!> <div class=\"cov-report-sec\"><h3> </h3> <!></div> <!> <div class=\"cov-medit-bar\"><button type=\"button\" class=\"btn btn-primary\"><span class=\"wd-mounted\"></span>Run this test</button></div>", 1), Xs = /* @__PURE__ */ W("<aside class=\"cov-report\"><div class=\"cov-report-resize\" title=\"Drag to resize\"></div> <div class=\"cov-report-head\"><h2> </h2> <button class=\"cov-report-close\" title=\"Close\"></button></div> <!></aside>");
 function Zs(e, t) {
 	k(t, !0);
-	let n = /* @__PURE__ */ N(void 0), i = /* @__PURE__ */ j(() => !!t.id && t.id.indexOf("T_") === 0), o = /* @__PURE__ */ j(() => !t.id || V(i) ? null : (t.version, le()).find((e) => e.id === t.id) || null), s = /* @__PURE__ */ j(() => !t.id || !V(i) ? null : (t.version, de()).find((e) => e.id === t.id) || null), c = /* @__PURE__ */ j(() => {
+	let n = /* @__PURE__ */ N(void 0), i = /* @__PURE__ */ j(() => !!t.id && t.id.indexOf("T_") === 0), o = /* @__PURE__ */ j(() => !t.id || V(i) ? null : (t.version, le().find((e) => e.id === t.id) || null)), s = /* @__PURE__ */ j(() => !t.id || !V(i) ? null : (t.version, de().find((e) => e.id === t.id) || null)), c = /* @__PURE__ */ j(() => {
 		if (!t.id || !V(i)) return "untested";
 		let e = pe(V(s) ? [V(s)] : [], t.results).get(t.id);
 		return e && e.status || "untested";
 	}), l = /* @__PURE__ */ j(() => V(c) === "pass" ? "Pass" : V(c) === "fail" ? "Fail" : V(c) === "partial" ? "Partial" : "Untested"), d = /* @__PURE__ */ j(() => t.id && V(i) && t.results.manual ? t.results.manual[t.id] : null), f = /* @__PURE__ */ j(() => {
-		let e = ve(V(d));
+		let e = V(d) ? ve(V(d)) : [];
 		return e.length && e[0].steps || [];
 	}), p = /* @__PURE__ */ j(() => V(d) ? V(d).run : null), m = /* @__PURE__ */ j(() => {
 		if (!V(p)) return "";
@@ -3711,7 +3714,8 @@ function Zs(e, t) {
 		return "Last run" + (V(p).by ? " by " + V(p).by : "") + (e ? " · " + e : "");
 	}), h = /* @__PURE__ */ j(() => V(s) && V(s).steps || []);
 	function g(e) {
-		let n = (t.version, le()).find((t) => t.id === e);
+		t.version;
+		let n = le().find((t) => t.id === e);
 		return n ? n.docId : void 0;
 	}
 	function _(e) {
@@ -3865,7 +3869,8 @@ var Qs = [], $s = /* @__PURE__ */ W("<div></div>"), ec = /* @__PURE__ */ W("<p c
 function nc(e, t) {
 	k(t, !0);
 	let n = /* @__PURE__ */ N(qn(t.results)), r = /* @__PURE__ */ N(0), i = /* @__PURE__ */ N(qn(Qs.slice())), a = /* @__PURE__ */ N(null), o = /* @__PURE__ */ N(null), s = /* @__PURE__ */ j(() => {
-		let e = (V(r), le()), t = de();
+		V(r);
+		let e = le(), t = de();
 		return {
 			reqs: e,
 			tests: t,
@@ -3930,7 +3935,7 @@ function nc(e, t) {
 		P(i, t, !0), Qs = t;
 	}
 	async function u() {
-		let e = await _e(g.site && g.site.sources);
+		let e = await _e(g.site?.sources ?? []);
 		P(n, e, !0), t.onResults(e), Wn(r);
 	}
 	var d = tc(), f = I(d), p = (e) => {
@@ -4147,7 +4152,7 @@ function lc(t, n) {
 }
 U(["keydown", "click"]);
 //#endregion
-//#region app/svelte/islands/coverage.js
+//#region app/svelte/islands/coverage.ts
 function uc(e, t) {
 	let n = wi(nc, {
 		target: e,
@@ -4178,7 +4183,7 @@ function dc(e, t) {
 	} };
 }
 //#endregion
-//#region app/svelte/stores/map.svelte.js
+//#region app/svelte/stores/map.svelte.ts
 var $ = qn({
 	model: null,
 	version: 0,
@@ -4587,7 +4592,7 @@ function Wc(e, t) {
 	}), O(S), R(() => C = X(S, 1, "graph-root", null, C, { "is-editing": V(s).editMode })), G(e, S), A();
 }
 //#endregion
-//#region app/svelte/islands/map.js
+//#region app/svelte/islands/map.ts
 function Gc(e, t) {
 	let n = wi(Wc, {
 		target: e,

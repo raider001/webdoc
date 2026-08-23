@@ -23,29 +23,28 @@
   that is on screen. It is the same identity check the engine makes before
   clearing window.__graph, for the same reason.
 -->
-<script>
+<script lang="ts">
   import { graphCanvas } from './actions/graph.js';
-
-  /** @typedef {import('/js/graph.js').GraphInputDoc} GraphInputDoc */
-  /** @typedef {import('/js/graph.js').GraphOptions} GraphOptions */
-  /** @typedef {import('/js/graph.js').GraphController} GraphController */
-  /** @typedef {import('/js/graph.js').GraphChangeEvent} GraphChangeEvent */
-  /** @typedef {import('./actions/graph.js').GraphViewSnapshot} GraphViewSnapshot */
+  import type { GraphViewSnapshot } from './actions/graph.js';
+  import type {
+    GraphInputDoc, GraphOptions, GraphController, GraphChangeEvent,
+  } from '/js/graph.js';
 
   /**
    * `docs` and `options` are read ONCE, when the action runs. A different model
    * or a different layout is a different controller, which is what the {#key}
    * around this component expresses - there is no prop here you can change to
    * re-lay-out a live graph, deliberately.
-   * @type {{
-   *   docs: GraphInputDoc[],
-   *   options: GraphOptions,
-   *   onReady: (api: GraphController|null, owner: object) => void,
-   *   onChange: (ev: GraphChangeEvent) => void,
-   *   onTeardown: (view: GraphViewSnapshot) => void,
-   * }}
    */
-  let { docs, options, onReady, onChange, onTeardown } = $props();
+  interface Props {
+    docs: GraphInputDoc[];
+    options: GraphOptions;
+    onReady: (api: GraphController | null, owner: object) => void;
+    onChange: (ev: GraphChangeEvent) => void;
+    onTeardown: (view: GraphViewSnapshot) => void;
+  }
+
+  let { docs, options, onReady, onChange, onTeardown }: Props = $props();
 
   /**
    * This instance's identity, handed up with every onReady so the parent can
@@ -57,9 +56,8 @@
    * The change subscription, dropped the moment the controller does. The
    * controller clears its own listener list on destroy too; unsubscribing here
    * as well is what keeps this component's teardown complete on its own terms.
-   * @type {(() => void)|null}
    */
-  let unsubscribe = null;
+  let unsubscribe: (() => void) | null = null;
 
   /**
    * The action's one call back into the component: a controller on create, null
@@ -69,10 +67,8 @@
    * returns the same snapshot on('change') delivers, so the chrome can draw
    * itself from real state immediately instead of sitting on defaults until the
    * reader happens to toggle something.
-   * @param {GraphController|null} api
-   * @returns {void}
    */
-  function ready(api) {
+  function ready(api: GraphController | null): void {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
     if (api) {
       unsubscribe = api.on('change', onChange);

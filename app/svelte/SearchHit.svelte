@@ -7,12 +7,18 @@
   names, and the snippet is server-supplied plain text - it is inserted as TEXT,
   never as HTML, which is why no sanitizer is involved on this path.
 -->
-<script>
-  /** @type {{ hit: {docId: string, title: string, snippet?: string, locked?: boolean}, onSelect: (id: string) => void }} */
-  let { hit, onSelect } = $props();
+<script lang="ts">
+  interface Props {
+    // Deliberately looser than search.ts's SearchResult, which declares
+    // `snippet` required: the server withholds it for a locked hit, and this
+    // component is the one place that has to render such a hit anyway.
+    hit: { docId: string; title: string; snippet?: string; locked?: boolean };
+    onSelect: (id: string) => void;
+  }
 
-  /** @param {MouseEvent} ev */
-  function click(ev) {
+  let { hit, onSelect }: Props = $props();
+
+  function click(ev: MouseEvent): void {
     if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
     ev.preventDefault();
     onSelect(hit.docId);

@@ -19,23 +19,30 @@
   through `use:sanitized`. Both end at app/js/sanitize.js - see
   ./actions/richtext.js for why they are two different actions.
 -->
-<script>
+<script lang="ts">
   import { checkIcon, closeIcon } from '/js/icons.js';
   import { icon } from './actions/icon.js';
   import { fragment } from './actions/fragment.js';
   import { sanitized } from './actions/richtext.js';
 
+  import type { TestStep } from '/js/requirements.js';
+
   /**
    * `ex` is this step's recorded result, if the test has ever been run. It is
    * looked up by INDEX against the definition, which is why runner.js stores
    * every step in order even when some were left unrecorded.
-   * @type {{
-   *   step: import('/js/requirements.js').TestStep,
-   *   index: number,
-   *   ex?: {step?: string, response?: string, pass?: boolean|null},
-   * }}
+   *
+   * Every field of `ex` is optional because the sidecar is a FILE: an entry a
+   * hand-edit or an older runner left half-written must read as "not recorded",
+   * not throw.
    */
-  let { step, index, ex = undefined } = $props();
+  interface Props {
+    step: TestStep;
+    index: number;
+    ex?: { step?: string; response?: string; pass?: boolean | null };
+  }
+
+  let { step, index, ex = undefined }: Props = $props();
 
   const hasResult = $derived(!!ex && typeof ex.pass === 'boolean');
   const passed = $derived(!!ex && ex.pass === true);

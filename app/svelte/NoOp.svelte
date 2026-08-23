@@ -16,14 +16,16 @@
      already loaded. Were it bundled instead, every module reached that way would
      be forked into a second instance with its own state.
 -->
-<script>
+<script lang="ts">
   import { closeIcon } from '/js/icons.js';
 
-  /** @type {{ label?: string }} */
-  let { label = 'no-op' } = $props();
+  interface Props {
+    label?: string;
+  }
 
-  /** @type {HTMLElement|undefined} */
-  let node = $state();
+  let { label = 'no-op' }: Props = $props();
+
+  let node: HTMLElement | undefined = $state();
 
   // A side effect on a real node, which is what $effect is actually for. The
   // earlier version assigned to $state from inside the effect - which works, but

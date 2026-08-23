@@ -5,16 +5,13 @@
 // + index.html hashes, no 'unsafe-inline') blocks inline scripts, which left
 // the samples unhighlighted and the theme toggle dead under the real server.
 // Still type="module": it imports highlightWithin from /js/highlighter.js.
-
 import { highlightWithin } from '/js/highlighter.js';
 highlightWithin(document.body);
-
 const root = document.documentElement;
 const which = document.getElementById('which');
 const show = () => { which.textContent = 'data-theme = ' + root.getAttribute('data-theme'); };
 document.getElementById('toggle').addEventListener('click', () => {
-  root.setAttribute('data-theme',
-    root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-  show();
+    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    show();
 });
 show();

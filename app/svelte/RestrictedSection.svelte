@@ -15,7 +15,7 @@
   same place - both attacker-chosen where authors are not fully trusted, both
   rendered as text.
 -->
-<script>
+<script lang="ts">
   import { lockIcon } from '/js/icons.js';
   import { icon } from './actions/icon.js';
   import GroupChip from './GroupChip.svelte';
@@ -24,9 +24,18 @@
    * `malformed` is the server saying the section's access rule could not be
    * parsed. That hides it from everyone but an administrator - a rule nobody can
    * read is treated as a rule nobody satisfies, never as no rule at all.
-   * @type {{ spec?: { read?: string[], label?: string, malformed?: boolean } }}
    */
-  let { spec = {} } = $props();
+  type SectionSpec = {
+    read?: string[];
+    label?: string;
+    malformed?: boolean;
+  };
+
+  type Props = {
+    spec?: SectionSpec;
+  };
+
+  let { spec = {} }: Props = $props();
 
   const groups = $derived(spec.read || []);
 

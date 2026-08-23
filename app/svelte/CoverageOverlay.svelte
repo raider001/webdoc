@@ -23,20 +23,19 @@
   version hid it on every open, and reopening the map to find last week's report
   still on screen would be worse.
 -->
-<script module>
+<script module lang="ts">
   /**
    * The status keys currently filtered OUT, remembered across mount and unmount.
    *
    * Module state because the instance does not outlive the overlay: this
    * component is destroyed when the reader closes the view, and a filter that
    * silently reset itself would look like the toggle had failed. The pan/zoom is
-   * remembered the same way, one layer down, in ./actions/graph.js.
-   * @type {string[]}
+   * remembered the same way, one layer down, in ./actions/graph.ts.
    */
-  let rememberedOff = [];
+  let rememberedOff: string[] = [];
 </script>
 
-<script>
+<script lang="ts">
   import { state as appState } from '/js/app-shell.js';
   import { requirementList, testList, setCoverageStatus } from '/js/requirements.js';
   import { loadResults, combinedStatus } from '/js/coverage.js';
@@ -45,29 +44,30 @@
   import CovExportButton from './CovExportButton.svelte';
   import ReportPanel from './ReportPanel.svelte';
 
-  /** @typedef {import('/js/coverage.js').CoverageResults} CoverageResults */
-  /** @typedef {import('/js/graph.js').GraphInputDoc} GraphInputDoc */
-  /** @typedef {import('./actions/graph.js').GraphApi} GraphApi */
+  import type { CoverageResults } from '/js/coverage.js';
+  import type { GraphInputDoc } from '/js/graph.js';
+  import type { GraphApi, GraphActionParams } from './actions/graph.js';
 
   /**
    * `results` arrive already loaded: coverage-view.js awaits them before it
    * mounts, so the first frame is the real graph rather than an empty stage that
    * fills in. `onResults` hands a later reload back, because exportReport()
    * lives over there and must not build a report from a stale sidecar.
-   * @type {{
-   *   results: CoverageResults,
-   *   onResults: (r: CoverageResults) => void,
-   *   onExport: () => void,
-   *   onClose: () => void,
-   * }}
    */
-  let { results: initialResults, onResults, onExport, onClose } = $props();
+  interface Props {
+    results: CoverageResults;
+    onResults: (r: CoverageResults) => void;
+    onExport: () => void;
+    onClose: () => void;
+  }
+
+  let { results: initialResults, onResults, onExport, onClose }: Props = $props();
 
   // A SEED, not a mirror - hence the ignore. The island is mounted afresh on
   // every open, so `initialResults` cannot change under this instance; what does
   // change is the reload below, and that writes `results` directly.
   // svelte-ignore state_referenced_locally
-  let results = $state(initialResults);
+  let results: CoverageResults = $state(initialResults);
 
   /**
    * The rebuild token. requirementList() and testList() read plain Maps that
@@ -78,17 +78,20 @@
    */
   let version = $state(0);
 
-  /** @type {string[]} */
-  let statusOff = $state(rememberedOff.slice());
+  let statusOff: string[] = $state(rememberedOff.slice());
 
   /** The selected node id, i.e. what the report panel is showing. */
-  let selected = $state(/** @type {string|null} */ (null));
+  let selected = $state<string | null>(null);
 
-  /** @type {GraphApi|null} */
-  let api = $state(null);
+  let api = $state<GraphApi | null>(null);
 
   const model = $derived.by(() => {
-    const reqs = (version, requirementList());
+    // `version` is read for its DEPENDENCY, never for its value - hence `void`,
+    // which says so and keeps TypeScript from reading the read as a mistake. It
+    // has to happen inside THIS derivation, beside the untrackable
+    // requirementList(), or a link or unlink would leave the model stale.
+    void version;
+    const reqs = requirementList();
     const tests = testList();
     return { reqs: reqs, tests: tests, status: combinedStatus(reqs, tests, results) };
   });
@@ -123,8 +126,7 @@
   // `if (!overlay.hidden)` listener had to write by hand, on a listener that was
   // then never removed.
   $effect(() => {
-    /** @param {KeyboardEvent} ev */
-    const onKey = (ev) => {
+    const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       if (selected !== null) selected = null;
       else onClose();
@@ -138,22 +140,18 @@
    * block, so every rebuild recomputes it from the current index; Svelte reads
    * an action's parameters untracked and exactly once, which is what makes that
    * safe rather than merely convenient.
-   * @returns {import('./actions/graph.js').GraphActionParams}
    */
-  function graphParams() {
+  function graphParams(): GraphActionParams {
     // Inverse traceability: a requirement's PARENTS are the requirements that
     // trace to it, and the graph draws an edge parent -> child from `assumes`.
-    /** @type {Object<string, string[]>} */
-    const parents = {};
+    const parents: Record<string, string[]> = {};
     model.reqs.forEach(r => (parents[r.id] = []));
     model.reqs.forEach(p => (p.traceFrom || []).forEach(c => { if (parents[c]) parents[c].push(p.id); }));
 
-    /** @type {GraphInputDoc[]} */
-    const reqNodes = model.reqs.map(r => ({
+    const reqNodes: GraphInputDoc[] = model.reqs.map(r => ({
       id: r.id, title: r.id, description: r.description, assumes: parents[r.id] || [], next: [],
     }));
-    /** @type {GraphInputDoc[]} */
-    const testNodes = model.tests.map(t => ({
+    const testNodes: GraphInputDoc[] = model.tests.map(t => ({
       id: t.id,
       title: t.name || t.id,
       description: (t.steps || []).length + ' step' + ((t.steps || []).length === 1 ? '' : 's'),
@@ -163,9 +161,9 @@
 
     // Which shape each node is drawn as. Built in one pass rather than by
     // mutation, so it is plainly a lookup table and not reactive state.
-    const nodeKind = new Map([
-      ...model.reqs.map(r => /** @type {[string, string]} */ ([r.id, 'req'])),
-      ...model.tests.map(t => /** @type {[string, string]} */ ([t.id, 'test'])),
+    const nodeKind = new Map<string, string>([
+      ...model.reqs.map((r): [string, string] => [r.id, 'req']),
+      ...model.tests.map((t): [string, string] => [t.id, 'test']),
     ]);
 
     return {
@@ -180,11 +178,7 @@
     };
   }
 
-  /**
-   * @param {string} key
-   * @returns {void}
-   */
-  function toggleStatus(key) {
+  function toggleStatus(key: string): void {
     const next = statusOff.includes(key) ? statusOff.filter(k => k !== key) : statusOff.concat(key);
     statusOff = next;
     rememberedOff = next;
@@ -193,10 +187,15 @@
   /**
    * Refetch the sidecar after a write that only the server knows the outcome of
    * (connecting or disconnecting an automated test), then rebuild.
-   * @returns {Promise<void>}
+   *
+   * `?? []` where this used to read `appState.site && appState.site.sources`:
+   * loadResults declares `SourceConfig[]` but opens with `for (const s of
+   * (sources || []))`, so a boot with no site.json yet was always handing it
+   * null. An empty list walks the same path to the same empty result; the null
+   * was never the point.
    */
-  async function reloadResults() {
-    const r = await loadResults(appState.site && appState.site.sources);
+  async function reloadResults(): Promise<void> {
+    const r = await loadResults(appState.site?.sources ?? []);
     results = r;
     onResults(r);
     version++;

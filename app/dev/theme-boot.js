@@ -11,11 +11,13 @@
 //
 // Loaded with a plain <script src> - no type="module", no defer - so it stays
 // parser-blocking and still runs before first paint, exactly as inline did.
-
 (function () {
-  try {
-    var stored = localStorage.getItem('wd-theme');
-    var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
-  } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+    try {
+        var stored = localStorage.getItem('wd-theme');
+        var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
+    }
+    catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
 })();

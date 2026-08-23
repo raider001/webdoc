@@ -14,19 +14,23 @@
   If that file is split, these two selectors must come with the tree, not with
   the auth screens.
 -->
-<script>
+<script lang="ts">
   import { lockIcon } from '/js/icons.js';
   import { icon } from './actions/icon.js';
   import { treeState } from './stores/tree.svelte.js';
+  import type { TreeDoc } from '/js/tree.js';
 
-  /** @type {{ doc: {id: string, title?: string, locked?: boolean}, onSelect: (id: string) => void }} */
-  let { doc, onSelect } = $props();
+  interface Props {
+    doc: TreeDoc;
+    onSelect: (id: string) => void;
+  }
+
+  let { doc, onSelect }: Props = $props();
 
   const isActive = $derived(treeState.activeId === doc.id);
   const label = $derived(doc.title || doc.id.split('/').pop());
 
-  /** @type {HTMLAnchorElement|undefined} */
-  let node = $state();
+  let node: HTMLAnchorElement | undefined = $state();
 
   // Scroll the routed document into view. app/js/tree.js did this at the end of
   // markActive(); it has to be an effect here because the link may not exist yet
@@ -35,8 +39,7 @@
     if (isActive && node) node.scrollIntoView({ block: 'nearest' });
   });
 
-  /** @param {MouseEvent} ev */
-  function click(ev) {
+  function click(ev: MouseEvent): void {
     if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;   // allow open-in-new-tab
     ev.preventDefault();
     onSelect(doc.id);

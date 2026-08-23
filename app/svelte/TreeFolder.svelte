@@ -10,17 +10,21 @@
   rebuild (create a document, or the four-second change poll) wiped the container
   and collapsed everything the reader had opened.
 -->
-<script>
-  import { fetchChildren } from '/js/tree.js';
+<script lang="ts">
+  import { fetchChildren, type TreeLevel } from '/js/tree.js';
   import { treeState, toggleFolder } from './stores/tree.svelte.js';
   import DocLink from './DocLink.svelte';
   import TreeFolder from './TreeFolder.svelte';
 
-  /** @type {{ name: string, path: string, onSelect: (id: string) => void }} */
-  let { name, path, onSelect } = $props();
+  interface Props {
+    name: string;
+    path: string;
+    onSelect: (id: string) => void;
+  }
 
-  /** @type {{folders: string[], docs: {id: string, title?: string, locked?: boolean}[]}} */
-  let level = $state({ folders: [], docs: [] });
+  let { name, path, onSelect }: Props = $props();
+
+  let level: TreeLevel = $state({ folders: [], docs: [] });
   let loaded = $state(false);
 
   const open = $derived(!!treeState.expanded[path]);
@@ -41,9 +45,8 @@
     return () => { cancelled = true; };
   });
 
-  /** @param {Event} e */
-  function ontoggle(e) {
-    const el = /** @type {HTMLDetailsElement} */ (e.currentTarget);
+  function ontoggle(e: Event): void {
+    const el = e.currentTarget as HTMLDetailsElement;
     if (el.open !== open) toggleFolder(path);
   }
 </script>

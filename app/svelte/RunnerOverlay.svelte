@@ -25,7 +25,7 @@
   `section.run-test[data-test-id=…]`, the five `table.run-grid` headers and the
   two `.run-pf button.run-pf-btn` per step.
 -->
-<script>
+<script lang="ts">
   import { checkIcon, closeIcon } from '/js/icons.js';
   import { manualTests, saveManual } from '/js/coverage.js';
   import { sanitizeToFragment } from '/js/sanitize.js';
@@ -33,34 +33,35 @@
   import { fragment } from './actions/fragment.js';
   import { richtext } from './actions/richtext.js';
 
-  /** @typedef {import('/js/runner.js').RunTest} RunTest */
-  /** @typedef {import('/js/requirements.js').TestCaseEntry} TestCaseEntry */
-  /** @typedef {import('/js/coverage.js').CoverageResults} CoverageResults */
+  import type { RunTest } from '/js/runner.js';
+  import type { TestCaseEntry } from '/js/requirements.js';
+  import type { CoverageResults } from '/js/coverage.js';
+  import type { SourceConfig } from '/js/catalog.js';
 
   /**
    * `results` is the caller's live object and is written THROUGH: saving edits
    * `results.manual` in place and hands that same map to saveManual(), exactly
    * as the hand-built runner did. It is a prop rather than component state
    * because main.js also uses it to refresh badges after onSaved().
-   * @type {{
-   *   tests: TestCaseEntry[],
-   *   results: CoverageResults,
-   *   sources: import('/js/catalog.js').SourceConfig[],
-   *   onSaved: () => void,
-   *   onClose: () => void,
-   * }}
    */
-  let { tests, results, sources, onSaved, onClose } = $props();
+  interface Props {
+    tests: TestCaseEntry[];
+    results: CoverageResults;
+    sources: SourceConfig[];
+    onSaved: () => void;
+    onClose: () => void;
+  }
+
+  let { tests, results, sources, onSaved, onClose }: Props = $props();
 
   const HEADERS = ['#', 'Action', 'Expected response', 'Actual response', 'Result'];
 
   /**
    * The working model. $state, and deeply so - a click on a Pass button mutates
    * one step and every derived below repaints itself.
-   * @type {RunTest[]}
    */
   // svelte-ignore state_referenced_locally
-  let model = $state(tests.map(t => {
+  let model: RunTest[] = $state(tests.map(t => {
     const ex = manualTests(results.manual[t.id]);
     const exSteps = ex.length ? (ex[0].steps || []) : [];
     return {
@@ -78,17 +79,15 @@
   let by = $state(readTester());
   let status = $state('');
 
-  /** @type {HTMLInputElement|undefined} */
-  let byBox = $state();
+  let byBox = $state<HTMLInputElement | undefined>();
 
   /**
    * The tester's name is remembered between runs. Storage can throw (private
    * mode, a blocked origin) and a name is not worth failing the screen over.
    * `window.localStorage` rather than the bare global: app/svelte/ is linted
    * with only the globals it actually declares.
-   * @returns {string}
    */
-  function readTester() {
+  function readTester(): string {
     try { return window.localStorage.getItem('wd-tester') || ''; } catch { return ''; }
   }
 
@@ -105,33 +104,23 @@
   /**
    * A test is failing if ANY recorded step failed, passing if every recorded
    * step passed, and not run until something is recorded at all.
-   * @param {RunTest} t
-   * @returns {'pass'|'fail'|'untested'}
    */
-  function testStatus(t) {
+  function testStatus(t: RunTest): 'pass' | 'fail' | 'untested' {
     let anySet = false, anyFail = false;
     t.steps.forEach(s => { if (s.pass !== null) { anySet = true; if (!s.pass) anyFail = true; } });
     if (!anySet) return 'untested';
     return anyFail ? 'fail' : 'pass';
   }
 
-  /**
-   * @param {'pass'|'fail'|'untested'} st
-   * @returns {string}
-   */
-  function pillText(st) {
+  function pillText(st: 'pass' | 'fail' | 'untested'): string {
     return st === 'pass' ? 'Pass' : st === 'fail' ? 'Fail' : 'Not run';
   }
 
   /**
    * Clicking the lit button clears the step back to "not recorded", which is the
    * only way to undo a mis-click.
-   * @param {number} ti
-   * @param {number} si
-   * @param {boolean} value
-   * @returns {void}
    */
-  function setPass(ti, si, value) {
+  function setPass(ti: number, si: number, value: boolean): void {
     const step = model[ti].steps[si];
     step.pass = step.pass === value ? null : value;
     model[ti].dirty = true;
@@ -141,19 +130,12 @@
    * The contenteditable's change callback. Addressed by INDEX rather than by a
    * captured object because `use:richtext` reads its parameters exactly once, so
    * this closure outlives any particular render of the row.
-   * @param {number} ti
-   * @param {number} si
-   * @returns {(html: string) => void}
    */
-  function onActual(ti, si) {
+  function onActual(ti: number, si: number): (html: string) => void {
     return (html) => { model[ti].steps[si].actual = html; model[ti].dirty = true; };
   }
 
-  /**
-   * @param {number} ti
-   * @returns {(html: string) => void}
-   */
-  function onNotes(ti) {
+  function onNotes(ti: number): (html: string) => void {
     return (html) => { model[ti].notes = html; model[ti].dirty = true; };
   }
 
@@ -162,19 +144,14 @@
    * came from is a contenteditable, so its content is whatever the browser (or a
    * paste) put there - sanitizing on the way IN is what keeps the stored sidecar
    * safe for every later reader of it.
-   * @param {string} html
-   * @returns {string}
    */
-  function cleanHtml(html) {
+  function cleanHtml(html: string): string {
     const box = document.createElement('div');
     box.appendChild(sanitizeToFragment(String(html || '')));
     return box.innerHTML.trim();
   }
 
-  /**
-   * @returns {Promise<void>}
-   */
-  async function save() {
+  async function save(): Promise<void> {
     const who = by.trim();
     try { window.localStorage.setItem('wd-tester', who); } catch { /* see readTester */ }
     const at = new Date().toISOString();
@@ -197,11 +174,7 @@
     if (ok) onSaved();
   }
 
-  /**
-   * @param {KeyboardEvent} ev
-   * @returns {void}
-   */
-  function onKey(ev) {
+  function onKey(ev: KeyboardEvent): void {
     if (ev.key === 'Escape') onClose();
   }
 

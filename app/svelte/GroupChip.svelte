@@ -16,16 +16,21 @@
   --group-sat / --group-light theme tokens for the rest, so the palette envelope
   stays theme-controlled and nothing here hardcodes a colour.
 -->
-<script>
+<script lang="ts">
   import { groupColor, groupLabel } from '/js/auth.js';
 
   /**
    * `title` is the chip's tooltip, used by the map legend to explain what a
    * group is; it is undefined almost everywhere else, and an undefined attribute
    * is simply not rendered.
-   * @type {{ name: string, small?: boolean, title?: string }}
    */
-  let { name, small = false, title = undefined } = $props();
+  type Props = {
+    name: string;
+    small?: boolean;
+    title?: string;
+  };
+
+  let { name, small = false, title = undefined }: Props = $props();
 
   // Derived, not computed once: the label comes from config.json's group list,
   // which arrives with /api/auth/me - so a chip drawn before the policy landed

@@ -20,7 +20,7 @@
   so nothing in tests/ ever renders this component. Treat a change here as
   unnetted.
 -->
-<script>
+<script lang="ts">
   import { groupColor, groupLabel } from '/js/auth.js';
 
   /**
@@ -28,9 +28,14 @@
    * fresh copy on every emit - so this component re-renders because the whole
    * event object was REPLACED, never because a Set was mutated behind Svelte's
    * back. A plain `$state` Set would not have reported the difference.
-   * @type {{ groups: string[], hidden: Set<string>, onToggle: (name: string) => void }}
    */
-  let { groups, hidden, onToggle } = $props();
+  interface Props {
+    groups: string[];
+    hidden: Set<string>;
+    onToggle: (name: string) => void;
+  }
+
+  let { groups, hidden, onToggle }: Props = $props();
 </script>
 
 <div class="graph-groups">

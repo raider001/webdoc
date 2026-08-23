@@ -19,28 +19,31 @@
   which lives outside the {#key} block. So it does have to re-render itself on a
   change, which it does from `current` like any other prop.
 -->
-<script>
+<script lang="ts">
   import { icon } from './actions/icon.js';
   import { chevronDownIcon } from '/js/icons.js';
 
-  /**
-   * @typedef {Object} MapMode
-   * @property {string} value - the layout mode: 'all' | 'recnext' | 'prereq'
-   * @property {string} label
-   * @property {string} swatch - the edge category whose colour/dash the swatch borrows
-   */
+  interface MapMode {
+    /** the layout mode: 'all' | 'recnext' | 'prereq' */
+    value: string;
+    label: string;
+    /** the edge category whose colour/dash the swatch borrows */
+    swatch: string;
+  }
 
-  /** @type {{ modes: MapMode[], current: string, onPick: (mode: string) => void }} */
-  let { modes, current, onPick } = $props();
+  interface Props {
+    modes: MapMode[];
+    current: string;
+    onPick: (mode: string) => void;
+  }
+
+  let { modes, current, onPick }: Props = $props();
 
   /** Is the popup up? */
   let open = $state(false);
 
-  /**
-   * The wrapper, so an outside click can be told from an inside one.
-   * @type {HTMLElement|undefined}
-   */
-  let wrap = $state();
+  /** The wrapper, so an outside click can be told from an inside one. */
+  let wrap: HTMLElement | undefined = $state();
 
   const currentMode = $derived(modes.find(m => m.value === current) || modes[0]);
 
@@ -54,19 +57,14 @@
   // mousedown that preceded that click has already been and gone.
   $effect(() => {
     if (!open) return;
-    /** @param {MouseEvent} e */
-    const offClick = (e) => {
-      if (wrap && !wrap.contains(/** @type {Node} */ (e.target))) open = false;
+    const offClick = (e: MouseEvent) => {
+      if (wrap && !wrap.contains(e.target as Node)) open = false;
     };
     document.addEventListener('mousedown', offClick);
     return () => document.removeEventListener('mousedown', offClick);
   });
 
-  /**
-   * @param {string} value
-   * @returns {void}
-   */
-  function pick(value) {
+  function pick(value: string): void {
     open = false;
     if (value !== current) onPick(value);
   }

@@ -23,21 +23,25 @@
   URL", which only DISCOVERS tests: the catalogue grows in place and nothing is
   connected until the reader picks one.
 -->
-<script>
+<script lang="ts">
   import { checkIcon, closeIcon, circleIcon } from '/js/icons.js';
   import { state as appState } from '/js/app-shell.js';
   import { testsFor, connectAutomated, disconnectAutomated, rememberAutoUrl, fetchXUnitCatalog } from '/js/coverage.js';
   import { icon } from './actions/icon.js';
 
-  /** @typedef {import('/js/coverage.js').CoverageResults} CoverageResults */
-  /** @typedef {import('/js/coverage.js').AutoTestRef} AutoTestRef */
+  import type { AutoTestCatalogEntry, AutoTestRef, CoverageResults } from '/js/coverage.js';
 
   /**
    * `id` is a requirement id OR a test-case id - the automated section is the
    * same for both, because an xUnit test can be attached to either.
-   * @type {{ id: string, results: CoverageResults, onReload: () => Promise<void> }}
    */
-  let { id, results, onReload } = $props();
+  interface Props {
+    id: string;
+    results: CoverageResults;
+    onReload: () => Promise<void>;
+  }
+
+  let { id, results, onReload }: Props = $props();
 
   let note = $state('');
   /** The catalog key of the entry mid-disconnect; its ✕ is disabled meanwhile. */
@@ -50,10 +54,8 @@
   /**
    * The catalogue key. Classname + name is what identifies an xUnit case across
    * reports; the sidecar stores the same pair.
-   * @param {AutoTestRef} tc
-   * @returns {string}
    */
-  const keyOf = (tc) => (tc.classname || '') + ' ' + (tc.name || '');
+  const keyOf = (tc: AutoTestRef): string => (tc.classname || '') + ' ' + (tc.name || '');
 
   const connected = $derived((results.autoLinks && results.autoLinks[id]) || []);
 
@@ -67,19 +69,13 @@
    * A connected test's status comes from the CATALOGUE, not from the link: the
    * link is a name, and whether that name passed is whatever the latest report
    * said. An entry no report mentions is untested rather than failed.
-   * @param {string} key
-   * @returns {string}
    */
-  function catStatus(key) {
+  function catStatus(key: string): string {
     const e = (results.autoCatalog || []).find(c => c.key === key);
     return e ? (e.pass ? 'pass' : 'fail') : 'untested';
   }
 
-  /**
-   * @param {string} status
-   * @returns {() => Element}
-   */
-  function glyph(status) {
+  function glyph(status: string): () => Element {
     return status === 'pass' ? checkIcon : status === 'fail' ? closeIcon : circleIcon;
   }
 
@@ -93,28 +89,27 @@
   });
 
   /**
-   * @param {AutoTestRef} tc
-   * @returns {Promise<void>}
+   * `?? []` in the three sidecar calls below, where each used to read
+   * `appState.site && appState.site.sources`: connectAutomated,
+   * disconnectAutomated and rememberAutoUrl all declare `SourceConfig[]` and all
+   * hand it straight to sourceForId, which opens `for (const s of (sources ||
+   * []))` and then asks for `sources[0]`. Both null and an empty list find no
+   * source name and return false; the null was never the point.
    */
-  async function disconnect(tc) {
+  async function disconnect(tc: AutoTestRef): Promise<void> {
     busy = keyOf(tc);
     note = 'Disconnecting…';
-    const ok = await disconnectAutomated(id, tc, appState.site && appState.site.sources);
+    const ok = await disconnectAutomated(id, tc, appState.site?.sources ?? []);
     busy = '';
     if (ok) await onReload();
   }
 
-  /**
-   * @param {MouseEvent} ev
-   * @param {import('/js/coverage.js').AutoTestCatalogEntry} c
-   * @returns {Promise<void>}
-   */
-  async function connect(ev, c) {
+  async function connect(ev: MouseEvent, c: AutoTestCatalogEntry): Promise<void> {
     ev.preventDefault();   // keep the search box focused; see VerifyingTests.svelte
     dropOpen = false;
     query = '';
     note = 'Connecting…';
-    const ok = await connectAutomated(id, c, appState.site && appState.site.sources);
+    const ok = await connectAutomated(id, c, appState.site?.sources ?? []);
     if (ok) await onReload();
   }
 
@@ -122,9 +117,8 @@
    * Pull an external xUnit report in and MERGE its cases into the live
    * catalogue, keyed, so re-adding the same URL refreshes rather than
    * duplicates. Nothing is connected by this - the reader still has to pick.
-   * @returns {Promise<void>}
    */
-  async function addUrl() {
+  async function addUrl(): Promise<void> {
     const href = url.trim();
     if (!href) return;
     fetching = true;
@@ -134,26 +128,21 @@
     if (!cat.length) { note = 'No xUnit tests found at that URL.'; return; }
     // Built in one pass rather than by mutation: a later entry with the same key
     // wins, which is exactly the refresh-don't-duplicate behaviour wanted here.
-    const merged = new Map([...(results.autoCatalog || []), ...cat].map(c => /** @type {[string, import('/js/coverage.js').AutoTestCatalogEntry]} */ ([c.key, c])));
+    const merged = new Map<string, AutoTestCatalogEntry>([...(results.autoCatalog || []), ...cat].map((c): [string, AutoTestCatalogEntry] => [c.key, c]));
     results.autoCatalog = [...merged.values()];
-    await rememberAutoUrl(href, id, appState.site && appState.site.sources);
+    await rememberAutoUrl(href, id, appState.site?.sources ?? []);
     url = '';
     note = 'Added ' + cat.length + ' tests — search to connect.';
     dropOpen = true;
   }
 
-  /**
-   * @param {KeyboardEvent} ev
-   * @returns {void}
-   */
-  function onUrlKey(ev) {
+  function onUrlKey(ev: KeyboardEvent): void {
     if (ev.key !== 'Enter') return;
     ev.preventDefault();
     addUrl();
   }
 
-  /** @returns {void} */
-  function closeSoon() {
+  function closeSoon(): void {
     window.setTimeout(() => { dropOpen = false; }, 160);
   }
 </script>

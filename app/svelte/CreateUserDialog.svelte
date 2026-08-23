@@ -11,15 +11,23 @@
   is a sibling of the account list's rather than nested inside it - the shape
   openCreateUser() produced.
 -->
-<script>
+<script lang="ts">
   import { adminUser } from '/js/auth.js';
   import Modal from './Modal.svelte';
 
   /**
    * `onCreated` is the account list's refresh; `onClose` tears this dialog down.
-   * @type {{ onClose: () => void, onCreated: () => void }}
+   *
+   * A type alias rather than an interface, deliberately: islands/auth.ts mounts
+   * this dialog through a helper constrained to `Record<string, unknown>`, and only
+   * an object literal type gets the implicit index signature that satisfies.
    */
-  let { onClose, onCreated } = $props();
+  type Props = {
+    onClose: () => void;
+    onCreated: () => void;
+  };
+
+  let { onClose, onCreated }: Props = $props();
 
   // Its own id prefix. This dialog and the account panel can be open together,
   // and #newUser / #newPass / #newName were literals before - two forms on one
@@ -32,8 +40,7 @@
   let busy = $state(false);
   let message = $state('');
 
-  /** @type {HTMLInputElement|undefined} */
-  let userBox = $state();
+  let userBox: HTMLInputElement | undefined = $state();
 
   // Matches openCreateUser()'s deferred focus: the dialog is appended and
   // focused a beat later, so the browser has finished laying it out first.
@@ -44,8 +51,7 @@
     return () => window.clearTimeout(t);
   });
 
-  /** @returns {Promise<void>} */
-  async function create() {
+  async function create(): Promise<void> {
     busy = true;
     const r = await adminUser('create', {
       username: username.trim(), password: password, displayName: display.trim(),

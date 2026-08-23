@@ -9,12 +9,15 @@
   mounted INTO that element, and a component cannot set an attribute on its own
   mount target.
 -->
-<script>
+<script lang="ts">
   import { searchState } from './stores/search.svelte.js';
   import SearchHit from './SearchHit.svelte';
 
-  /** @type {{ onSelect: (id: string) => void }} */
-  let { onSelect } = $props();
+  interface Props {
+    onSelect: (id: string) => void;
+  }
+
+  let { onSelect }: Props = $props();
 </script>
 
 {#if searchState.searching}

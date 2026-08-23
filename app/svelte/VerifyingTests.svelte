@@ -20,30 +20,37 @@
   the server's index is what decides what is linked - guessing locally would show
   a link that a failed write never made.
 -->
-<script>
+<script lang="ts">
   import { closeIcon, checkIcon, circleIcon } from '/js/icons.js';
   import { app } from '/js/app-shell.js';
   import { requirementList, testList } from '/js/requirements.js';
   import { computeTestStatus } from '/js/coverage.js';
   import { icon } from './actions/icon.js';
 
-  /** @typedef {import('/js/coverage.js').CoverageResults} CoverageResults */
+  import type { CoverageResults } from '/js/coverage.js';
 
   /**
    * `version` is the parent's rebuild token, read INSIDE the deriveds below.
    * requirementList() and testList() are plain functions over plain Maps -
    * Svelte cannot see them change - so the token is what tells this component
    * that a link or unlink landed. Same pattern, same reason, as
-   * stores/coverage.svelte.js's covStatus.version.
-   * @type {{
-   *   reqId: string,
-   *   results: CoverageResults,
-   *   version: number,
-   *   onOpenTest: (id: string) => void,
-   *   onChanged: () => void,
-   * }}
+   * stores/coverage.svelte.ts's covStatus.version.
+   *
+   * Every read of it below is a `void` statement: the value is meaningless and
+   * only the DEPENDENCY is wanted, and saying so is what keeps TypeScript from
+   * reading the read as a mistake. Each one sits in the same evaluation as the
+   * untrackable list call it guards - move it out and the section stops
+   * refreshing after an edit, silently.
    */
-  let { reqId, results, version, onOpenTest, onChanged } = $props();
+  interface Props {
+    reqId: string;
+    results: CoverageResults;
+    version: number;
+    onOpenTest: (id: string) => void;
+    onChanged: () => void;
+  }
+
+  let { reqId, results, version, onOpenTest, onChanged }: Props = $props();
 
   /** The last thing an edit had to say, shown beside the search box. */
   let note = $state('');
@@ -53,36 +60,31 @@
   let dropOpen = $state(false);
 
   const linked = $derived.by(() => {
-    const rec = (version, requirementList()).find(r => r.id === reqId);
+    void version;
+    const rec = requirementList().find(r => r.id === reqId);
     return (rec && rec.verifiedBy) || [];
   });
 
   /** Status per test id, for the dot in front of each entry. */
-  const tstatus = $derived(computeTestStatus((version, testList()), results));
+  const tstatus = $derived.by(() => {
+    void version;
+    return computeTestStatus(testList(), results);
+  });
 
-  /**
-   * @param {string} tid
-   * @returns {string}
-   */
-  function statusOf(tid) {
+  function statusOf(tid: string): string {
     const st = tstatus.get(tid);
     return (st && st.status) || 'untested';
   }
 
-  /**
-   * @param {string} status
-   * @returns {() => Element}
-   */
-  function glyph(status) {
+  function glyph(status: string): () => Element {
     return status === 'pass' ? checkIcon : status === 'fail' ? closeIcon : circleIcon;
   }
 
-  /**
-   * @param {string} tid
-   * @returns {string}
-   */
-  function nameOf(tid) {
-    const t = (version, testList()).find(x => x.id === tid);
+  /** Called from the markup, so the `version` read lands in the template's own
+   *  tracked evaluation - the same place the comma operator put it. */
+  function nameOf(tid: string): string {
+    void version;
+    const t = testList().find(x => x.id === tid);
     return t ? t.name : tid;
   }
 
@@ -93,16 +95,13 @@
   const options = $derived.by(() => {
     const already = new Set(linked);
     const q = query.trim().toLowerCase();
-    return (version, testList())
+    void version;
+    return testList()
       .filter(t => !already.has(t.id) && (!q || t.id.toLowerCase().includes(q) || (t.name || '').toLowerCase().includes(q)))
       .slice(0, 8);
   });
 
-  /**
-   * @param {string} tid
-   * @returns {Promise<void>}
-   */
-  async function unlink(tid) {
+  async function unlink(tid: string): Promise<void> {
     // The registry entry is optional in the type because the module that fills
     // it (authoring.js) loads independently; an unwired button says so rather
     // than throwing inside a click handler.
@@ -115,12 +114,7 @@
     if (ok) onChanged();
   }
 
-  /**
-   * @param {MouseEvent} ev
-   * @param {string} tid
-   * @returns {Promise<void>}
-   */
-  async function link(ev, tid) {
+  async function link(ev: MouseEvent, tid: string): Promise<void> {
     // mousedown, not click, and the default is prevented: the box below is still
     // focused, and letting the press blur it would hide this option before the
     // click ever landed.
@@ -137,9 +131,8 @@
   /**
    * The blur close is delayed because a click on an option is a blur followed by
    * a mousedown, and closing on the blur would remove the option first.
-   * @returns {void}
    */
-  function closeSoon() {
+  function closeSoon(): void {
     window.setTimeout(() => { dropOpen = false; }, 160);
   }
 </script>
