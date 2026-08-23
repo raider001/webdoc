@@ -41,6 +41,47 @@ Neither defect is caught by anything the project currently owns. Both are caught
 
 ---
 
+## Status: TypeScript conversion COMPLETE - all 57 modules are .ts
+
+Committed in five parts. `git log`:
+
+```
+c954ae5  Convert all 57 browser modules from JSDoc to TypeScript
+87b25eb  Compile app/js from src/js, ahead of the TypeScript conversion
+66630d1  Migrate the browser app to Svelte 5, in eight phases
+7b24754  Add the build toolchain: TypeScript checking, Vite, Svelte 5
+7886fdc  Add optional accounts and per-document access control
+```
+
+Sources live in `src/js/**/*.ts`; `tsc -p tsconfig.app.json` transpiles them into `app/js/`, which is committed. tsc TRANSPILES rather than bundles, so one source file is still one served module at the same path with its `./catalog.js` specifier intact - the browser resolves the same graph it always did.
+
+**The emitted output is 17.6% SMALLER** (535 kB vs 650 kB). The type information that used to ship as JSDoc comments is now erased at compile time, while every prose comment survives.
+
+Audited, not assumed: **zero `any`, zero `@ts-ignore`, zero index signatures** across all 57 files.
+
+### What the conversion actually bought
+
+Not the rename - the constructs JSDoc could not express, each closing a previously invisible hazard:
+
+- **`MdBlockNode` is a nine-variant discriminated union.** Three hazards became hard compile errors: `spaces >= b.marker` on a list node (list.marker is the bullet CHARACTER, item.marker the content-indent COLUMN - a string-vs-number comparison the old `{string|number}` could not see); `b.kind === 'fenced'` on an htmlblock (string vs number 1-7, no overlap); and reading `.listType` off an item node.
+- **`makeBlock` is generic over an `MdBlockTypeMap`**, so the tag selects the variant at the call site and the extras bag is checked against it. The old `Object<string, *>` accepted anything.
+- **The editor block types split into the two families they always were** but could never say: `parseDoc` produces EDITOR blocks carrying `html` for contenteditable; `serializeDoc` consumes SOURCE blocks carrying `text`/`items`/`code`. That union had already drifted once - two kinds had switch arms but were absent from the declared union, so those arms narrowed to `never`.
+- `TableAlign` is a four-case union; `CycleBrokenEdge` declares the `_chain` property stamped in one function and read back 200 lines later; `GraphContext` keeps its five composed stage interfaces rather than collapsing flat.
+
+Behaviour was not allowed to change. Bugs found were reported, not fixed - a fix hidden inside a 57-file rename is unreviewable. `test_conformance.py` still reports 649/652 against the official CommonMark spec, the same three Autolinks failures as before.
+
+### The cost, stated plainly
+
+`app/js/` is now GENERATED. A contributor with only Python can no longer change browser behaviour by editing a file and refreshing; that survives for Markdown, CSS and the server. The repository carries two committed generated trees (`app/js/` and `app/build/islands.js`), which is what keeps `git clone && python serve.py` working with no Node and no network.
+
+### Still outstanding
+
+1. **`strictNullChecks` (rung 4)** is off. It is the one real class of bug the current configuration cannot see - discriminated unions keyed on a boolean literal never narrow, so `if (!r.ok)` does not refine a `{ok:true}|{ok:false,error:string}` union. Much cheaper now that everything is `.ts`.
+2. **Two Phase 7 residuals.** `app/js/graph/chrome-view.ts` still renders the COVERAGE graph's chrome in vanilla (only the map's became Svelte), and `graph/chrome.ts` now holds only the edit-state machine and is misnamed.
+3. **The editor** (~1,900 lines) remains vanilla by design - a stated non-goal throughout. Its syntax converted; its architecture did not.
+
+---
+
 ## Status: THE MIGRATION IS COMPLETE - Phases 0 through 8 all done
 
 Final gates, run repeatedly and consistently:
