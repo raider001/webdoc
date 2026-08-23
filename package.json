@@ -6,12 +6,13 @@
     "node": "^20.19 || ^22.12 || >=24"
   },
   "scripts": {
-    "build": "vite build",
+    "build": "tsc -p tsconfig.app.json && vite build",
     "dev": "vite build --watch",
     "test": "vitest run",
     "check": "tsc --noEmit && svelte-check --tsconfig ./jsconfig.json",
     "check:js": "tsc --noEmit",
-    "lint": "eslint app/svelte"
+    "lint": "eslint app/svelte",
+    "build:js": "tsc -p tsconfig.app.json"
   },
   "dependencies": {},
   "devDependencies": {

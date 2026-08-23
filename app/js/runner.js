@@ -15,9 +15,7 @@
 // format inside a view.
 // ---------------------------------------------------------------------------
 import { loadIslands } from './islands.js';
-
 /** @typedef {import('./main.js').RunnerOpts} RunnerOpts */
-
 /**
  * One step's live run state inside a test's working model: the definition
  * (action/expected, both Markdown source, carried over unchanged from the
@@ -28,7 +26,6 @@ import { loadIslands } from './islands.js';
  * @property {string} actual - the tester's recorded response, as HTML
  * @property {boolean|null} pass - null when not yet recorded
  */
-
 /**
  * One test case's working run state, pre-populated from its latest stored
  * result (if any) so a re-run starts where the last one left off. `dirty`
@@ -42,14 +39,12 @@ import { loadIslands } from './islands.js';
  * @property {string} notes - HTML
  * @property {RunStep[]} steps
  */
-
 /**
  * Who ran a test and when.
  * @typedef {Object} TestRunMeta
  * @property {string} at - ISO timestamp
  * @property {string} by - tester name
  */
-
 /**
  * One test's stored manual run outcome, keyed by test id inside a per-source
  * manual-results sidecar (CoverageResults.manual).
@@ -58,7 +53,6 @@ import { loadIslands } from './islands.js';
  * @property {{step: string, response: string, pass: boolean|null}[]} steps
  * @property {string} report - HTML
  */
-
 /**
  * The live run screen, or null when none is open.
  * @type {{destroy: () => void}|null}
@@ -72,36 +66,39 @@ let island = null;
  * on the page.
  */
 let generation = 0;
-
 /** Close and remove the run overlay, if one is open. @returns {void} */
 export function closeRunner() {
-  generation++;
-  if (island) { island.destroy(); island = null; }
-  document.body.classList.remove('is-running');
+    generation++;
+    if (island) {
+        island.destroy();
+        island = null;
+    }
+    document.body.classList.remove('is-running');
 }
-
 /**
  * Open the full-screen test-run overlay for a set of test cases.
  * @param {RunnerOpts} opts
  * @returns {void}
  */
 export function openRunner(opts) {
-  closeRunner();
-  const mine = generation;
-  // Set before the await, not after: it is what stops the document scrolling
-  // behind the overlay, and the overlay is what the reader is about to look at.
-  document.body.classList.add('is-running');
-  loadIslands().then(islands => {
-    if (mine !== generation) return;   // closed (or superseded) while the bundle was in flight
-    island = islands.mountRunner(document.body, {
-      tests: opts.tests || [],
-      // The one caller (main.js) always supplies results; the fallback is
-      // belt-and-braces for a caller that does not, and builds only the two maps
-      // the runner touches.
-      results: opts.results || /** @type {import('./coverage.js').CoverageResults} */ ({ auto: {}, manual: {} }),
-      sources: opts.sources,
-      onSaved: () => { if (typeof opts.onSaved === 'function') opts.onSaved(); },
-      onClose: closeRunner,
+    closeRunner();
+    const mine = generation;
+    // Set before the await, not after: it is what stops the document scrolling
+    // behind the overlay, and the overlay is what the reader is about to look at.
+    document.body.classList.add('is-running');
+    loadIslands().then(islands => {
+        if (mine !== generation)
+            return; // closed (or superseded) while the bundle was in flight
+        island = islands.mountRunner(document.body, {
+            tests: opts.tests || [],
+            // The one caller (main.js) always supplies results; the fallback is
+            // belt-and-braces for a caller that does not, and builds only the two maps
+            // the runner touches.
+            results: opts.results || /** @type {import('./coverage.js').CoverageResults} */ ({ auto: {}, manual: {} }),
+            sources: opts.sources,
+            onSaved: () => { if (typeof opts.onSaved === 'function')
+                opts.onSaved(); },
+            onClose: closeRunner,
+        });
     });
-  });
 }

@@ -3,9 +3,7 @@
 // service registry; main.js does all the wiring. Keeping these here (instead of in
 // main.js) lets a feature module import them WITHOUT importing main.js - so the
 // modules never form an import cycle with the bootstrap.
-
 /** @typedef {import('./catalog.js').Doc} Doc */
-
 /**
  * The single shared app state (discovery result + current doc + scroll-spy
  * handle), kept here (not in main.js) so a feature module can read/write it
@@ -19,13 +17,11 @@
  */
 /** @type {AppState} */
 export const state = { site: null, docs: [], byId: new Map(), current: null, spy: null };
-
 /**
  * @param {string} id
  * @returns {HTMLElement|null}
  */
 export const el = id => document.getElementById(id);
-
 /**
  * A display title derived from a doc id's last segment (footer + new-doc
  * fallback, used when the full title isn't in the sparse client cache).
@@ -33,17 +29,16 @@ export const el = id => document.getElementById(id);
  * @returns {string}
  */
 export function titleFromId(id) {
-  const base = String(id).split('/').pop().replace(/[-_]+/g, ' ');
-  return base.replace(/\b\w/g, c => c.toUpperCase());
+    const base = String(id).split('/').pop().replace(/[-_]+/g, ' ');
+    return base.replace(/\b\w/g, c => c.toUpperCase());
 }
-
 /**
  * The document to show when no (or an unknown) id is routed. state.docs is
  * empty under lazy boot, so a configured defaultDoc is what actually resolves.
  * @returns {string|undefined}
  */
 export function defaultId() {
-  return (state.site && state.site.defaultDoc) || (state.docs[0] && state.docs[0].id);
+    return (state.site && state.site.defaultDoc) || (state.docs[0] && state.docs[0].id);
 }
 /**
  * Build a doc stub {id, source, rel, url, name} from an id, following the
@@ -53,11 +48,12 @@ export function defaultId() {
  * @returns {Doc|null}
  */
 export function docFromId(id) {
-  const slash = String(id).indexOf('/');
-  if (slash < 0) return null;
-  const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
-  const url = '/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/');
-  return { id: id, source: source, rel: rel, url: url, name: id.split('/').pop() + '.md' };
+    const slash = String(id).indexOf('/');
+    if (slash < 0)
+        return null;
+    const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
+    const url = '/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/');
+    return { id: id, source: source, rel: rel, url: url, name: id.split('/').pop() + '.md' };
 }
 /**
  * Resolve an id to a cached doc, or a fresh stub (cached for reuse). Shared by
@@ -66,11 +62,14 @@ export function docFromId(id) {
  * @returns {Doc|null|undefined}
  */
 export function getDoc(id) {
-  let d = state.byId.get(id);
-  if (!d && id) { d = docFromId(id); if (d) state.byId.set(id, d); }
-  return d;
+    let d = state.byId.get(id);
+    if (!d && id) {
+        d = docFromId(id);
+        if (d)
+            state.byId.set(id, d);
+    }
+    return d;
 }
-
 /**
  * Download a string as a file (self-contained report), no server round-trip.
  * @param {string} filename
@@ -79,18 +78,21 @@ export function getDoc(id) {
  * @returns {void}
  */
 export function downloadFile(filename, text, mime) {
-  const blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+    const blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 /**
  * @param {Date} d
  * @returns {string}
  */
 export function isoDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-
 /**
  * Service registry: cross-cutting functions the modules call each other
  * through, set by main.js at boot (and by authoring.js/map-view.js/

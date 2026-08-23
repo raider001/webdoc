@@ -25,15 +25,12 @@
 // ---------------------------------------------------------------------------
 import { index, testIndex, groupsByDoc, setComponentBySource, componentOf } from './requirements/store.js';
 import { extractGroups, resolveReqRef, cssSafe } from './requirements/parse.js';
-
 export { setCoverageStatus } from './requirements/store.js';
 export { resolveRequirementRef, preprocessRequirements } from './requirements/parse.js';
 export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirements/render.js';
-
 /** @typedef {import('./catalog.js').Doc} Doc */
 /** @typedef {import('./catalog.js').SourceConfig} SourceConfig */
 /** @typedef {import('./requirements/parse.js').ReqOrTestBlock} ReqOrTestBlock */
-
 /**
  * One test-case step: an action and its expected response. Same shape as the
  * editor's own step objects (editor/widgets.js's TestStep) - structured data in
@@ -41,7 +38,6 @@ export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirement
  * table (requirements/parse.js's extractTestCase reads both forms).
  * @typedef {import('./editor/widgets.js').TestStep} TestStep
  */
-
 /**
  * One requirement record (an R_ id). Built per-document by requirements/parse.js's
  * extractReqGroup and, in fuller form (with resolved traceFrom/verifiedBy), from
@@ -57,7 +53,6 @@ export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirement
  * @property {string[]} traceFrom
  * @property {string[]} verifiedBy
  */
-
 /**
  * One test-case record (a T_ id). Built per-document by requirements/parse.js's
  * extractTestCase and, in fuller form, from the server's global index by
@@ -74,7 +69,6 @@ export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirement
  *   resolved `verifies`.
  * @property {string[]} verifies
  */
-
 /**
  * A plain doc-to-doc reference pair. The same {from,to} shape is independently
  * produced twice - as requirement-trace edges (requirementTraceEdges, below) and
@@ -83,7 +77,6 @@ export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirement
  * @property {string} from
  * @property {string} to
  */
-
 // Build the GLOBAL requirement/test index from the server's SQLite index (composed
 // ids + resolved trace-from / verified-by / verifies). This used to scan every doc
 // body at boot - the wall that capped the corpus. Now the server computes it and the
@@ -98,35 +91,37 @@ export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirement
  * @returns {Promise<void>}
  */
 export async function buildRequirementIndex(_docs, sources) {
-  index.clear();
-  testIndex.clear();
-  groupsByDoc.clear();
-  /** @type {Object<string, string>} */
-  const cbs = {};
-  for (const s of sources || []) cbs[s.name] = s.component;
-  setComponentBySource(cbs);
-
-  let data = null;
-  try {
-    const res = await fetch('/api/index/coverage', { cache: 'no-cache' });
-    if (res.ok) data = await res.json();
-  } catch (e) { /* index unavailable -> empty (badges/map stay neutral) */ }
-  if (!data) return;
-  for (const r of data.requirements || []) {
-    index.set(r.id, {
-      id: r.id, docId: r.docId, component: r.component, group: r.group, no: r.no,
-      description: r.description || '', traceTo: (r.traceTo || []).slice(),
-      traceFrom: (r.traceFrom || []).slice(), verifiedBy: (r.verifiedBy || []).slice()
-    });
-  }
-  for (const t of data.tests || []) {
-    testIndex.set(t.id, {
-      id: t.id, docId: t.docId, component: t.component, key: t.key, name: t.name || t.id,
-      steps: t.steps || [], verifiesRaw: (t.verifies || []).slice(), verifies: (t.verifies || []).slice()
-    });
-  }
+    index.clear();
+    testIndex.clear();
+    groupsByDoc.clear();
+    /** @type {Object<string, string>} */
+    const cbs = {};
+    for (const s of sources || [])
+        cbs[s.name] = s.component;
+    setComponentBySource(cbs);
+    let data = null;
+    try {
+        const res = await fetch('/api/index/coverage', { cache: 'no-cache' });
+        if (res.ok)
+            data = await res.json();
+    }
+    catch (e) { /* index unavailable -> empty (badges/map stay neutral) */ }
+    if (!data)
+        return;
+    for (const r of data.requirements || []) {
+        index.set(r.id, {
+            id: r.id, docId: r.docId, component: r.component, group: r.group, no: r.no,
+            description: r.description || '', traceTo: (r.traceTo || []).slice(),
+            traceFrom: (r.traceFrom || []).slice(), verifiedBy: (r.verifiedBy || []).slice()
+        });
+    }
+    for (const t of data.tests || []) {
+        testIndex.set(t.id, {
+            id: t.id, docId: t.docId, component: t.component, key: t.key, name: t.name || t.id,
+            steps: t.steps || [], verifiesRaw: (t.verifies || []).slice(), verifies: (t.verifies || []).slice()
+        });
+    }
 }
-
 /**
  * Parse the CURRENT document's requirement/test blocks from its (already-loaded)
  * body and stash them for renderRequirements, enriched with the global trace-from /
@@ -137,69 +132,72 @@ export async function buildRequirementIndex(_docs, sources) {
  * @returns {ReqOrTestBlock[]}
  */
 export function prepareDocGroups(body, docId, source) {
-  const component = componentOf(source);
-  const blocks = extractGroups(String(body || ''), { id: docId, source: source }, component);
-  for (const b of blocks) {
-    if (b.kind === 'req') {
-      for (const rec of b.rows) {
-        const g = index.get(rec.id);
-        if (g) { rec.traceFrom = g.traceFrom || []; rec.verifiedBy = g.verifiedBy || []; }
-      }
-    } else if (b.kind === 'test' && b.rec) {
-      const g = testIndex.get(b.rec.id);
-      if (g) b.rec.verifies = (g.verifies || []).slice();
+    const component = componentOf(source);
+    const blocks = extractGroups(String(body || ''), { id: docId, source: source }, component);
+    for (const b of blocks) {
+        if (b.kind === 'req') {
+            for (const rec of b.rows) {
+                const g = index.get(rec.id);
+                if (g) {
+                    rec.traceFrom = g.traceFrom || [];
+                    rec.verifiedBy = g.verifiedBy || [];
+                }
+            }
+        }
+        else if (b.kind === 'test' && b.rec) {
+            const g = testIndex.get(b.rec.id);
+            if (g)
+                b.rec.verifies = (g.verifies || []).slice();
+        }
     }
-  }
-  groupsByDoc.set(docId, blocks);
-  return blocks;
+    groupsByDoc.set(docId, blocks);
+    return blocks;
 }
-
 /**
  * Every known requirement (for the coverage rollup and the editor picker).
  * @returns {RequirementEntry[]} sorted by id
  */
 export function requirementList() {
-  return [...index.values()]
-    .map(r => ({
-      id: r.id, description: r.description || '', docId: r.docId, group: r.group,
-      component: r.component, no: r.no,
-      traceTo: (r.traceTo || []).slice(),
-      traceFrom: (r.traceFrom || []).slice(),
-      verifiedBy: (r.verifiedBy || []).slice()   // calculated test ids
+    return [...index.values()]
+        .map(r => ({
+        id: r.id, description: r.description || '', docId: r.docId, group: r.group,
+        component: r.component, no: r.no,
+        traceTo: (r.traceTo || []).slice(),
+        traceFrom: (r.traceFrom || []).slice(),
+        verifiedBy: (r.verifiedBy || []).slice() // calculated test ids
     }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+        .sort((a, b) => a.id.localeCompare(b.id));
 }
-
 /**
  * Every known test case (for the coverage rollup, graph, runner and editor).
  * @returns {TestCaseEntry[]} sorted by id (verifiesRaw is omitted from this
  *   projection - only the resolved verifies list is included)
  */
 export function testList() {
-  return [...testIndex.values()]
-    .map(t => ({
-      id: t.id, name: t.name || '', key: t.key, docId: t.docId, component: t.component,
-      steps: (t.steps || []).map(s => ({ action: s.action, expected: s.expected })),
-      verifies: (t.verifies || []).slice()
+    return [...testIndex.values()]
+        .map(t => ({
+        id: t.id, name: t.name || '', key: t.key, docId: t.docId, component: t.component,
+        steps: (t.steps || []).map(s => ({ action: s.action, expected: s.expected })),
+        verifies: (t.verifies || []).slice()
     }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+        .sort((a, b) => a.id.localeCompare(b.id));
 }
-
 // Deep-link: scroll a requirement or test into view and flash it.
 /** @param {string} prefix - the element-id prefix, 'req-' or 'test-' @param {string} id @returns {void} */
 function reveal(prefix, id) {
-  if (!id) return;
-  const el = document.getElementById(prefix + cssSafe(id));
-  if (!el) return;
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  el.classList.add('req-flash');
-  setTimeout(() => el.classList.remove('req-flash'), 1600);
+    if (!id)
+        return;
+    const el = document.getElementById(prefix + cssSafe(id));
+    if (!el)
+        return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('req-flash');
+    setTimeout(() => el.classList.remove('req-flash'), 1600);
 }
 /** @param {string} reqId @returns {void} */
 export function revealRequirement(reqId) { reveal('req-', reqId); }
 /** @param {string} testId @returns {void} */
 export function revealTest(testId) { reveal('test-', testId); }
-
 // Pull ?req=<id> / ?test=<id> out of a hash-route query string.
 //
 // The query deliberately lives INSIDE the hash (#/<docId>?req=<ID>) rather than
@@ -217,28 +215,30 @@ export function revealTest(testId) { reveal('test-', testId); }
  * @returns {{req: string|null, test: string|null}}
  */
 export function routeParams(query) {
-  const p = new URLSearchParams(query || '');
-  return { req: p.get('req'), test: p.get('test') };
+    const p = new URLSearchParams(query || '');
+    return { req: p.get('req'), test: p.get('test') };
 }
-
 /**
  * Document -> document trace edges, for the map view's requirement-trace layer.
  * @returns {DocEdgeRef[]}
  */
 export function requirementTraceEdges() {
-  const seen = new Set();
-  const edges = [];
-  for (const rec of index.values()) {
-    for (const raw of rec.traceTo) {
-      const target = resolveReqRef(raw, rec);
-      if (!target) continue;
-      const toDoc = index.get(target).docId;
-      if (toDoc === rec.docId) continue;
-      const key = rec.docId + ' ' + toDoc;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      edges.push({ from: rec.docId, to: toDoc });
+    const seen = new Set();
+    const edges = [];
+    for (const rec of index.values()) {
+        for (const raw of rec.traceTo) {
+            const target = resolveReqRef(raw, rec);
+            if (!target)
+                continue;
+            const toDoc = index.get(target).docId;
+            if (toDoc === rec.docId)
+                continue;
+            const key = rec.docId + ' ' + toDoc;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            edges.push({ from: rec.docId, to: toDoc });
+        }
     }
-  }
-  return edges;
+    return edges;
 }

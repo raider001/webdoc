@@ -8,23 +8,20 @@
 // dynamic attribute, an event handler, or state that changes after creation
 // belongs in elem() instead; build it there and pass the finished node in as a
 // value.
-
 // A slot takes exactly what an elem() child slot takes, so the two builders can
 // be mixed freely in one tree; the shape is defined once, in dom.js.
 /** @typedef {import('./dom.js').ChildSlot} ChildSlot */
-
 /**
  * @param {TemplateStringsArray} strings
  * @param {...ChildSlot} values
  * @returns {DocumentFragment}
  */
 export function html(strings, ...values) {
-  const tpl = document.createElement('template');
-  tpl.innerHTML = strings.join('<!--slot-->');
-  fillSlots(tpl.content, values);
-  return tpl.content;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = strings.join('<!--slot-->');
+    fillSlots(tpl.content, values);
+    return tpl.content;
 }
-
 // Find every slot marker (in document order) and replace it with its value.
 // Throws on a count mismatch rather than silently misassigning every slot after
 // the gap - the near-certain cause is a ${} written inside an attribute, where
@@ -35,19 +32,21 @@ export function html(strings, ...values) {
  * @returns {void}
  */
 export function fillSlots(root, values) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
-  const slots = [];
-  let node;
-  // SHOW_COMMENT means every node the walker hands back is a Comment.
-  while ((node = /** @type {Comment} */ (walker.nextNode()))) if (node.data === 'slot') slots.push(node);
-  if (slots.length !== values.length) {
-    throw new Error('html: ' + values.length + ' value(s) but ' + slots.length +
-      ' slot(s) found - a ${...} probably landed inside an attribute, which is not supported');
-  }
-  slots.forEach((slot, i) => {
-    const nodes = [].concat(values[i]).flat(Infinity)
-      .filter(v => v != null && v !== false)
-      .map(v => (v.nodeType ? v : document.createTextNode(String(v))));
-    slot.replaceWith(...nodes);
-  });
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+    const slots = [];
+    let node;
+    // SHOW_COMMENT means every node the walker hands back is a Comment.
+    while ((node = /** @type {Comment} */ (walker.nextNode())))
+        if (node.data === 'slot')
+            slots.push(node);
+    if (slots.length !== values.length) {
+        throw new Error('html: ' + values.length + ' value(s) but ' + slots.length +
+            ' slot(s) found - a ${...} probably landed inside an attribute, which is not supported');
+    }
+    slots.forEach((slot, i) => {
+        const nodes = [].concat(values[i]).flat(Infinity)
+            .filter(v => v != null && v !== false)
+            .map(v => (v.nodeType ? v : document.createTextNode(String(v))));
+        slot.replaceWith(...nodes);
+    });
 }

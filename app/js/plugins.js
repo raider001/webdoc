@@ -10,7 +10,6 @@
 // stop the application from booting - a default install ships no plugins and
 // behaves exactly as it did before this module existed.
 // ---------------------------------------------------------------------------
-
 /**
  * Dynamically import each named renderer plugin from
  * ../thirdpartyrenderer/<name>.js, tolerating any that are missing or throw.
@@ -20,18 +19,20 @@
  * @returns {Promise<string[]>} the sanitized ids (from `names`) that loaded successfully
  */
 export async function loadPlugins(names) {
-  if (!Array.isArray(names) || !names.length) return [];
-  const loaded = [];
-  for (const raw of names) {
-    const name = String(raw || '').replace(/[^\w-]/g, ''); // plugin ids are bare file stems
-    if (!name) continue;
-    try {
-      await import(`../thirdpartyrenderer/${name}.js`);
-      loaded.push(name);
-    } catch (e) {
-      console.warn(`[plugins] renderer plugin "${name}" could not be loaded — skipping.`,
-                   (e && e.message) || e);
+    if (!Array.isArray(names) || !names.length)
+        return [];
+    const loaded = [];
+    for (const raw of names) {
+        const name = String(raw || '').replace(/[^\w-]/g, ''); // plugin ids are bare file stems
+        if (!name)
+            continue;
+        try {
+            await import(`../thirdpartyrenderer/${name}.js`);
+            loaded.push(name);
+        }
+        catch (e) {
+            console.warn(`[plugins] renderer plugin "${name}" could not be loaded — skipping.`, (e && e.message) || e);
+        }
     }
-  }
-  return loaded;
+    return loaded;
 }

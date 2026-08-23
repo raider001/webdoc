@@ -15,9 +15,7 @@ import { highlightWithin } from './highlighter.js';
 import { resolveResourceUrl } from './doclinks.js';
 import { restrictedSection } from './auth-ui.js';
 import { announce } from './announce.js';
-
 /** @typedef {import('./catalog.js').Doc} Doc */
-
 // ---- Mounted components inside the article --------------------------------
 // Requirement tables and test blocks are Svelte components mounted into
 // placeholder nodes inside the article. The article is destroyed and rebuilt on
@@ -32,7 +30,6 @@ import { announce } from './announce.js';
 // registry - a second one would mean a teardown path that some mounts are not on.
 /** @type {Map<Element, () => void>} */
 const mountedInArticle = new Map();
-
 /**
  * Record a component mounted inside the article so it can be destroyed when the
  * article is replaced.
@@ -41,7 +38,6 @@ const mountedInArticle = new Map();
  * @returns {void}
  */
 export function registerMounted(host, destroy) { mountedInArticle.set(host, destroy); }
-
 /**
  * Destroy every component mounted inside `root`, then forget them. Safe to call
  * when nothing is registered.
@@ -49,13 +45,16 @@ export function registerMounted(host, destroy) { mountedInArticle.set(host, dest
  * @returns {void}
  */
 export function teardownMounted(root) {
-  for (const [host, destroy] of mountedInArticle) {
-    if (!root.contains(host)) continue;
-    try { destroy(); } catch (e) { /* a failed teardown must not block the render */ }
-    mountedInArticle.delete(host);
-  }
+    for (const [host, destroy] of mountedInArticle) {
+        if (!root.contains(host))
+            continue;
+        try {
+            destroy();
+        }
+        catch (e) { /* a failed teardown must not block the render */ }
+        mountedInArticle.delete(host);
+    }
 }
-
 /**
  * Push this document's breadcrumb, TOC and footer lists into the island store,
  * then FLUSH.
@@ -71,10 +70,10 @@ export function teardownMounted(root) {
  * @returns {void}
  */
 function setDocChrome(doc, toc) {
-  if (!app.setDocChrome) return;   // island not mounted (a test harness, or a failed boot)
-  app.setDocChrome(doc.id, toc, doc.assumes || [], doc.next || []);
+    if (!app.setDocChrome)
+        return; // island not mounted (a test harness, or a failed boot)
+    app.setDocChrome(doc.id, toc, doc.assumes || [], doc.next || []);
 }
-
 /**
  * Render `doc` into the reading-view content pane: parse and sanitize its Markdown
  * body, inject the description subtitle, number the headings and build the TOC,
@@ -86,83 +85,77 @@ function setDocChrome(doc, toc) {
  * @returns {void}
  */
 export function renderDoc(doc) {
-  const content = el('content');
-  // Tear down anything mounted INSIDE the previous article before the DOM it
-  // lives in is destroyed. `content.textContent = ''` detaches nodes; it does
-  // not stop a component's effects, which would go on running against detached
-  // nodes for the rest of the session - one badge-repaint effect per requirement
-  // row, per document ever visited, since renderDoc also fires on the
-  // four-second external-change poll and after every runner save.
-  teardownMounted(content);
-  content.textContent = '';
-
-  // pipeline: extract requirement groups -> parse -> sanitize (inert) -> adopt
-  const article = elem('article', 'doc', sanitizeToFragment(renderMarkdown(preprocessRequirements(doc.body || '', doc.id))));
-  content.appendChild(article);
-
-  // Surface the metadata description as a subtitle under the first heading.
-  if (doc.description) {
-    const lede = elem('p', 'doc-lede', doc.description);
-    const h1 = article.querySelector('h1');
-    if (h1) h1.after(lede); else article.prepend(lede);
-  }
-
-  // numberHeadings still MUTATES the article - it stamps the ids and the
-  // `.secnum` labels onto the real headings - and returns the flat list the TOC
-  // component renders. The mutation stays vanilla because it edits document
-  // CONTENT; only its return value crosses into the store.
-  const toc = numberHeadings(article);
-  const tocList = el('tocList');
-  setDocChrome(doc, toc);
-
-  // Build THIS document's requirement/test blocks from its (loaded) body - enriched
-  // with the server-resolved trace-from / verified-by - then replace the placeholders.
-  prepareDocGroups(doc.body || '', doc.id, doc.source);
-  renderRequirements(article, doc.id);
-
-  // Resolve in-body links: internal doc-id refs -> hash routes, in-page anchors
-  // -> smooth scroll, external URLs -> open in a new tab. (Heading ids exist now.)
-  resolveLinks(article, doc.id);
-  // Resolve relative image sources to the doc's server folder (/docs/<source>/<dir>/).
-  resolveImages(article, doc.id);
-
-  // Pluggable rendered blocks (diagrams etc.): post-sanitize, before the
-  // highlighter, so a registered ```lang block becomes DOM instead of code.
-  // No-op unless a renderer plugin is enabled; runs before links inside a
-  // rendered diagram would be reprocessed.
-  renderBlocks(article, { docId: doc.id });
-
-  // Restricted sections: the SERVER replaced each one it withheld with a fenced
-  // ```wd-restricted block before sending the file. Swap those for a proper
-  // notice here - after the block renderers, so a plugin never sees them, and
-  // before highlighting, so they are not styled as code.
-  renderRestrictedSections(article);
-
-  // Syntax highlighting: post-sanitize, over the remaining code blocks.
-  highlightWithin(article);
-
-  setupScrollSpy(article, tocList);
-
-  // header + footer chrome. Breadcrumb, TOC and both footer groups are all
-  // driven by setDocChrome() above; what is left here is the parts no component
-  // owns - the document title, and the two footer containers' hidden flags
-  // (they are the components' MOUNT TARGETS, so a component cannot set them).
-  document.title = doc.title + ' — ' + (state.site.siteTitle || 'Documentation');
-  el('footPrev').hidden = !(doc.assumes && doc.assumes.length);
-  el('footNext').hidden = !(doc.next && doc.next.length);
-  // "On this page" is meaningless for a document with no headings.
-  const tocPane = el('toc');
-  if (tocPane) tocPane.hidden = !toc.length;
-  if (app.setTreeActive) app.setTreeActive(doc.id);   // highlight + reveal in the drawer tree
-  // Offer edit/delete only where this account could actually use them (authoring.js
-  // registers this; the server still re-checks every write).
-  if (app.updateDocActions) app.updateDocActions(doc.id);
-
-  content.scrollTop = 0;
-  content.focus({ preventScroll: true });
-  announce('Loaded: ' + doc.title);
+    const content = el('content');
+    // Tear down anything mounted INSIDE the previous article before the DOM it
+    // lives in is destroyed. `content.textContent = ''` detaches nodes; it does
+    // not stop a component's effects, which would go on running against detached
+    // nodes for the rest of the session - one badge-repaint effect per requirement
+    // row, per document ever visited, since renderDoc also fires on the
+    // four-second external-change poll and after every runner save.
+    teardownMounted(content);
+    content.textContent = '';
+    // pipeline: extract requirement groups -> parse -> sanitize (inert) -> adopt
+    const article = elem('article', 'doc', sanitizeToFragment(renderMarkdown(preprocessRequirements(doc.body || '', doc.id))));
+    content.appendChild(article);
+    // Surface the metadata description as a subtitle under the first heading.
+    if (doc.description) {
+        const lede = elem('p', 'doc-lede', doc.description);
+        const h1 = article.querySelector('h1');
+        if (h1)
+            h1.after(lede);
+        else
+            article.prepend(lede);
+    }
+    // numberHeadings still MUTATES the article - it stamps the ids and the
+    // `.secnum` labels onto the real headings - and returns the flat list the TOC
+    // component renders. The mutation stays vanilla because it edits document
+    // CONTENT; only its return value crosses into the store.
+    const toc = numberHeadings(article);
+    const tocList = el('tocList');
+    setDocChrome(doc, toc);
+    // Build THIS document's requirement/test blocks from its (loaded) body - enriched
+    // with the server-resolved trace-from / verified-by - then replace the placeholders.
+    prepareDocGroups(doc.body || '', doc.id, doc.source);
+    renderRequirements(article, doc.id);
+    // Resolve in-body links: internal doc-id refs -> hash routes, in-page anchors
+    // -> smooth scroll, external URLs -> open in a new tab. (Heading ids exist now.)
+    resolveLinks(article, doc.id);
+    // Resolve relative image sources to the doc's server folder (/docs/<source>/<dir>/).
+    resolveImages(article, doc.id);
+    // Pluggable rendered blocks (diagrams etc.): post-sanitize, before the
+    // highlighter, so a registered ```lang block becomes DOM instead of code.
+    // No-op unless a renderer plugin is enabled; runs before links inside a
+    // rendered diagram would be reprocessed.
+    renderBlocks(article, { docId: doc.id });
+    // Restricted sections: the SERVER replaced each one it withheld with a fenced
+    // ```wd-restricted block before sending the file. Swap those for a proper
+    // notice here - after the block renderers, so a plugin never sees them, and
+    // before highlighting, so they are not styled as code.
+    renderRestrictedSections(article);
+    // Syntax highlighting: post-sanitize, over the remaining code blocks.
+    highlightWithin(article);
+    setupScrollSpy(article, tocList);
+    // header + footer chrome. Breadcrumb, TOC and both footer groups are all
+    // driven by setDocChrome() above; what is left here is the parts no component
+    // owns - the document title, and the two footer containers' hidden flags
+    // (they are the components' MOUNT TARGETS, so a component cannot set them).
+    document.title = doc.title + ' — ' + (state.site.siteTitle || 'Documentation');
+    el('footPrev').hidden = !(doc.assumes && doc.assumes.length);
+    el('footNext').hidden = !(doc.next && doc.next.length);
+    // "On this page" is meaningless for a document with no headings.
+    const tocPane = el('toc');
+    if (tocPane)
+        tocPane.hidden = !toc.length;
+    if (app.setTreeActive)
+        app.setTreeActive(doc.id); // highlight + reveal in the drawer tree
+    // Offer edit/delete only where this account could actually use them (authoring.js
+    // registers this; the server still re-checks every write).
+    if (app.updateDocActions)
+        app.updateDocActions(doc.id);
+    content.scrollTop = 0;
+    content.focus({ preventScroll: true });
+    announce('Loaded: ' + doc.title);
 }
-
 /**
  * Replace every ```wd-restricted fence the server left behind with the
  * restricted-section notice.
@@ -183,18 +176,22 @@ export function renderDoc(doc) {
  * @returns {void}
  */
 function renderRestrictedSections(article) {
-  article.querySelectorAll('pre > code.language-wd-restricted').forEach(code => {
-    let spec = {};
-    try { spec = JSON.parse(code.textContent || '{}') || {}; } catch (e) { spec = {}; }
-    const pre = code.parentElement;
-    if (pre && pre.parentElement) pre.replaceWith(restrictedSection(spec));
-  });
+    article.querySelectorAll('pre > code.language-wd-restricted').forEach(code => {
+        let spec = {};
+        try {
+            spec = JSON.parse(code.textContent || '{}') || {};
+        }
+        catch (e) {
+            spec = {};
+        }
+        const pre = code.parentElement;
+        if (pre && pre.parentElement)
+            pre.replaceWith(restrictedSection(spec));
+    });
 }
-
 // A CSS.escape shim for building `#id` selectors from arbitrary heading/anchor ids.
 /** @param {string} s @returns {string} */
 function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/([^\w-])/g, '\\$1'); }
-
 // Batch-resolve in-body link targets to doc ids via the server index. Lazy boot no
 // longer holds every id client-side, so resolution (relative ./ ../, .md, full id,
 // last-segment fallback, case-insensitive) is done server-side, authoritatively,
@@ -205,15 +202,19 @@ function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(
  * @returns {Promise<Object<string, string|null>>} map of input path -> resolved doc id, or null if unresolved (every requested path is present as a key)
  */
 async function resolveDocPaths(baseId, paths) {
-  if (!paths.length) return {};
-  const qs = 'base=' + encodeURIComponent(baseId || '') + paths.map(p => '&p=' + encodeURIComponent(p)).join('');
-  try {
-    const r = await fetch('/api/index/resolve?' + qs, { cache: 'no-cache' });
-    if (!r.ok) return {};
-    return (await r.json()).resolved || {};
-  } catch (e) { return {}; }
+    if (!paths.length)
+        return {};
+    const qs = 'base=' + encodeURIComponent(baseId || '') + paths.map(p => '&p=' + encodeURIComponent(p)).join('');
+    try {
+        const r = await fetch('/api/index/resolve?' + qs, { cache: 'no-cache' });
+        if (!r.ok)
+            return {};
+        return (await r.json()).resolved || {};
+    }
+    catch (e) {
+        return {};
+    }
 }
-
 // Rewrite in-body links after render: external URLs open in a new tab, in-page
 // anchors scroll smoothly, and internal doc refs become #/ routes. Async because the
 // internal refs are resolved in ONE batched request to the server index.
@@ -226,66 +227,74 @@ async function resolveDocPaths(baseId, paths) {
  * @property {string} path
  * @property {string} frag
  */
-
 /**
  * @param {HTMLElement} article
  * @param {string} baseId
  * @returns {Promise<void>}
  */
 async function resolveLinks(article, baseId) {
-  /** @type {PendingDocLink[]} */
-  const internal = [];
-  // The selector only matches anchors; the checker stops at Element.
-  // Skip anything inside a mounted component. Rewriting an href there would be
-  // undone by the component's next update, and the listeners attached here would
-  // outlive the node they were bound to. A component that renders links is
-  // responsible for its own routing.
-  /** @type {HTMLAnchorElement[]} */
-  const anchors = /** @type {HTMLAnchorElement[]} */ ([...article.querySelectorAll('a[href]')].filter(a => !a.closest('.wd-mounted')));
-  anchors.forEach(a => {
-    const raw = a.getAttribute('href') || '';
-    if (!raw) return;
-    if (/^(https?:|mailto:|tel:)/i.test(raw)) {                 // external
-      a.setAttribute('target', '_blank');
-      const rel = new Set((a.getAttribute('rel') || '').split(/\s+/).filter(Boolean));
-      rel.add('noopener'); rel.add('noreferrer');
-      a.setAttribute('rel', [...rel].join(' '));
-      a.setAttribute('data-external', '');
-      return;
+    /** @type {PendingDocLink[]} */
+    const internal = [];
+    // The selector only matches anchors; the checker stops at Element.
+    // Skip anything inside a mounted component. Rewriting an href there would be
+    // undone by the component's next update, and the listeners attached here would
+    // outlive the node they were bound to. A component that renders links is
+    // responsible for its own routing.
+    /** @type {HTMLAnchorElement[]} */
+    const anchors = /** @type {HTMLAnchorElement[]} */ ([...article.querySelectorAll('a[href]')].filter(a => !a.closest('.wd-mounted')));
+    anchors.forEach(a => {
+        const raw = a.getAttribute('href') || '';
+        if (!raw)
+            return;
+        if (/^(https?:|mailto:|tel:)/i.test(raw)) { // external
+            a.setAttribute('target', '_blank');
+            const rel = new Set((a.getAttribute('rel') || '').split(/\s+/).filter(Boolean));
+            rel.add('noopener');
+            rel.add('noreferrer');
+            a.setAttribute('rel', [...rel].join(' '));
+            a.setAttribute('data-external', '');
+            return;
+        }
+        if (raw.startsWith('#/'))
+            return; // already an app route
+        if (raw.startsWith('#')) { // in-page anchor
+            const id = decodeURIComponent(raw.slice(1));
+            a.addEventListener('click', ev => {
+                const target = article.querySelector('#' + cssEsc(id));
+                if (target) {
+                    ev.preventDefault();
+                    target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                }
+            });
+            return;
+        }
+        const hashIdx = raw.indexOf('#'); // internal document reference
+        const path = (hashIdx >= 0 ? raw.slice(0, hashIdx) : raw).replace(/\.md$/i, '').replace(/\/+$/, '');
+        const frag = hashIdx >= 0 ? raw.slice(hashIdx + 1) : '';
+        internal.push({ a: a, path: path, frag: frag });
+    });
+    if (!internal.length)
+        return;
+    const resolved = await resolveDocPaths(baseId, [...new Set(internal.map(x => x.path))]);
+    for (const { a, path, frag } of internal) {
+        const id = resolved[path];
+        if (id) {
+            a.setAttribute('href', '#/' + id);
+            if (frag)
+                a.addEventListener('click', () => setTimeout(() => {
+                    const t = el('content').querySelector('#' + cssEsc(decodeURIComponent(frag)));
+                    if (t)
+                        t.scrollIntoView({ block: 'start' });
+                }, 140));
+        }
+        else {
+            a.classList.add('doc-link-broken');
+            a.title = 'Unresolved link';
+            a.setAttribute('href', '#'); // neutralise so middle-click/new-tab can't hit the server
+            a.addEventListener('click', ev => ev.preventDefault());
+        }
     }
-    if (raw.startsWith('#/')) return;                           // already an app route
-    if (raw.startsWith('#')) {                                  // in-page anchor
-      const id = decodeURIComponent(raw.slice(1));
-      a.addEventListener('click', ev => {
-        const target = article.querySelector('#' + cssEsc(id));
-        if (target) { ev.preventDefault(); target.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
-      });
-      return;
-    }
-    const hashIdx = raw.indexOf('#');                           // internal document reference
-    const path = (hashIdx >= 0 ? raw.slice(0, hashIdx) : raw).replace(/\.md$/i, '').replace(/\/+$/, '');
-    const frag = hashIdx >= 0 ? raw.slice(hashIdx + 1) : '';
-    internal.push({ a: a, path: path, frag: frag });
-  });
-  if (!internal.length) return;
-  const resolved = await resolveDocPaths(baseId, [...new Set(internal.map(x => x.path))]);
-  for (const { a, path, frag } of internal) {
-    const id = resolved[path];
-    if (id) {
-      a.setAttribute('href', '#/' + id);
-      if (frag) a.addEventListener('click', () => setTimeout(() => {
-        const t = el('content').querySelector('#' + cssEsc(decodeURIComponent(frag)));
-        if (t) t.scrollIntoView({ block: 'start' });
-      }, 140));
-    } else {
-      a.classList.add('doc-link-broken');
-      a.title = 'Unresolved link';
-      a.setAttribute('href', '#');                             // neutralise so middle-click/new-tab can't hit the server
-      a.addEventListener('click', ev => ev.preventDefault());
-    }
-  }
 }
-
 // Resolve relative in-body image sources to the document's folder on the server. A
 // Markdown image ![x](diagram.png) renders to <img src="diagram.png">, which the
 // browser resolves against the app route (#/...) and 404s at the server root. Doc
@@ -298,14 +307,14 @@ async function resolveLinks(article, baseId) {
  * @returns {void}
  */
 function resolveImages(article, baseId) {
-  article.querySelectorAll('img[src]').forEach(img => {
-    if (img.closest('.wd-mounted')) return;   // Svelte's DOM; see resolveLinks
-    const url = resolveResourceUrl(baseId, img.getAttribute('src'));
-    if (url) img.setAttribute('src', url);
-  });
+    article.querySelectorAll('img[src]').forEach(img => {
+        if (img.closest('.wd-mounted'))
+            return; // Svelte's DOM; see resolveLinks
+        const url = resolveResourceUrl(baseId, img.getAttribute('src'));
+        if (url)
+            img.setAttribute('src', url);
+    });
 }
-
-
 // Highlight the TOC entry whose heading is in view (an IntersectionObserver over the
 // content pane). One observer at a time; rebuilt for each rendered document.
 /** @type {IntersectionObserver|null} */
@@ -316,23 +325,24 @@ let spyObserver = null;
  * @returns {void}
  */
 function setupScrollSpy(article, tocList) {
-  if (spyObserver) spyObserver.disconnect();
-  const links = new Map();
-  /** @type {NodeListOf<HTMLAnchorElement>} */
-  const tocLinks = tocList.querySelectorAll('a[data-target]');
-  tocLinks.forEach(a => links.set(a.dataset.target, a));
-  spyObserver = new IntersectionObserver(entries => {
-    for (const e of entries) {
-      if (e.isIntersecting) {
-        tocList.querySelectorAll('a.active').forEach(a => a.classList.remove('active'));
-        const a = links.get(e.target.id);
-        if (a) a.classList.add('active');
-      }
-    }
-  }, { root: el('content'), rootMargin: '-8% 0px -80% 0px', threshold: 0 });
-  article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => spyObserver.observe(h));
+    if (spyObserver)
+        spyObserver.disconnect();
+    const links = new Map();
+    /** @type {NodeListOf<HTMLAnchorElement>} */
+    const tocLinks = tocList.querySelectorAll('a[data-target]');
+    tocLinks.forEach(a => links.set(a.dataset.target, a));
+    spyObserver = new IntersectionObserver(entries => {
+        for (const e of entries) {
+            if (e.isIntersecting) {
+                tocList.querySelectorAll('a.active').forEach(a => a.classList.remove('active'));
+                const a = links.get(e.target.id);
+                if (a)
+                    a.classList.add('active');
+            }
+        }
+    }, { root: el('content'), rootMargin: '-8% 0px -80% 0px', threshold: 0 });
+    article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => spyObserver.observe(h));
 }
-
 // ---- In-document search (highlight + jump) --------------------------------
 /**
  * Wire the in-document search box: on every input, clear the previous highlights
@@ -341,37 +351,41 @@ function setupScrollSpy(article, tocList) {
  * @returns {void}
  */
 export function setupDocSearch() {
-  const input = /** @type {HTMLInputElement} */ (el('docSearch'));
-  input.addEventListener('input', () => {
-    /** @type {HTMLElement|null} */
-    const article = el('content').querySelector('.doc');
-    if (!article) return;
-    clearHighlights(article);
-    const q = input.value.trim();
-    if (q.length < 2) return;
-    const first = highlight(article, q);
-    if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  });
+    const input = /** @type {HTMLInputElement} */ (el('docSearch'));
+    input.addEventListener('input', () => {
+        /** @type {HTMLElement|null} */
+        const article = el('content').querySelector('.doc');
+        if (!article)
+            return;
+        clearHighlights(article);
+        const q = input.value.trim();
+        if (q.length < 2)
+            return;
+        const first = highlight(article, q);
+        if (first)
+            first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
 }
 /**
  * @param {HTMLElement} root
  * @returns {void}
  */
 function clearHighlights(root) {
-  // Normalize ONLY the parents whose children were actually un-wrapped, never the
-  // whole article. root.normalize() merges every adjacent text node in the
-  // subtree - including inside a mounted component's DOM, where Svelte is holding
-  // references to specific text nodes it expects to keep updating. Merging those
-  // out from under it makes later updates land on detached nodes, and the symptom
-  // is a requirement table that silently stops refreshing after someone uses
-  // find-in-page.
-  /** @type {Set<Node>} */
-  const touched = new Set();
-  root.querySelectorAll('mark.find').forEach(m => {
-    if (m.parentNode) touched.add(m.parentNode);
-    m.replaceWith(document.createTextNode(m.textContent || ''));
-  });
-  touched.forEach(parent => parent.normalize());
+    // Normalize ONLY the parents whose children were actually un-wrapped, never the
+    // whole article. root.normalize() merges every adjacent text node in the
+    // subtree - including inside a mounted component's DOM, where Svelte is holding
+    // references to specific text nodes it expects to keep updating. Merging those
+    // out from under it makes later updates land on detached nodes, and the symptom
+    // is a requirement table that silently stops refreshing after someone uses
+    // find-in-page.
+    /** @type {Set<Node>} */
+    const touched = new Set();
+    root.querySelectorAll('mark.find').forEach(m => {
+        if (m.parentNode)
+            touched.add(m.parentNode);
+        m.replaceWith(document.createTextNode(m.textContent || ''));
+    });
+    touched.forEach(parent => parent.normalize());
 }
 /**
  * Wrap every case-insensitive occurrence of `q` in `root`'s text nodes (skipping
@@ -382,30 +396,35 @@ function clearHighlights(root) {
  * @returns {HTMLElement|null} the first inserted mark, for scroll-into-view, or null if no match
  */
 function highlight(root, q) {
-  const needle = q.toLowerCase();
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    // .wd-mounted is Svelte's territory: wrapping its text in a <mark> would be
-    // reverted on the component's next update, and the un-wrap on the next
-    // keystroke would then be editing nodes the component no longer owns.
-    acceptNode: n => (n.parentElement && n.parentElement.closest('pre,code,mark,.wd-mounted') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT)
-  });
-  const targets = [];
-  let node;
-  // SHOW_TEXT means every node the walker hands back is a Text node.
-  while ((node = /** @type {Text} */ (walker.nextNode()))) if (node.nodeValue.toLowerCase().includes(needle)) targets.push(node);
-  let firstMark = null;
-  for (const text of targets) {
-    const frag = document.createDocumentFragment();
-    let s = text.nodeValue, lower = s.toLowerCase(), i = 0, idx;
-    while ((idx = lower.indexOf(needle, i)) !== -1) {
-      if (idx > i) frag.appendChild(document.createTextNode(s.slice(i, idx)));
-      const mark = elem('mark', 'find', s.slice(idx, idx + needle.length));
-      frag.appendChild(mark);
-      if (!firstMark) firstMark = mark;
-      i = idx + needle.length;
+    const needle = q.toLowerCase();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        // .wd-mounted is Svelte's territory: wrapping its text in a <mark> would be
+        // reverted on the component's next update, and the un-wrap on the next
+        // keystroke would then be editing nodes the component no longer owns.
+        acceptNode: n => (n.parentElement && n.parentElement.closest('pre,code,mark,.wd-mounted') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT)
+    });
+    const targets = [];
+    let node;
+    // SHOW_TEXT means every node the walker hands back is a Text node.
+    while ((node = /** @type {Text} */ (walker.nextNode())))
+        if (node.nodeValue.toLowerCase().includes(needle))
+            targets.push(node);
+    let firstMark = null;
+    for (const text of targets) {
+        const frag = document.createDocumentFragment();
+        let s = text.nodeValue, lower = s.toLowerCase(), i = 0, idx;
+        while ((idx = lower.indexOf(needle, i)) !== -1) {
+            if (idx > i)
+                frag.appendChild(document.createTextNode(s.slice(i, idx)));
+            const mark = elem('mark', 'find', s.slice(idx, idx + needle.length));
+            frag.appendChild(mark);
+            if (!firstMark)
+                firstMark = mark;
+            i = idx + needle.length;
+        }
+        if (i < s.length)
+            frag.appendChild(document.createTextNode(s.slice(i)));
+        text.replaceWith(frag);
     }
-    if (i < s.length) frag.appendChild(document.createTextNode(s.slice(i)));
-    text.replaceWith(frag);
-  }
-  return firstMark;
+    return firstMark;
 }

@@ -15,9 +15,7 @@
 // importing 'svelte' directly: the specifier 'svelte' is a BUILD-time name that
 // no browser can resolve, and keeping it inside the compiled artifact is what
 // lets app/js/ stay plain ES modules the browser loads natively.
-
 /** @typedef {Record<string, unknown>} IslandProps */
-
 /**
  * The bundle's export surface, as built from app/svelte/entry.js.
  * @typedef {Object} IslandModule
@@ -51,12 +49,10 @@
  * @property {(target: Element, opts: {onClose: () => void, onRebuild: (animate?: boolean) => Promise<void>}) => {destroy: () => void}} mountMapOverlay - the document map, into #graphOverlay's stage; destroy it on close so the canvas rAF loop stops and window.__graph is released
  * @property {(model: import('./graph-model.js').GraphModel, opts?: {animate?: boolean, refit?: boolean}) => void} setMapModel - hand the map a freshly fetched server graph model and relayout; safe before the overlay is mounted, which is how the first open seeds it
  */
-
 // The served path of the compiled bundle. Exactly one file in the repository
 // knows this, which is what makes renaming or emergency-reverting it a one-file
 // change. Kept as a named constant so it is greppable from the build config.
 const BUNDLE_URL = '/build/islands.js';
-
 /** @type {Promise<IslandModule>|null} */
 let pending = null;
 /**
@@ -65,7 +61,6 @@ let pending = null;
  * @type {IslandModule|null}
  */
 let loaded = null;
-
 /**
  * Load (once) and return the compiled island bundle. Concurrent callers share
  * one in-flight promise, so two islands mounting in the same frame cannot each
@@ -73,25 +68,24 @@ let loaded = null;
  * @returns {Promise<IslandModule>}
  */
 export function loadIslands() {
-  // Held in a variable on purpose. The specifier is a served URL, not a module
-  // either the type-checker or a bundler should resolve: app/build/islands.js is
-  // a build OUTPUT, and treating it as an input would make the build depend on
-  // its own result. A non-literal specifier states that honestly - the module
-  // shape is asserted below because it genuinely cannot be checked from here,
-  // and app/svelte/entry.js is the file that has to keep the promise.
-  if (!pending) {
-    const url = BUNDLE_URL;
-    pending = /** @type {Promise<IslandModule>} */ (import(/* @vite-ignore */ url));
-    // Remember the resolved module for loadedIslands(). The rejection arm is
-    // present only so this derived promise is HANDLED: every real caller awaits
-    // `pending` itself and reports the failure there, and an unhandled rejection
-    // here would report the same failure a second time, with no stack worth
-    // reading.
-    pending.then(mod => { loaded = mod; }, () => { /* reported by the awaiting caller */ });
-  }
-  return pending;
+    // Held in a variable on purpose. The specifier is a served URL, not a module
+    // either the type-checker or a bundler should resolve: app/build/islands.js is
+    // a build OUTPUT, and treating it as an input would make the build depend on
+    // its own result. A non-literal specifier states that honestly - the module
+    // shape is asserted below because it genuinely cannot be checked from here,
+    // and app/svelte/entry.js is the file that has to keep the promise.
+    if (!pending) {
+        const url = BUNDLE_URL;
+        pending = /** @type {Promise<IslandModule>} */ (import(/* @vite-ignore */ url));
+        // Remember the resolved module for loadedIslands(). The rejection arm is
+        // present only so this derived promise is HANDLED: every real caller awaits
+        // `pending` itself and reports the failure there, and an unhandled rejection
+        // here would report the same failure a second time, with no stack worth
+        // reading.
+        pending.then(mod => { loaded = mod; }, () => { });
+    }
+    return pending;
 }
-
 /**
  * The bundle IF it is already loaded, else null. NEVER loads it.
  *
@@ -110,7 +104,6 @@ export function loadIslands() {
  * @returns {IslandModule|null}
  */
 export function loadedIslands() { return loaded; }
-
 /**
  * Mount a component from the bundle into `target`, returning a teardown handle.
  *
@@ -124,9 +117,10 @@ export function loadedIslands() { return loaded; }
  * @returns {Promise<{destroy: () => void}>}
  */
 export async function mountIsland(name, target, props) {
-  const mod = await loadIslands();
-  const Component = /** @type {Record<string, *>} */ (mod)[name];
-  if (!Component) throw new Error('islands: no component exported as "' + name + '"');
-  const instance = mod.mount(Component, { target: target, props: props || {} });
-  return { destroy: () => mod.unmount(instance) };
+    const mod = await loadIslands();
+    const Component = /** @type {Record<string, *>} */ (mod)[name];
+    if (!Component)
+        throw new Error('islands: no component exported as "' + name + '"');
+    const instance = mod.mount(Component, { target: target, props: props || {} });
+    return { destroy: () => mod.unmount(instance) };
 }

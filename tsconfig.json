@@ -21,6 +21,6 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["app/js/**/*.js"],
+  "include": ["src/js/**/*"],
   "exclude": ["app/thirdpartyrenderer/**", "node_modules"]
 }

@@ -21,24 +21,20 @@
 import { parseDocument } from './md/blocks.js';
 import { renderTree } from './md/render.js';
 import { parseInlines } from './md/inline.js';
-
 export const INTERIM = false;
-
 /* ===========================================================================
    Public entry
    =========================================================================== */
-
 /**
  * Parse and render a full Markdown document to an HTML string.
  * @param {string} src
  * @returns {string}
  */
 export function renderMarkdown(src) {
-  const { doc, refs } = parseDocument(String(src));
-  let html = renderTree(doc, refs);
-  return html;
+    const { doc, refs } = parseDocument(String(src));
+    let html = renderTree(doc, refs);
+    return html;
 }
-
 /**
  * Render INLINE markdown only (code spans, emphasis, links) — no block
  * constructs. Used for table-cell content such as requirement descriptions and
@@ -47,5 +43,5 @@ export function renderMarkdown(src) {
  * @returns {string}
  */
 export function renderInline(src) {
-  return parseInlines(String(src == null ? '' : src), Object.create(null));
+    return parseInlines(String(src == null ? '' : src), Object.create(null));
 }

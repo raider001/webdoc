@@ -21,9 +21,7 @@
 // DOM. This is intentionally narrower than sanitize.js (it must KEEP <svg> and
 // its shape elements) - it is defence-in-depth over the plugin's own output.
 // ---------------------------------------------------------------------------
-
 import { elem } from './dom.js';
-
 /**
  * The extra context object passed to a renderer's `render(source, ctx)` call:
  * the fenced block's language and source plus the mount points (`host`, the
@@ -37,7 +35,6 @@ import { elem } from './dom.js';
  * @property {HTMLElement} pre
  * @property {string} source
  */
-
 /**
  * A registered renderer's render function: turns a fenced block's source text
  * into DOM. May return a Node/DocumentFragment, a Promise resolving to one
@@ -45,7 +42,6 @@ import { elem } from './dom.js';
  * fills `ctx.host` itself.
  * @typedef {function(string, BlockRenderContext): (Node|Promise<Node>|void)} RenderBlockFn
  */
-
 /**
  * One registry entry: a renderer function plus its human-readable label (used
  * in the fallback notice when the renderer fails or its library is missing).
@@ -53,10 +49,8 @@ import { elem } from './dom.js';
  * @property {RenderBlockFn} render
  * @property {string} label
  */
-
 /** @type {Map<string, RendererEntry>} */
 const registry = new Map(); // lang -> RendererEntry
-
 /**
  * Register a renderer for a fenced info-string. `render(source, ctx)` may return
  * a Node/DocumentFragment, a Promise resolving to one (for libraries that load
@@ -67,31 +61,28 @@ const registry = new Map(); // lang -> RendererEntry
  * @returns {void}
  */
 export function registerBlockRenderer(lang, render, opts = {}) {
-  if (!lang || typeof render !== 'function') return;
-  registry.set(String(lang).toLowerCase(), { render, label: opts.label || String(lang) });
+    if (!lang || typeof render !== 'function')
+        return;
+    registry.set(String(lang).toLowerCase(), { render, label: opts.label || String(lang) });
 }
-
 /** @param {string} lang @returns {boolean} */
 export function hasBlockRenderer(lang) {
-  return registry.has(String(lang || '').toLowerCase());
+    return registry.has(String(lang || '').toLowerCase());
 }
-
 /** @returns {string[]} */
 export function registeredBlockLangs() {
-  return [...registry.keys()];
+    return [...registry.keys()];
 }
-
 /**
  * The "language-xxx" hint the sanitizer preserved on the <code> element.
  * @param {Element} code
  * @returns {string|null}
  */
 function langOf(code) {
-  const cls = code.getAttribute('class') || '';
-  const m = /(?:^|\s)language-([\w+.#-]+)/i.exec(cls);
-  return m ? m[1].toLowerCase() : null;
+    const cls = code.getAttribute('class') || '';
+    const m = /(?:^|\s)language-([\w+.#-]+)/i.exec(cls);
+    return m ? m[1].toLowerCase() : null;
 }
-
 /**
  * Defence-in-depth over renderer output: strip scripts, inline event handlers
  * and script-y URLs, while leaving SVG shapes intact. Never allowed to throw.
@@ -99,21 +90,24 @@ function langOf(code) {
  * @returns {void}
  */
 function scrubRendered(container) {
-  try {
-    container.querySelectorAll('script').forEach(s => s.remove());
-    container.querySelectorAll('*').forEach(el => {
-      for (const attr of Array.from(el.attributes)) {
-        const name = attr.name.toLowerCase();
-        if (name.startsWith('on')) { el.removeAttribute(attr.name); continue; }
-        if ((name === 'href' || name === 'xlink:href' || name === 'src' || name === 'formaction') &&
-            /^\s*(javascript|vbscript|data:text\/html)/i.test(attr.value || '')) {
-          el.removeAttribute(attr.name);
-        }
-      }
-    });
-  } catch (e) { /* scrubbing must never break rendering */ }
+    try {
+        container.querySelectorAll('script').forEach(s => s.remove());
+        container.querySelectorAll('*').forEach(el => {
+            for (const attr of Array.from(el.attributes)) {
+                const name = attr.name.toLowerCase();
+                if (name.startsWith('on')) {
+                    el.removeAttribute(attr.name);
+                    continue;
+                }
+                if ((name === 'href' || name === 'xlink:href' || name === 'src' || name === 'formaction') &&
+                    /^\s*(javascript|vbscript|data:text\/html)/i.test(attr.value || '')) {
+                    el.removeAttribute(attr.name);
+                }
+            }
+        });
+    }
+    catch (e) { /* scrubbing must never break rendering */ }
 }
-
 /**
  * Fallback: keep the author's source as a normal (highlightable) code block and
  * prepend a small inert notice explaining why the diagram did not render.
@@ -125,23 +119,20 @@ function scrubRendered(container) {
  * @returns {void}
  */
 function renderFallback(host, lang, label, source, err) {
-  host.textContent = '';
-  host.classList.add('block-render-failed');
-  const reason = (err && err.message) ? ': ' + err.message : '';
-  host.append(
-    elem('div', 'block-render-note', (label || lang) + ' could not be rendered' + reason + ' — showing source.'),
-    elem('pre', null, elem('code', { class: 'language-' + lang, text: source })));
+    host.textContent = '';
+    host.classList.add('block-render-failed');
+    const reason = (err && err.message) ? ': ' + err.message : '';
+    host.append(elem('div', 'block-render-note', (label || lang) + ' could not be rendered' + reason + ' — showing source.'), elem('pre', null, elem('code', { class: 'language-' + lang, text: source })));
 }
-
 /**
  * @param {HTMLElement} host
  * @param {Node|void} node
  * @returns {void}
  */
 function fill(host, node) {
-  if (node && node.nodeType) host.appendChild(node); // else: renderer filled host itself
+    if (node && node.nodeType)
+        host.appendChild(node); // else: renderer filled host itself
 }
-
 /**
  * Pipeline stage: replace every fenced block whose language has a registered
  * renderer with that renderer's output. Runs after resolveLinks and before
@@ -151,42 +142,48 @@ function fill(host, node) {
  * @returns {void}
  */
 export function renderBlocks(root, ctx = {}) {
-  if (!root || typeof root.querySelectorAll !== 'function') return;
-  let codes;
-  try { codes = root.querySelectorAll('pre > code'); }
-  catch (e) { return; }
-
-  Array.from(codes).forEach(code => {
-    const lang = langOf(code);
-    if (!lang) return;
-    const entry = registry.get(lang);
-    if (!entry) return;                       // not a plugin language -> leave for the highlighter
-    const pre = code.parentElement;
-    if (!pre || pre.tagName !== 'PRE' || !pre.parentNode) return;
-
-    const source = code.textContent;
-    const host = elem('div', { class: 'block-render', 'data-block-lang': lang });
-    pre.replaceWith(host);                     // host is in the DOM before render (libs may measure layout)
-
-    let out;
+    if (!root || typeof root.querySelectorAll !== 'function')
+        return;
+    let codes;
     try {
-      out = entry.render(source, Object.assign({ lang, host, pre, source }, ctx));
-    } catch (e) {
-      renderFallback(host, lang, entry.label, source, e);
-      return;
+        codes = root.querySelectorAll('pre > code');
     }
-
-    // Thenable is duck-typed rather than `instanceof Promise` so a renderer that
-    // hands back its own library's promise still settles. A typeof test on a
-    // property proves nothing to the checker about the union it came from, so
-    // each branch restates the half the test just established.
-    if (out && typeof (/** @type {Promise<Node>} */ (out)).then === 'function') {
-      /** @type {Promise<Node>} */ (out)
-        .then(node => { fill(host, node); scrubRendered(host); })
-        .catch(e => renderFallback(host, lang, entry.label, source, e));
-    } else {
-      fill(host, /** @type {Node|void} */ (out));
-      scrubRendered(host);
+    catch (e) {
+        return;
     }
-  });
+    Array.from(codes).forEach(code => {
+        const lang = langOf(code);
+        if (!lang)
+            return;
+        const entry = registry.get(lang);
+        if (!entry)
+            return; // not a plugin language -> leave for the highlighter
+        const pre = code.parentElement;
+        if (!pre || pre.tagName !== 'PRE' || !pre.parentNode)
+            return;
+        const source = code.textContent;
+        const host = elem('div', { class: 'block-render', 'data-block-lang': lang });
+        pre.replaceWith(host); // host is in the DOM before render (libs may measure layout)
+        let out;
+        try {
+            out = entry.render(source, Object.assign({ lang, host, pre, source }, ctx));
+        }
+        catch (e) {
+            renderFallback(host, lang, entry.label, source, e);
+            return;
+        }
+        // Thenable is duck-typed rather than `instanceof Promise` so a renderer that
+        // hands back its own library's promise still settles. A typeof test on a
+        // property proves nothing to the checker about the union it came from, so
+        // each branch restates the half the test just established.
+        if (out && typeof ( /** @type {Promise<Node>} */(out)).then === 'function') {
+            /** @type {Promise<Node>} */ (out)
+                .then(node => { fill(host, node); scrubRendered(host); })
+                .catch(e => renderFallback(host, lang, entry.label, source, e));
+        }
+        else {
+            fill(host, /** @type {Node|void} */ (out));
+            scrubRendered(host);
+        }
+    });
 }

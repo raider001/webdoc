@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src/js",
+    "outDir": "app/js",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "removeComments": false,
+    "sourceMap": false,
+    "declaration": false
+  },
+  "include": ["src/js/**/*"],
+  "exclude": ["node_modules"]
+}

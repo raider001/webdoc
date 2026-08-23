@@ -20,9 +20,7 @@
 // Deliberately tiny: no queue, no debounce, no politeness API. Each of those
 // would CHANGE when (or whether) something is announced, and nothing here needs
 // them - callers announce one short sentence at a human-paced moment.
-
 import { el } from './app-shell.js';
-
 /**
  * Write `text` into the polite live region, replacing whatever it held.
  *
@@ -41,6 +39,7 @@ import { el } from './app-shell.js';
  * @returns {void}
  */
 export function announce(text) {
-  const live = el('live');
-  if (live) live.textContent = text;
+    const live = el('live');
+    if (live)
+        live.textContent = text;
 }

@@ -24,10 +24,8 @@ import { renderInline, renderMarkdown } from '../commonmark.js';
 import { sanitizeToFragment } from '../sanitize.js';
 import { groupsByDoc } from './store.js';
 import { loadIslands, loadedIslands } from '../islands.js';
-
 /** @typedef {import('./parse.js').ReqOrTestBlock} ReqOrTestBlock */
 /** @typedef {import('../islands.js').IslandModule} IslandModule */
-
 /**
  * INLINE markdown (code / emphasis / links, no block constructs) -> sanitized
  * fragment. For single-line contexts like a requirement description.
@@ -35,7 +33,7 @@ import { loadIslands, loadedIslands } from '../islands.js';
  * @returns {DocumentFragment}
  */
 export function inlineMarkdown(text) {
-  return sanitizeToFragment(renderInline(String(text == null ? '' : text)));
+    return sanitizeToFragment(renderInline(String(text == null ? '' : text)));
 }
 /**
  * FULL markdown (paragraphs, lists, code blocks, ...) -> sanitized fragment. Test
@@ -44,9 +42,8 @@ export function inlineMarkdown(text) {
  * @returns {DocumentFragment}
  */
 export function blockMarkdown(text) {
-  return sanitizeToFragment(renderMarkdown(String(text == null ? '' : text)));
+    return sanitizeToFragment(renderMarkdown(String(text == null ? '' : text)));
 }
-
 /**
  * A placeholder that has already been replaced by its host, waiting for the
  * bundle so the component can go in.
@@ -54,7 +51,6 @@ export function blockMarkdown(text) {
  * @property {HTMLElement} host
  * @property {ReqOrTestBlock} block
  */
-
 /**
  * Mount every pending block, then APPLY THE RESULT SYNCHRONOUSLY.
  *
@@ -70,25 +66,26 @@ export function blockMarkdown(text) {
  * @returns {void}
  */
 function mountBlocks(mod, pending) {
-  for (const { host, block } of pending) {
-    // The article was replaced before the bundle arrived (only reachable on the
-    // asynchronous path below). Mounting into a detached host would start
-    // effects nothing will ever stop: the teardown for THIS article has already
-    // run, so registering now would only add a leak to the registry.
-    if (!host.isConnected) continue;
-    const instance = block.kind === 'test'
-      ? mod.mountTestCase(host, block)
-      : mod.mountReqTable(host, block);
-    // Through the registry, not an import: reader.js imports requirements.js,
-    // which re-exports this file, so importing reader.js back would close a
-    // cycle. main.js publishes registerMounted for exactly this. The guard is
-    // for a shell that never booted (a harness) - a missed registration costs a
-    // leak, a thrown TypeError costs the whole document.
-    if (app.registerMounted) app.registerMounted(host, instance.destroy);
-  }
-  mod.flushSync();
+    for (const { host, block } of pending) {
+        // The article was replaced before the bundle arrived (only reachable on the
+        // asynchronous path below). Mounting into a detached host would start
+        // effects nothing will ever stop: the teardown for THIS article has already
+        // run, so registering now would only add a leak to the registry.
+        if (!host.isConnected)
+            continue;
+        const instance = block.kind === 'test'
+            ? mod.mountTestCase(host, block)
+            : mod.mountReqTable(host, block);
+        // Through the registry, not an import: reader.js imports requirements.js,
+        // which re-exports this file, so importing reader.js back would close a
+        // cycle. main.js publishes registerMounted for exactly this. The guard is
+        // for a shell that never booted (a harness) - a missed registration costs a
+        // leak, a thrown TypeError costs the whole document.
+        if (app.registerMounted)
+            app.registerMounted(host, instance.destroy);
+    }
+    mod.flushSync();
 }
-
 /**
  * Replace each reqgroup placeholder with the component that draws it
  * (post-sanitize).
@@ -103,33 +100,39 @@ function mountBlocks(mod, pending) {
  * @returns {void}
  */
 export function renderRequirements(article, docId) {
-  /** @type {PendingMount[]} */
-  const pending = [];
-  article.querySelectorAll('pre > code.language-reqgroup').forEach(code => {
-    const pre = code.parentElement;
-    const key = code.textContent.trim();
-    const sep = key.indexOf('::');
-    const dId = sep >= 0 ? key.slice(0, sep) : docId;
-    const n = sep >= 0 ? parseInt(key.slice(sep + 2), 10) : 0;
-    const blocks = groupsByDoc.get(dId);
-    const g = blocks && blocks[n];
-    if (!g) { pre.remove(); return; }
-    // `.wd-mounted` is display:contents, so the host is not a box: the figure
-    // lays out exactly where the <pre> did. It is also the marker reader.js's
-    // find-in-page, link resolution and image resolution use to leave this
-    // subtree alone, because Svelte owns it from here on.
-    const host = elem('div', 'wd-mounted');
-    pre.replaceWith(host);
-    pending.push({ host: host, block: g });
-  });
-  if (!pending.length) return;
-
-  // The bundle is normally already here - boot() awaits mountShellIslands()
-  // before the first route resolves - and when it is, mounting inline is what
-  // keeps renderDoc synchronous end to end (see mountBlocks). The fallback is
-  // for the cold case only, and accepts that a deep link into that one render
-  // may not scroll; the tables themselves still appear.
-  const mod = loadedIslands();
-  if (mod) { mountBlocks(mod, pending); return; }
-  loadIslands().then(m => mountBlocks(m, pending));
+    /** @type {PendingMount[]} */
+    const pending = [];
+    article.querySelectorAll('pre > code.language-reqgroup').forEach(code => {
+        const pre = code.parentElement;
+        const key = code.textContent.trim();
+        const sep = key.indexOf('::');
+        const dId = sep >= 0 ? key.slice(0, sep) : docId;
+        const n = sep >= 0 ? parseInt(key.slice(sep + 2), 10) : 0;
+        const blocks = groupsByDoc.get(dId);
+        const g = blocks && blocks[n];
+        if (!g) {
+            pre.remove();
+            return;
+        }
+        // `.wd-mounted` is display:contents, so the host is not a box: the figure
+        // lays out exactly where the <pre> did. It is also the marker reader.js's
+        // find-in-page, link resolution and image resolution use to leave this
+        // subtree alone, because Svelte owns it from here on.
+        const host = elem('div', 'wd-mounted');
+        pre.replaceWith(host);
+        pending.push({ host: host, block: g });
+    });
+    if (!pending.length)
+        return;
+    // The bundle is normally already here - boot() awaits mountShellIslands()
+    // before the first route resolves - and when it is, mounting inline is what
+    // keeps renderDoc synchronous end to end (see mountBlocks). The fallback is
+    // for the cold case only, and accepts that a deep link into that one render
+    // may not scroll; the tables themselves still appear.
+    const mod = loadedIslands();
+    if (mod) {
+        mountBlocks(mod, pending);
+        return;
+    }
+    loadIslands().then(m => mountBlocks(m, pending));
 }

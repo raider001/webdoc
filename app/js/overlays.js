@@ -25,7 +25,6 @@
 // opens the map never downloads the graph engine.
 import { el } from './app-shell.js';
 import { elem } from './dom.js';
-
 /**
  * One overlay host: the full-screen container plus the stage its owning module
  * renders into.
@@ -33,49 +32,46 @@ import { elem } from './dom.js';
  * @property {HTMLElement} host - the #graphOverlay / #covOverlay element itself
  * @property {HTMLElement} stage - the inner div the feature module fills
  */
-
 /** @type {OverlayHost|null} */
 let mapParts = null;
 /** @type {OverlayHost|null} */
 let covParts = null;
-
 /**
  * @param {string} id
  * @param {string} cls
  * @returns {OverlayHost}
  */
 function makeHost(id, cls) {
-  const stage = elem('div');
-  const host = elem('div', { class: cls, id: id, hidden: true }, stage);
-  document.body.appendChild(host);
-  return { host: host, stage: stage };
+    const stage = elem('div');
+    const host = elem('div', { class: cls, id: id, hidden: true }, stage);
+    document.body.appendChild(host);
+    return { host: host, stage: stage };
 }
-
 /**
  * Create both overlay hosts. Called once from boot(), before anything can ask
  * about them. Idempotent, so a second call (a test, a hot reload) is harmless.
  * @returns {void}
  */
 export function ensureOverlayHosts() {
-  if (!mapParts) mapParts = makeHost('graphOverlay', 'graph-overlay');
-  if (!covParts) covParts = makeHost('covOverlay', 'graph-overlay cov-overlay');
+    if (!mapParts)
+        mapParts = makeHost('graphOverlay', 'graph-overlay');
+    if (!covParts)
+        covParts = makeHost('covOverlay', 'graph-overlay cov-overlay');
 }
-
 /**
  * @param {OverlayHost|null} parts
  * @param {string} which
  * @returns {OverlayHost}
  */
 function need(parts, which) {
-  if (!parts) throw new Error('overlays: ' + which + ' host requested before ensureOverlayHosts() ran');
-  return parts;
+    if (!parts)
+        throw new Error('overlays: ' + which + ' host requested before ensureOverlayHosts() ran');
+    return parts;
 }
-
 /** @returns {OverlayHost} */
 export function mapOverlay() { return need(mapParts, 'map'); }
 /** @returns {OverlayHost} */
 export function coverageOverlay() { return need(covParts, 'coverage'); }
-
 /**
  * Is the document map currently on screen? Safe before ensureOverlayHosts() has
  * run - it answers false rather than throwing, because "not open" is the honest
@@ -84,16 +80,14 @@ export function coverageOverlay() { return need(covParts, 'coverage'); }
  * @returns {boolean}
  */
 export function mapOpen() {
-  const node = el('graphOverlay');
-  return !!node && !node.hidden;
+    const node = el('graphOverlay');
+    return !!node && !node.hidden;
 }
-
 /** @returns {boolean} */
 export function coverageOpen() {
-  const node = el('covOverlay');
-  return !!node && !node.hidden;
+    const node = el('covOverlay');
+    return !!node && !node.hidden;
 }
-
 /**
  * Rebuild the document map, but only if it is actually open.
  *
@@ -104,7 +98,8 @@ export function coverageOpen() {
  * @returns {Promise<void>}
  */
 export async function requestMapRebuild() {
-  if (!mapOpen()) return;
-  const mapView = await import('./map-view.js');
-  await mapView.buildDocGraph(true);   // keep the current view (the default), animate to the new layout
+    if (!mapOpen())
+        return;
+    const mapView = await import('./map-view.js');
+    await mapView.buildDocGraph(true); // keep the current view (the default), animate to the new layout
 }

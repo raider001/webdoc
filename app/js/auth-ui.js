@@ -36,7 +36,6 @@ import { elem } from './dom.js';
 import { el, app } from './app-shell.js';
 import { auth, signOut, signInRequired, onAuthChange } from './auth.js';
 import { loadIslands } from './islands.js';
-
 /**
  * A host element for a component mounted into DOM the shell owns.
  *
@@ -49,7 +48,6 @@ import { loadIslands } from './islands.js';
  * @returns {HTMLElementTagNameMap[K]}
  */
 function mountHost(tag) { return elem(tag, 'wd-mounted'); }
-
 // ---- group chips ----------------------------------------------------------
 /**
  * Instances keyed by the host the caller is holding. A WeakMap, so a host that
@@ -64,7 +62,6 @@ const chipInstances = new WeakMap();
  * @type {WeakSet<Element>}
  */
 const chipCancelled = new WeakSet();
-
 /**
  * A coloured chip naming one access group. The single place a group is drawn, so
  * the map legend, the locked-page screen and the admin list all agree.
@@ -83,14 +80,14 @@ const chipCancelled = new WeakSet();
  * @returns {HTMLElement}
  */
 export function groupChip(name, opts) {
-  const host = mountHost('span');
-  loadIslands().then(mod => {
-    if (chipCancelled.has(host)) return;
-    chipInstances.set(host, mod.mountGroupChip(host, name, opts));
-  });
-  return host;
+    const host = mountHost('span');
+    loadIslands().then(mod => {
+        if (chipCancelled.has(host))
+            return;
+        chipInstances.set(host, mod.mountGroupChip(host, name, opts));
+    });
+    return host;
 }
-
 /**
  * Destroy the chip mounted in `host`. Call it before dropping the host - the
  * editor redraws its chip rows on every checkbox change, and a cleared container
@@ -99,13 +96,17 @@ export function groupChip(name, opts) {
  * @returns {void}
  */
 export function destroyGroupChip(host) {
-  if (!host) return;
-  const instance = chipInstances.get(host);
-  if (instance) { chipInstances.delete(host); instance.destroy(); return; }
-  // The bundle has not landed yet; leave a note for the pending mount instead.
-  chipCancelled.add(host);
+    if (!host)
+        return;
+    const instance = chipInstances.get(host);
+    if (instance) {
+        chipInstances.delete(host);
+        instance.destroy();
+        return;
+    }
+    // The bundle has not landed yet; leave a note for the pending mount instead.
+    chipCancelled.add(host);
 }
-
 // ---- the sign-in wall -----------------------------------------------------
 /**
  * True while a wall is on screen (or on its way). Not a node handle on purpose:
@@ -114,7 +115,6 @@ export function destroyGroupChip(host) {
  * when, there is a real session.
  */
 let wallUp = false;
-
 /**
  * Put up the full-screen sign-in / registration screen.
  *
@@ -131,19 +131,19 @@ let wallUp = false;
  * @returns {void}
  */
 export function mountSignInWall(target, opts) {
-  if (wallUp) return;
-  wallUp = true;
-  loadIslands().then(mod => {
-    mod.mountSignInWall(target, {
-      onSignedIn: () => { wallUp = false; opts.onSignedIn(); },
+    if (wallUp)
+        return;
+    wallUp = true;
+    loadIslands().then(mod => {
+        mod.mountSignInWall(target, {
+            onSignedIn: () => { wallUp = false; opts.onSignedIn(); },
+        });
+    }, () => {
+        // The bundle failed to load. Clearing the latch is all that can be done
+        // here; boot()'s own catch reports the failure to the visitor.
+        wallUp = false;
     });
-  }, () => {
-    // The bundle failed to load. Clearing the latch is all that can be done
-    // here; boot()'s own catch reports the failure to the visitor.
-    wallUp = false;
-  });
 }
-
 /**
  * The promise-shaped form of mountSignInWall, for the two places that continue
  * with `.then(() => location.reload())`. Resolves once the visitor is signed in.
@@ -153,12 +153,12 @@ export function mountSignInWall(target, opts) {
  * @returns {Promise<void>}
  */
 export function showSignInWall() {
-  if (wallUp) return Promise.resolve();
-  return new Promise(resolve => {
-    mountSignInWall(document.body, { onSignedIn: () => resolve() });
-  });
+    if (wallUp)
+        return Promise.resolve();
+    return new Promise(resolve => {
+        mountSignInWall(document.body, { onSignedIn: () => resolve() });
+    });
 }
-
 // ---- the header's account button -----------------------------------------
 /**
  * Wire the header account button: it shows who is signed in, and opens the
@@ -172,51 +172,52 @@ export function showSignInWall() {
  * @returns {void}
  */
 export function setupAccountButton() {
-  const btn = el('accountBtn');
-  if (!btn) return;
-  const render = () => {
-    btn.hidden = !auth.enabled;
-    if (!auth.enabled) return;
-    if (auth.user) {
-      btn.title = auth.user.displayName + ' (' + auth.user.username + ')';
-      btn.setAttribute('aria-label', 'Account: ' + auth.user.displayName);
-    } else {
-      btn.title = 'Sign in';
-      btn.setAttribute('aria-label', 'Sign in');
-    }
-  };
-  btn.addEventListener('click', () => (auth.user
-    ? openAccountPanel()
-    // RELOAD 1 of 3. Signing in from the header happens with a document already
-    // rendered from state.byId - a body the server redacted for the anonymous
-    // reader - and with auth.js's access cache full of anonymous answers. Both
-    // have to go before the new identity sees anything.
-    : showSignInWall().then(() => location.reload())));
-  onAuthChange(render);
-  render();
-  // The contents follow the session on their own, through the island store's
-  // own onAuthChange subscription; render() above never touches them.
-  loadIslands().then(mod => mod.mountAccountButton(btn));
+    const btn = el('accountBtn');
+    if (!btn)
+        return;
+    const render = () => {
+        btn.hidden = !auth.enabled;
+        if (!auth.enabled)
+            return;
+        if (auth.user) {
+            btn.title = auth.user.displayName + ' (' + auth.user.username + ')';
+            btn.setAttribute('aria-label', 'Account: ' + auth.user.displayName);
+        }
+        else {
+            btn.title = 'Sign in';
+            btn.setAttribute('aria-label', 'Sign in');
+        }
+    };
+    btn.addEventListener('click', () => (auth.user
+        ? openAccountPanel()
+        // RELOAD 1 of 3. Signing in from the header happens with a document already
+        // rendered from state.byId - a body the server redacted for the anonymous
+        // reader - and with auth.js's access cache full of anonymous answers. Both
+        // have to go before the new identity sees anything.
+        : showSignInWall().then(() => location.reload())));
+    onAuthChange(render);
+    render();
+    // The contents follow the session on their own, through the island store's
+    // own onAuthChange subscription; render() above never touches them.
+    loadIslands().then(mod => mod.mountAccountButton(btn));
 }
-
 // ---- the account panel ----------------------------------------------------
 /** @returns {void} */
 export function openAccountPanel() {
-  if (!auth.user) return;
-  loadIslands().then(mod => mod.openAccountPanel({
-    // RELOAD 2 of 3. Signing out is the direction that matters most: everything
-    // already rendered was fetched as somebody, and the anonymous reader must
-    // not inherit it.
-    onSignOut: () => signOut().then(() => location.reload()),
-  }));
+    if (!auth.user)
+        return;
+    loadIslands().then(mod => mod.openAccountPanel({
+        // RELOAD 2 of 3. Signing out is the direction that matters most: everything
+        // already rendered was fetched as somebody, and the anonymous reader must
+        // not inherit it.
+        onSignOut: () => signOut().then(() => location.reload()),
+    }));
 }
-
 // ---- the administrator's user list ---------------------------------------
 /** @returns {void} */
 export function openAdminPanel() {
-  loadIslands().then(mod => mod.openAdminPanel());
+    loadIslands().then(mod => mod.openAdminPanel());
 }
-
 // ---- the restricted-page screen ------------------------------------------
 /**
  * What a reader sees INSTEAD of a document they may not open.
@@ -230,23 +231,24 @@ export function openAdminPanel() {
  * @returns {HTMLElement}
  */
 export function restrictedPanel(docId, detail) {
-  const host = mountHost('div');
-  loadIslands().then(mod => {
-    // Routed away again before the bundle landed: mounting now would start
-    // effects against a detached node that nothing will ever tear down, because
-    // the teardown for this article already ran.
-    if (!host.isConnected) return;
-    const instance = mod.mountRestrictedPage(host, docId, detail || {}, {
-      // RELOAD 3 of 3. Same reason as the header button, plus one more: the map
-      // and the tree were built from the anonymous index and would still be
-      // showing it.
-      onSignIn: () => showSignInWall().then(() => location.reload()),
+    const host = mountHost('div');
+    loadIslands().then(mod => {
+        // Routed away again before the bundle landed: mounting now would start
+        // effects against a detached node that nothing will ever tear down, because
+        // the teardown for this article already ran.
+        if (!host.isConnected)
+            return;
+        const instance = mod.mountRestrictedPage(host, docId, detail || {}, {
+            // RELOAD 3 of 3. Same reason as the header button, plus one more: the map
+            // and the tree were built from the anonymous index and would still be
+            // showing it.
+            onSignIn: () => showSignInWall().then(() => location.reload()),
+        });
+        if (app.registerMounted)
+            app.registerMounted(host, instance.destroy);
     });
-    if (app.registerMounted) app.registerMounted(host, instance.destroy);
-  });
-  return host;
+    return host;
 }
-
 /**
  * The notice that replaces a section this reader may not see. The SERVER has
  * already removed the content; this only renders the hole it left.
@@ -254,15 +256,16 @@ export function restrictedPanel(docId, detail) {
  * @returns {HTMLElement}
  */
 export function restrictedSection(spec) {
-  const host = mountHost('div');
-  loadIslands().then(mod => {
-    if (!host.isConnected) return;   // the article was replaced first; see above
-    const instance = mod.mountRestrictedSection(host, spec || {});
-    if (app.registerMounted) app.registerMounted(host, instance.destroy);
-  });
-  return host;
+    const host = mountHost('div');
+    loadIslands().then(mod => {
+        if (!host.isConnected)
+            return; // the article was replaced first; see above
+        const instance = mod.mountRestrictedSection(host, spec || {});
+        if (app.registerMounted)
+            app.registerMounted(host, instance.destroy);
+    });
+    return host;
 }
-
 /**
  * Re-run whatever depends on the signed-in identity. Exported so main.js can
  * hook the header up without importing the internals.

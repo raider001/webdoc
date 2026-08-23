@@ -1,5 +1,4 @@
 // graph/util.js - constants and small pure helpers shared across the graph modules.
-
 /**
  * Layout tuning-parameter bag: node box size, gaps between layers/rows/
  * components, barycenter-sweep iteration count, which connection type drives
@@ -17,16 +16,14 @@
  * @property {string} [layoutMode]
  * @property {number} [relocateMax]
  */
-
 // Layout tuning. All in world units (pre-transform).
 /** @type {LayoutOptions} */
 const LO = {
-  nodeW: 210, nodeH: 76,   // node box size
-  hGap: 110,  vGap: 40,    // gaps between layers (h) and rows (v)
-  compGap: 90,             // vertical gap between disconnected components
-  iters: 8                 // barycenter ordering sweeps
+    nodeW: 210, nodeH: 76, // node box size
+    hGap: 110, vGap: 40, // gaps between layers (h) and rows (v)
+    compGap: 90, // vertical gap between disconnected components
+    iters: 8 // barycenter ordering sweeps
 };
-
 // Pan/zoom limits. MIN_K is the interactive floor; FIT_MIN_K is a much smaller
 // floor used ONLY by fit(), so a huge (10k-50k node) layout can be framed in one
 // view instead of overflowing when the true fit scale is below MIN_K. fit() also
@@ -34,10 +31,8 @@ const LO = {
 // back out to the whole-graph overview.
 const MIN_K = 0.15, MAX_K = 3, FIT_MIN_K = 0.002;
 const DRAG_THRESHOLD = 5; // px of pointer travel before a press becomes a drag
-
 // Minimap box dimensions.
 const MINI_W = 168, MINI_H = 120, MINI_PAD = 6;
-
 /**
  * @param {number} v
  * @param {number} lo
@@ -53,5 +48,4 @@ function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
  * @returns {string}
  */
 function fmt(n) { return String(Math.round(n * 1000) / 1000); }
-
 export { LO, MIN_K, MAX_K, FIT_MIN_K, DRAG_THRESHOLD, MINI_W, MINI_H, MINI_PAD, clamp, fmt };
