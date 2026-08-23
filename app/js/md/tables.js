@@ -113,7 +113,9 @@ export function extractTables(block) {
  */
 export function renderTable(b, refs) {
   const cols = b.aligns.length;
+  /** @param {string|null} a - this column's alignment, null for the default @returns {string} */
   const attr = a => a ? ' align="' + a + '"' : '';
+  /** @param {string} tag @param {string} text - raw cell markdown @param {string|null} a @returns {string} */
   const cell = (tag, text, a) => '<' + tag + attr(a) + '>' + parseInlines(text || '', refs) + '</' + tag + '>\n';
   let out = '<table>\n<thead>\n<tr>\n';
   for (let i = 0; i < cols; i++) out += cell('th', b.headerCells[i], b.aligns[i]);

@@ -13,7 +13,7 @@
 // noise between them.
 // ---------------------------------------------------------------------------
 
-import { renderInline, renderMarkdown } from './commonmark.js';
+import { renderMarkdown } from './commonmark.js';
 import { sanitizeToFragment } from './sanitize.js';
 
 /** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
@@ -22,17 +22,14 @@ import { sanitizeToFragment } from './sanitize.js';
 /** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
 /** @typedef {import('./coverage-view.js').TestReportData} TestReportData */
 
+/** @param {string|null|undefined} s - null/undefined render as empty, never "null" */
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
 // Markdown as a SANITIZED HTML string, safe to embed in the standalone report.
-function mdInline(text) {
-  const d = document.createElement('div');
-  d.appendChild(sanitizeToFragment(renderInline(String(text == null ? '' : text))));
-  return d.innerHTML;
-}
+/** @param {string} text - markdown source @returns {string} sanitized HTML */
 function mdBlock(text) {
   const d = document.createElement('div');
   d.appendChild(sanitizeToFragment(renderMarkdown(String(text == null ? '' : text))));
@@ -51,16 +48,19 @@ function stepsCell(steps) {
     (s.expected ? '<div class="rstep-e tc-md">&rarr; ' + mdBlock(s.expected) + '</div>' : '') + '</li>'
   ).join('') + '</ol>';
 }
+/** @param {string} at - ISO timestamp; anything unparseable falls back to the raw string @returns {string} */
 function fmtWhen(at) {
   if (!at) return '';
   try { const d = new Date(at); if (!isNaN(d.getTime())) return d.toLocaleString(); } catch (e) {}
   return String(at);
 }
+/** @type {Object<string, string>} */
 const LABEL = { pass: 'Pass', fail: 'Fail', partial: 'Partial', untested: 'Untested' };
 // Inline (not a file reference - this report has no external assets) check/cross
 // glyphs for the evidence list, same shapes as icons/check.svg and icons/close.svg.
 const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12L10 17L19 7"/></svg>';
 const CROSS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6L18 18"/><path d="M18 6L6 18"/></svg>';
+/** @param {string} status - a CoverageStatus.status; missing/unknown falls back to 'untested' @returns {string} HTML */
 function pill(status) {
   const st = status || 'untested';
   return '<span class="pill pill-' + st + '">' + esc(LABEL[st] || st) + '</span>';
@@ -72,7 +72,7 @@ function pill(status) {
  */
 function statusOf(map, id) {
   if (!map) return null;
-  return map.get ? map.get(id) : map[id];
+  return map instanceof Map ? map.get(id) : map[id];
 }
 /**
  * @param {string[]} ids
@@ -96,8 +96,10 @@ export function generateReportHtml(data) {
   const detailById = new Map((data.detail || []).map(d => [d.id, d]));
 
   // ---- summary counts ----
+  /** @type {Object<string, number>} */
   const rc = { pass: 0, partial: 0, fail: 0, untested: 0 };
   reqs.forEach(r => { const s = (statusOf(reqStatus, r.id) || {}).status || 'untested'; rc[s] = (rc[s] || 0) + 1; });
+  /** @type {Object<string, number>} */
   const tc = { pass: 0, fail: 0, untested: 0 };
   tests.forEach(t => { const s = (statusOf(testStatus, t.id) || {}).status || 'untested'; tc[s] = (tc[s] || 0) + 1; });
   const reqTotal = reqs.length, testTotal = tests.length;
@@ -117,6 +119,7 @@ export function generateReportHtml(data) {
 
   // ---- requirements table ----
   const reqRows = reqs.map(r => {
+    /** @type {Partial<CoverageStatus>} */
     const s = (statusOf(reqStatus, r.id) || {});
     const pct = (s.pct === null || s.pct === undefined) ? '' : s.pct + '%';
     return '<tr>' +
@@ -130,6 +133,7 @@ export function generateReportHtml(data) {
 
   // ---- test-case table ----
   const testRows = tests.map(t => {
+    /** @type {Partial<CoverageStatus>} */
     const s = (statusOf(testStatus, t.id) || {});
     const d = detailById.get(t.id);
     const run = d && d.run;
@@ -148,6 +152,7 @@ export function generateReportHtml(data) {
   const evidence = tests.map(t => {
     const d = detailById.get(t.id);
     if (!d || (!d.auto.length && !d.manual.length && !d.report)) return '';
+    /** @type {string[]} */
     const rows = [];
     d.auto.forEach(a => rows.push(
       '<li class="' + (a.pass ? 'ev-pass' : 'ev-fail') + '"><span class="dot">' + (a.pass ? CHECK_SVG : CROSS_SVG) + '</span>' +
@@ -202,6 +207,7 @@ export function generateReportHtml(data) {
     '</main></body></html>';
 }
 
+/** @param {string} html @returns {string} */
 function stripTags(html) {
   // Evidence text may be WYSIWYG HTML; reduce to plain text before escaping.
   return String(html || '').replace(/<[^>]*>/g, '');

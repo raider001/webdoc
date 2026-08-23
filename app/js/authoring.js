@@ -6,17 +6,34 @@
 // app.closeDrawer, wired by main at boot); it registers its own map- and coverage-
 // facing handles (editDocRelation, deleteDocFlow, link/unlinkTestToRequirement).
 import { state, el, app, titleFromId, defaultId, getDoc } from './app-shell.js';
-import { openEditor, openNewDocModal, parseDoc, confirmDialog } from './editor.js';
-import { buildDocGraph, ensureGraphModel, invalidateGraphModel } from './map-view.js';
-import { renderTree } from './tree.js';
+// editor.js is NOT imported statically. It is the largest module graph in the app
+// (editor.js plus editor/{serialize,richtext,widgets,panels,ui}.js, ~1,800 lines),
+// and a reader who only ever reads never opens it. Every entry point below awaits
+// editorModule() first, so the editor is fetched on the first authoring action and
+// cached by the module loader from then on.
+//
+// setLinkSearch is still configured by main.js at boot, but against
+// editor/richtext.js directly - that module imports only dom.js, so wiring link
+// autocomplete early costs nothing and does not drag the editor in.
+/** @type {Promise<typeof import('./editor.js')>|null} */
+let editorMod = null;
+/** @returns {Promise<typeof import('./editor.js')>} */
+function editorModule() {
+  if (!editorMod) editorMod = import('./editor.js');
+  return editorMod;
+}
+import { ensureGraphModel, invalidateGraphModel } from './graph-model.js';
+import { announce } from './announce.js';
+import { mapOpen, requestMapRebuild } from './overlays.js';
 import { loadDoc } from './catalog.js';
 import { buildRequirementIndex, requirementList, testList, resolveRequirementRef } from './requirements.js';
+import { apiFetch, describeFailure, auth, docAccess, invalidateAccess } from './auth.js';
 
 /** @typedef {import('./catalog.js').Doc} Doc */
 /** @typedef {import('./catalog.js').SourceConfig} SourceConfig */
 /** @typedef {import('./editor.js').Block} Block */
 /** @typedef {import('./editor/serialize.js').DocMeta} DocMeta */
-/** @typedef {import('./map-view.js').GraphDocNode} GraphDocNode */
+/** @typedef {import('./graph-model.js').GraphDocNode} GraphDocNode */
 /** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
 
 /**
@@ -28,6 +45,7 @@ import { buildRequirementIndex, requirementList, testList, resolveRequirementRef
  * @property {(id: string) => void} onCreate
  */
 
+/** The open editor's root element, so exitEdit can take it back out. @type {HTMLElement|null} */
 let editorEl = null;
 
 /**
@@ -35,8 +53,17 @@ let editorEl = null;
  * navigate + close the drawer.
  * @returns {Promise<HTMLElement>}
  */
+/**
+ * Refresh the drawer tree after a structural change (create / delete / move).
+ *
+ * This used to REBUILD the tree from scratch, which threw away every folder the
+ * reader had expanded. It is now a data refresh: the components refetch the
+ * levels that are open and keep the expansion, because that state lives in a
+ * store rather than on the DOM nodes.
+ * @returns {void}
+ */
 function rerenderTree() {
-  return renderTree(el('treeList'), tid => { app.navigate(tid); app.closeDrawer(); });
+  if (app.invalidateTree) app.invalidateTree();
 }
 
 /** Wire the header's new-document / edit / delete buttons. */
@@ -44,7 +71,36 @@ export function setupEditButtons() {
   el('newDocBtn').addEventListener('click', () => openNewDocFlow());
   el('editBtn').addEventListener('click', () => { if (state.current) editExisting(state.current); });
   el('deleteBtn').addEventListener('click', () => { if (state.current) deleteDocFlow(state.current.id, { rebuildMap: false }); });
+  el('newDocBtn').hidden = !auth.canWrite;
 }
+
+/**
+ * Show or hide the edit / delete controls for the document now on screen.
+ *
+ * Presentation only: the server re-checks every write regardless, so this is
+ * about not offering an action that will be refused - not about enforcing
+ * anything. Called by the reader through the `app` registry on each render.
+ * @param {string} docId
+ * @returns {Promise<void>}
+ */
+async function updateDocActions(docId) {
+  const edit = el('editBtn'), del = el('deleteBtn');
+  if (!auth.enabled) { edit.hidden = false; del.hidden = false; return; }
+  // Hide immediately, reveal once the server has answered - so the buttons never
+  // flash on for a document this account cannot touch.
+  edit.hidden = true; del.hidden = true;
+  const info = await docAccess(docId);
+  if (!info || !state.current || state.current.id !== docId) return;   // navigated away
+  // A page with sections withheld from this reader is read-only for them: saving
+  // it back would overwrite what they were never shown.
+  const partial = (info.redactedSections || 0) > 0;
+  edit.hidden = !info.canWrite || partial;
+  // Deleting a restricted page also needs access-management rights, because
+  // removing the page removes its ACL with it.
+  const restricted = !!(info.effective && (info.effective.read || info.effective.hidden));
+  del.hidden = !info.canWrite || partial || (restricted && !info.canEditAccess);
+}
+app.updateDocActions = updateDocActions;
 
 /**
  * Open the "new document" modal, from the header ＋. The modal opens OVER the
@@ -60,7 +116,8 @@ async function openNewDocFlow() {
   const known = new Set((await ensureGraphModel()).docs.map(d => d.id));
   // From the map, "New document" just creates the file (and the node appears) - it
   // does NOT drop you into the editor. From the reader, it opens the editor as usual.
-  const fromMap = !el('graphOverlay').hidden;
+  const fromMap = mapOpen();
+  const { openNewDocModal } = await editorModule();
   openNewDocModal({
     sources: (state.site && state.site.sources) || [],
     exists: (id) => known.has(id) || state.byId.has(id),
@@ -68,6 +125,7 @@ async function openNewDocFlow() {
   });
 }
 
+/** @param {string} id */
 async function startNewDoc(id) {
   const title = titleFromId(id);
   await enterEdit(id, { title, description: '', assumes: [], next: [] },
@@ -77,6 +135,7 @@ async function startNewDoc(id) {
 // Create a minimal document on disk WITHOUT opening the editor (used from the map:
 // the file is written + indexed and its node appears; the user stays on the map).
 // The body is just the meta header + an H1 - the same shape serializeDoc emits.
+/** @param {string} id */
 async function createDocInPlace(id) {
   const title = titleFromId(id);
   const md = '<!--meta\n' + JSON.stringify({ title: title, description: '', assumes: [], next: [] }, null, 2) +
@@ -85,14 +144,14 @@ async function createDocInPlace(id) {
   const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
   let res;
   try {
-    res = await fetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
+    res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
       { method: 'PUT', body: md });
-  } catch (e) { el('live').textContent = 'Create failed: ' + e.message; return; }
-  if (!res.ok) { el('live').textContent = 'Create failed (' + res.status + ')'; return; }
+  } catch (e) { announce('Create failed: ' + e.message); return; }
+  if (!res.ok) { announce('Create failed: ' + await describeFailure(res)); return; }
   await refreshCatalog();                    // server re-indexed on PUT; invalidate the client graph model
   await rerenderTree();                      // new file -> tree changed
-  el('live').textContent = 'Created “' + title + '”.';
-  if (!el('graphOverlay').hidden) buildDocGraph(true, true);   // rebuild the open map so the new node shows (keep view + animate)
+  announce('Created “' + title + '”.');
+  await requestMapRebuild();   // no-op unless the map is open; loads map-view.js only if it is
 }
 
 /**
@@ -101,7 +160,32 @@ async function createDocInPlace(id) {
  */
 async function editExisting(doc) {
   await loadDoc(doc);
+  // A reader who was served a REDACTED copy must not edit it: saving would write
+  // the placeholders over the real sections. The server refuses this too - this
+  // is just a better place to say so than a failed save.
+  const info = await docAccess(doc.id);
+  if (info && info.redactedSections) {
+    await (await editorModule()).confirmDialog({
+      title: 'This page cannot be edited here',
+      message: 'Parts of this page are restricted to groups your account is not in. '
+        + 'Editing it would overwrite the sections you cannot see, so it is read-only for you.',
+      confirmLabel: 'OK', cancelLabel: null
+    });
+    return;
+  }
+  const { parseDoc } = await editorModule();
   const parsed = parseDoc(doc.body || '', doc.meta || {});
+  if (parsed.lostMarkers) {
+    // A restricted-section marker could not be represented as a block, so saving
+    // would delete a permission boundary. Refuse rather than lose it.
+    await (await editorModule()).confirmDialog({
+      title: 'This page cannot be edited here',
+      message: 'It contains a restricted-section marker in a position the visual editor cannot '
+        + 'represent, and saving would remove it. Edit the Markdown file directly instead.',
+      confirmLabel: 'OK', cancelLabel: null
+    });
+    return;
+  }
   parsed.meta.title = doc.title || parsed.meta.title;
   parsed.meta.description = doc.description || parsed.meta.description;
   parsed.meta.assumes = (doc.assumes || []).slice();
@@ -125,13 +209,19 @@ async function enterEdit(id, meta, blocks, isNew) {
   // server graph model the map uses (cached; invalidated after a create/delete/edit).
   /** @type {GraphDocNode[]} */
   const allDocs = (await ensureGraphModel()).docs;
+  const access = await docAccess(id);
+  const { openEditor } = await editorModule();
   editorEl = openEditor({
     docId: id, meta, blocks, isNew,
     sources: (state.site && state.site.sources) || [],
     allDocs: allDocs,
+    knownGroups: (access && access.knownGroups) || [],
+    docAccess: access,
     requirements: requirementList(),
     component: componentFor(id),
-    onSave: (md, newMeta, status) => saveDoc(id, md, isNew, status),
+    // serializeDoc has already folded the edited metadata into `md`, so the
+    // second argument is redundant here - only `status` is wanted after it.
+    onSave: (md, _newMeta, status) => saveDoc(id, md, isNew, status),
     onClose: () => { exitEdit(); app.navigate(state.byId.has(id) ? id : defaultId()); }
   });
   document.querySelector('.app-body').appendChild(editorEl);
@@ -141,9 +231,16 @@ function exitEdit() {
   document.body.classList.remove('is-editing');
   if (editorEl) { editorEl.remove(); editorEl = null; }
 }
+/**
+ * The requirement-id prefix declared for whichever source `id` lives in.
+ * @param {string} id
+ * @returns {string}
+ */
 function componentFor(id) {
   const src = id.split('/')[0];
-  const s = ((state.site && state.site.sources) || []).find(x => x.name === src);
+  // state.site is raw parsed JSON, so `sources` has to be named as what site.json
+  // declares it to be before it can be searched.
+  const s = /** @type {SourceConfig[]} */ ((state.site && state.site.sources) || []).find(x => x.name === src);
   return s ? s.component : '';
 }
 
@@ -159,10 +256,10 @@ async function saveDoc(id, md, wasNew, status) {
   const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
   let res;
   try {
-    res = await fetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
+    res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
       { method: 'PUT', body: md });
   } catch (e) { status.textContent = 'Save failed: ' + e.message; return; }
-  if (!res.ok) { status.textContent = 'Save failed (' + res.status + ')'; return; }
+  if (!res.ok) { status.textContent = 'Save failed: ' + await describeFailure(res); return; }
   status.textContent = 'Saved.';
   const cached = state.byId.get(id); if (cached) cached._loaded = false;   // force a fresh reload of the new body
   await refreshCatalog();
@@ -185,6 +282,7 @@ async function saveDoc(id, md, wasNew, status) {
  */
 async function refreshCatalog(extraIds) {
   invalidateGraphModel();
+  invalidateAccess();   // a write can change the effective ACL of everything downstream
   await buildRequirementIndex(null, state.site.sources);   // refresh the global req index (cheap, server-side)
   (extraIds || []).forEach(id => { const cached = state.byId.get(id); if (cached) cached._loaded = false; });
   if (state.current) {
@@ -196,18 +294,17 @@ async function refreshCatalog(extraIds) {
 // ---- Delete a document (CRUD) ---------------------------------------------
 /**
  * @param {string} id
- * @returns {Promise<{ok: true}|{ok: false, error: string}>}
+ * @returns {Promise<{ok: boolean, error?: string}>} `error` carries a
+ *   describeFailure() sentence whenever ok is false
  */
 async function deleteDocRequest(id) {
   const slash = id.indexOf('/');
   const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
   const url = '/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/');
   try {
-    const res = await fetch(url, { method: 'DELETE' });
+    const res = await apiFetch(url, { method: 'DELETE' });
     if (res.ok) return { ok: true };
-    let msg = 'server returned ' + res.status;
-    try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
-    return { ok: false, error: msg };
+    return { ok: false, error: await describeFailure(res) };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
@@ -222,7 +319,7 @@ async function deleteDocFlow(id, opts) {
   if (!id) return;
   const doc = getDoc(id);
   const title = (doc && doc.title) || titleFromId(id);
-  const confirmed = await confirmDialog({
+  const confirmed = await (await editorModule()).confirmDialog({
     title: 'Delete this document?',
     message: '“' + title + '” (' + id + '.md) will be permanently deleted from disk. This can’t be undone.',
     confirmLabel: 'Delete', danger: true
@@ -231,21 +328,21 @@ async function deleteDocFlow(id, opts) {
   const wasCurrent = !!(state.current && state.current.id === id);
   const r = await deleteDocRequest(id);
   if (!r.ok) {
-    el('live').textContent = 'Delete failed: ' + r.error;
-    await confirmDialog({ title: 'Delete failed', message: r.error, confirmLabel: 'OK', cancelLabel: null });
+    announce('Delete failed: ' + r.error);
+    await (await editorModule()).confirmDialog({ title: 'Delete failed', message: r.error, confirmLabel: 'OK', cancelLabel: null });
     return;
   }
   state.byId.delete(id);
   await refreshCatalog();
   await rerenderTree();   // structure changed
-  el('live').textContent = 'Deleted “' + title + '”.';
+  announce('Deleted “' + title + '”.');
   // If the reading view was showing the deleted doc, move it to a surviving one.
   if (wasCurrent) {
     const next = defaultId();
     if (next && next !== id) app.navigate(next); else app.showError('No documents left.');
   }
   // Refresh an open map in place so the deleted node is gone (keep view + animate).
-  if (opts && opts.rebuildMap && !el('graphOverlay').hidden) buildDocGraph(true, true);
+  if (opts && opts.rebuildMap) await requestMapRebuild();
 }
 
 // Link / unlink a test case and a requirement by editing the requirement id in
@@ -277,6 +374,7 @@ function removeVerifyFromBody(body, testKey, reqId, component) {
   return String(body).replace(/<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->/gi, (m, json) => {
     let meta; try { meta = JSON.parse(json); } catch (e) { return m; }
     if ((meta.test || meta['test-case']) !== testKey) return m;
+    /** @type {string[]} */
     const v = Array.isArray(meta.verifies) ? meta.verifies.map(String) : [];
     // drop any ref that IS or RESOLVES to reqId (verifies may hold short forms).
     const kept = v.filter(ref => ref !== reqId && resolveRequirementRef(ref, component) !== reqId);
@@ -297,13 +395,30 @@ async function writeTestDocBody(t, newBody, oldBody) {
   const source = t.docId.slice(0, slash), rel = t.docId.slice(slash + 1) + '.md';
   let res;
   try {
-    res = await fetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
+    res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
       { method: 'PUT', body: newBody });
   } catch (e) { return false; }
   if (!res.ok) return false;
   await refreshCatalog();
   return true;
 }
+/**
+ * Fetch a document's RAW markdown - the on-disk bytes, meta header included.
+ *
+ * `doc.body` is NOT this: catalog.loadDoc splits the <!--meta--> header off, so
+ * writing doc.body back erases the header - the title, the assumes/next links,
+ * and the access rule along with them.
+ * @param {string} docId
+ * @returns {Promise<string|null>}
+ */
+async function rawDoc(docId) {
+  const slash = docId.indexOf('/');
+  const url = '/docs/' + encodeURIComponent(docId.slice(0, slash)) + '/'
+    + (docId.slice(slash + 1) + '.md').split('/').map(encodeURIComponent).join('/');
+  try { const r = await fetch(url, { cache: 'no-cache', credentials: 'same-origin' }); return r.ok ? await r.text() : null; }
+  catch (e) { return null; }
+}
+
 /**
  * @param {string} testId
  * @param {string} reqId
@@ -312,10 +427,9 @@ async function writeTestDocBody(t, newBody, oldBody) {
 async function linkTestToRequirement(testId, reqId) {
   const t = testList().find(x => x.id === testId);
   if (!t) return false;
-  const doc = state.byId.get(t.docId); if (!doc) return false;
-  try { await loadDoc(doc); } catch (e) {}
-  const body = doc.body || '';
-  return writeTestDocBody(t, addVerifyToBody(body, t.key, reqId), body);
+  const raw = await rawDoc(t.docId);
+  if (raw === null) return false;
+  return writeTestDocBody(t, addVerifyToBody(raw, t.key, reqId), raw);
 }
 /**
  * @param {string} testId
@@ -325,10 +439,9 @@ async function linkTestToRequirement(testId, reqId) {
 async function unlinkTestFromRequirement(testId, reqId) {
   const t = testList().find(x => x.id === testId);
   if (!t) return false;
-  const doc = state.byId.get(t.docId); if (!doc) return false;
-  try { await loadDoc(doc); } catch (e) {}
-  const body = doc.body || '';
-  return writeTestDocBody(t, removeVerifyFromBody(body, t.key, reqId, t.component), body);
+  const raw = await rawDoc(t.docId);
+  if (raw === null) return false;
+  return writeTestDocBody(t, removeVerifyFromBody(raw, t.key, reqId, t.component), raw);
 }
 
 /**
@@ -371,7 +484,7 @@ async function editDocRelation(fromId, toId, field, action) {
   const newBody = editDocMetaBody(raw, field, action === 'add' ? toId : null, action === 'remove' ? toId : null);
   if (newBody === raw) return true;                  // already in the desired state
   let res;
-  try { res = await fetch(url, { method: 'PUT', body: newBody }); }
+  try { res = await apiFetch(url, { method: 'PUT', body: newBody }); }
   catch (e) { return false; }
   if (!res.ok) return false;
   await refreshCatalog([fromId, toId]);   // fromId's file changed; invalidate both ends of the relationship

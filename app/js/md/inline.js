@@ -51,8 +51,6 @@ const RE_HTMLTAG = new RegExp('^(?:' +
   ')');
 const RE_AUTOLINK = /^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\x00-\x20]*)>/;
 const RE_EMAIL = /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)>/;
-const RE_WWW = /^www\.[^\s<]*/;
-const RE_URLAUTO = /^https?:\/\/[^\s<]*/;
 
 /* ---- GFM extended autolinks (bare www / http(s) URLs and emails in text) ---- */
 // Pattern for a URL or email candidate inside a plain-text run.
@@ -154,11 +152,14 @@ function emitTextRun(pieces, run, prevChar) {
  */
 export function parseInlines(src, refs) {
   const s = src;
-  const pieces = [];         // { kind, ... }
-  const delims = [];         // indices into `pieces` that are delimiter runs / brackets
+  /** @type {InlinePiece[]} */
+  const pieces = [];
+  /** @type {number[]} indices into `pieces` that are delimiter runs / brackets */
+  const delims = [];
   let i = 0;
   const n = s.length;
 
+  /** @param {string} t - already HTML-escaped @returns {void} */
   function pushText(t) { pieces.push({ kind: 'text', text: t }); }
 
   while (i < n) {
@@ -209,17 +210,20 @@ export function parseInlines(src, refs) {
     }
     if (c === '*' || c === '_' || c === '~') {
       const run = scanRun(s, i, c);
+      /** @type {InlinePiece} */
       const piece = { kind: 'text', text: c.repeat(run.len), delim: c, canOpen: run.canOpen, canClose: run.canClose, numDelims: run.len, origLen: run.len };
       pieces.push(piece);
       delims.push(pieces.length - 1);
       i += run.len; continue;
     }
     if (c === '[') {
+      /** @type {InlinePiece} */
       const piece = { kind: 'text', text: '[', bracket: '[', pos: pieces.length, srcPos: i };
       pieces.push(piece); delims.push(pieces.length - 1);
       i++; continue;
     }
     if (c === '!' && s[i + 1] === '[') {
+      /** @type {InlinePiece} */
       const piece = { kind: 'text', text: '![', bracket: '![', pos: pieces.length, srcPos: i };
       pieces.push(piece); delims.push(pieces.length - 1);
       i += 2; continue;
@@ -268,6 +272,7 @@ function scanRun(s, i, ch) {
 // as "punctuation" for the emphasis flanking rules, so currency/maths symbols
 // (e.g. $, £, €, +, =, ~) count just like ASCII punctuation.
 const RE_PUNCT = /[\p{P}\p{S}]/u;
+/** @param {string|undefined} c - undefined past either end of the source @returns {boolean} */
 function isPunct(c) { return c !== undefined && RE_PUNCT.test(c); }
 
 /**
@@ -276,13 +281,10 @@ function isPunct(c) { return c !== undefined && RE_PUNCT.test(c); }
  * flanking, `~~` requiring 2 delimiters) and recording the result via wrapRange.
  * @param {InlinePiece[]} pieces
  * @param {number[]} delims - indices into `pieces` for delimiter runs / brackets, in source order
- * @param {number} bottom - the piece index below which openers must not be looked up (bracket-scoped re-entry; -1 for the top-level pass)
+ * @param {number} _bottom - the piece index below which openers must not be looked up (-1 for the top-level pass); not consulted, because resolveEmphasisRange already pre-filters `delims` to the bracket-scoped range
  * @returns {void}
  */
-function resolveEmphasis(pieces, delims, bottom) {
-  const floor = {};
-  const isD = idx => { const p = pieces[idx]; return p && p.delim && !p.used; };
-  let ci = 0;
+function resolveEmphasis(pieces, delims, _bottom) {
   // iterate closers
   const stack = delims.filter(idx => pieces[idx] && pieces[idx].delim);
   let closerPos = 0, guard = 0;
@@ -312,9 +314,6 @@ function resolveEmphasis(pieces, delims, bottom) {
     opener.numDelims -= use; closer.numDelims -= use;
     // wrap pieces between opener and closer
     const oIdx = stack[openerPos], cIdx2 = cIdx;
-    pieces[oIdx].after = pieces[oIdx].after || '';
-    // mark open/close by inserting raw open/close around the range
-    pieces[oIdx].openTags = (pieces[oIdx].openTags || '');
     // Simplest: record wrap boundaries via side arrays
     wrapRange(pieces, oIdx, cIdx2, tag);
     // remove delimiters strictly between (mark used)
@@ -409,7 +408,6 @@ function handleCloseBracket(s, i, pieces, delims, refs) {
     const pk = pieces[k];
     if (pk && pk.delim && !pk.used) pk.used = true;
   }
-  const innerStart = openerPieceIdx;
   opener.kind = 'text'; opener.text = '';
   const url = normalizeUri(decodeInlineText(dest));
   const titleAttr = title !== null ? ' title="' + esc(decodeInlineText(title)) + '"' : '';
@@ -454,20 +452,6 @@ function resolveEmphasisRange(pieces, delims, fromIdx) {
 function collapseRange(pieces, startIdx, rawHtml) {
   for (let k = startIdx + 1; k < pieces.length; k++) pieces[k] = { kind: 'text', text: '' };
   pieces[startIdx] = { kind: 'raw', html: rawHtml };
-}
-/**
- * Concatenate the literal text of pieces[from..] (kind 'text' only, raw HTML
- * pieces are skipped). Note: appears unused elsewhere in this module (see
- * piecesPlainText, which also folds in raw-piece text and is what image alt
- * text actually uses).
- * @param {InlinePiece[]} pieces
- * @param {number} from
- * @returns {string}
- */
-function piecesText(pieces, from) {
-  let t = '';
-  for (let k = from; k < pieces.length; k++) { const p = pieces[k]; if (p.kind === 'text') t += p.text; }
-  return t;
 }
 /**
  * Concatenate the plain-text content of pieces[from..], used to build an

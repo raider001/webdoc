@@ -10,6 +10,7 @@ import { index } from './store.js';
 
 /** @typedef {import('../requirements.js').RequirementEntry} RequirementEntry */
 /** @typedef {import('../requirements.js').TestCaseEntry} TestCaseEntry */
+/** @typedef {import('../requirements.js').TestStep} TestStep */
 
 /**
  * The minimal per-document context extractGroups needs: just enough to compose
@@ -75,6 +76,7 @@ function metaBlockRe() {
  *   '-' (safe for use as an element id)
  */
 export function cssSafe(id) { return String(id).replace(/[^A-Za-z0-9_-]/g, '-'); }
+/** @param {string|null} raw - a comma-separated reference list, or any falsy value @returns {string[]} */
 function splitRefs(raw) { return raw ? String(raw).split(',').map(s => s.trim()).filter(Boolean) : []; }
 
 /**
@@ -88,6 +90,7 @@ function splitRefs(raw) { return raw ? String(raw).split(',').map(s => s.trim())
  * @returns {[number, number][]} start/end index pairs
  */
 function fencedRanges(body) {
+  /** @type {[number, number][]} */
   const ranges = [];
   let offset = 0, open = null;
   for (const line of String(body).split('\n')) {
@@ -146,6 +149,7 @@ function parseTable(text) {
   const rows = [];
   for (let r = 2; r < lines.length; r++) { // lines[1] is the |---| delimiter
     const cells = splitRow(lines[r]);
+    /** @type {Object<string, string>} */
     const rec = {};
     header.forEach((h, i) => { rec[h] = (cells[i] || '').trim(); });
     rows.push(rec);
@@ -231,11 +235,13 @@ function extractReqGroup(meta, table, doc, component) {
   else if (!meta) error = 'requirement-group metadata is not valid JSON';
   else if (!group) error = 'requirement-group name is missing';
 
+  /** @type {ReqGroupBlock} */
   const g = { kind: 'req', group: group || '(unnamed)', component: component || '?', rows: [], error: error };
   for (const row of table.rows) {
     const no = pick(row, ['requirement-no', 'req-no', 'no', 'requirement', '#']);
     if (!no) continue;
     const id = ((component && group) ? 'R_' + component + '_' + group + '_' + no : 'R_?_' + no).toUpperCase();
+    /** @type {RequirementEntry} */
     const rec = {
       id: id, docId: doc.id, component: component, group: group, no: no,
       description: pick(row, ['description', 'desc']),
@@ -268,9 +274,12 @@ function extractTestCase(meta, table, doc, component) {
   // Steps are structured data in the meta header (a custom block, NOT a markdown
   // table), so each action / expected can hold arbitrary markdown - pipes,
   // backslashes, multiple lines. Older docs kept them in a table; still read those.
+  /** @type {TestStep[]} */
   let steps = [];
   if (Array.isArray(meta && meta.steps)) {
-    steps = meta.steps.map(s => ({
+    // Straight out of the meta JSON, so a step is whatever the author wrote -
+    // hence the loose element type and the alias hunt below.
+    steps = /** @type {Object<string, *>[]} */ (meta.steps).map(s => ({
       action: (s && s.action) || '',
       expected: (s && (s.expected || s['expected-response'] || s.response)) || ''
     })).filter(s => s.action || s.expected);
@@ -284,6 +293,7 @@ function extractTestCase(meta, table, doc, component) {
   }
   const verifiesRaw = Array.isArray(meta && meta.verifies) ? meta.verifies.map(String)
                     : splitRefs(meta && (meta.verifies || meta.verify || ''));
+  /** @type {TestCaseEntry} */
   const rec = {
     id: id, docId: doc.id, component: component, key: key || '',
     name: (meta && meta.name) || key || id,

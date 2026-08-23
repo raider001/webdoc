@@ -8,8 +8,9 @@ WebDocs is two cooperating halves that share almost no responsibility. A tiny
 Python server *serves* documents and hands them to the browser as files. The
 browser application *renders* them. Nothing on the server side ever transforms
 Markdown; nothing on the client side ever touches the filesystem. Keeping that
-line sharp is what lets the whole thing stay static, dependency-free, and easy to
-reason about.
+line sharp is what lets the whole thing stay static, easy to reason about, and
+almost free of dependencies — the one it does carry is described at the end of
+this page.
 
 ## The rendering pipeline
 
@@ -115,13 +116,31 @@ Because discovery is just "list the files as JSON", the server stays a thin
 stdlib script. See [Configuration](Docs/reference/config) for the `config.json`
 fields and how a source maps a name and component onto a folder.
 
-## The zero-dependency principle
+## The dependency principle
 
-There is no framework and no third-party runtime code anywhere in the browser
-application. The parser, sanitizer, highlighters, the optional block-renderer
-plugin system, map renderer, search index, and theming layer are all
-hand-written vanilla JavaScript. `serve.py` uses only the
-Python standard library. The single development dependency, Playwright, exists
-purely to drive the automated tests and never ships to a reader. This is a
-constraint, not an accident: it keeps the tool auditable, portable, and free of
-the supply chain that a documentation reader has no reason to carry.
+The browser application carries exactly one piece of third-party code: a compiled
+Svelte 5 runtime, which the interactive chrome — the drawer, the header controls,
+the edit controls, the map mode selector, the coverage panels — was moved onto
+after hand-wiring DOM updates across those views became the largest single source
+of the reader's state bugs. Nothing else came with it. The parser, sanitizer,
+highlighters, the optional block-renderer plugin system, map renderer, search
+client, WYSIWYG editor, and theming layer are all still hand-written vanilla
+JavaScript, and no library replaced any of them.
+
+That runtime is compiled in rather than fetched. `app/build/islands.js` — around
+142 kB raw, 40 kB gzipped, built from the components in `app/svelte/` — is
+**committed to the repository**, so a clean clone runs on a Python interpreter
+and nothing else: no Node.js, no `npm install`, no network. `npm run build` is a
+step for someone changing the UI, not for anyone authoring a document, reading
+one, or running the server. Both halves of that arrangement are held in place by
+the test suite, which fails if the committed bundle drifts from its sources or if
+the package manifest's runtime `dependencies` object stops being empty; see
+[the system requirements](Docs/requirements/system) for the rows those tests
+verify.
+
+`serve.py` keeps the original rule outright: the Python standard library, with no
+package to install. Playwright, driven from Python, exists purely to run the
+automated tests and never ships to a reader. This is a constraint, not an
+accident — it keeps the tool auditable, portable, and free of the supply chain
+that a documentation reader has no reason to carry — and the single exception
+above was made once, deliberately, rather than by drift.

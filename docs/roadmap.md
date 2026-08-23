@@ -9,12 +9,14 @@
 
 # Development Roadmap
 
-WebDocs was built in ten stages, each adding a self-contained capability on top
-of the one before. This is not a dated timeline — it is a record of the *stages*
-in which features became available, so you can tell which layer any given
-behaviour belongs to. Every stage held to the same rule: zero third-party
-runtime dependencies — the sole exception being the optional, bring-your-own
-diagram library introduced in the final stage.
+WebDocs was built in twelve stages, each adding a self-contained capability on
+top of the one before. This is not a dated timeline — it is a record of the
+*stages* in which features became available, so you can tell which layer any
+given behaviour belongs to. Stages 1 to 11 held to the same rule: zero
+third-party runtime dependencies, the one exception being the optional,
+bring-your-own diagram library of stage 10, which a checkout does not carry
+unless you put it there. Stage 12 is where that rule was deliberately relaxed,
+once, and its entry says what was given up and what was kept.
 
 ## Stage 1 — Foundation
 
@@ -123,6 +125,55 @@ The one place the core opens the door to an outside library.
   zero-third-party-runtime core — the diagram library is loaded only if present,
   and the block falls back to its source code if it is absent.
 
+## Stage 11 — Accounts & access control
+
+Turning the library from open to private, without changing what it is when you
+leave it open.
+
+- Sign-in, registration and sessions, all on the Python standard library:
+  PBKDF2-HMAC-SHA256 password hashing, in-memory session tokens, per-account and
+  per-address rate limiting, and CSRF protection on every write.
+- Access groups declared in `config.json`; membership managed in an
+  administrator panel, and a per-account panel for changing your own password.
+- Per-document access rules authored in the document's own `<!--meta-->` header,
+  so a permission travels with its page through git.
+- Recursive propagation of a rule down the **Recommended next** chain, so locking
+  a chapter's entry point locks the chapter.
+- Section-level rules, withheld by the server before the file is sent.
+- Locked (visible on the map, body withheld) versus hidden (indistinguishable
+  from a page that does not exist).
+- Access groups shown on the map as per-node colour bands, with a legend that
+  dims what a given group can see.
+- Off by default: with no `auth` block the server behaves exactly as it did
+  before this stage existed.
+
+## Stage 12 — The Svelte UI shell
+
+The one place the rule about third-party runtime code was relaxed on purpose.
+
+- The interactive chrome — the drawer, the header controls, the edit controls,
+  the map mode selector, the coverage panels — moved from hand-wired DOM updates
+  onto Svelte 5 components, mounted as islands into the same static shell.
+- The compiled bundle, `app/build/islands.js`, is **committed to the
+  repository**, so a clean clone still runs on `python serve.py` alone: no
+  Node.js, no `npm install`, no network. A test fails if that bundle ever drifts
+  from the sources it is built from.
+- Every npm package in the repository is build-time development tooling. The
+  package manifest's runtime `dependencies` object is empty, and another test
+  keeps it that way.
+- Nothing else was replaced. The CommonMark engine, the sanitizer, the
+  highlighters, the canvas map and the WYSIWYG editor are all still the
+  hand-written implementations of stages 2 through 9, and `serve.py` is still
+  the Python standard library and nothing more.
+- What was given up: the browser now carries a compiled framework runtime it did
+  not carry before. What was bought: the reader's interactive state is declared
+  in one place per view instead of being maintained by hand across a dozen update
+  paths, which is where most of its behaviour bugs had been coming from. The
+  requirement that used to say "zero third-party runtime dependencies" was
+  amended to say what is now true, and three testable rows were added beneath it
+  rather than quietly widened — see
+  [System Requirements](Docs/requirements/system).
+
 ## Feature summary
 
 | Feature | Stage |
@@ -166,3 +217,12 @@ The one place the core opens the door to an outside library.
 | WYSIWYG editor + new-doc + PUT save | 9 |
 | Requirement/test-case editor widgets | 9 |
 | Renderer plugins + Mermaid diagrams | 10 |
+| Sign-in, registration, sessions | 11 |
+| Access groups + administrator panel | 11 |
+| Per-document read/modify rules | 11 |
+| Recursive locking down Recommended next | 11 |
+| Section-level restrictions | 11 |
+| Locked vs hidden documents | 11 |
+| Access groups on the map | 11 |
+| Svelte 5 island UI shell | 12 |
+| Committed browser bundle (Node-free clone) | 12 |

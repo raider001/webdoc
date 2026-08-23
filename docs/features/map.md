@@ -1,5 +1,5 @@
 <!--meta
-{ "title": "The Map View", "description": "A pannable, zoomable graph of how documents and requirements relate.", "assumes": ["Docs/overview"], "next": [] }
+{ "title": "The Map View", "description": "A pannable, zoomable graph of how documents and requirements relate.", "assumes": ["Docs/overview"], "next": ["Docs/features/access-control"] }
 -->
 
 # The Map View

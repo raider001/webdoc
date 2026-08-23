@@ -54,6 +54,7 @@ import { elem } from './dom.js';
  * @property {string} label
  */
 
+/** @type {Map<string, RendererEntry>} */
 const registry = new Map(); // lang -> RendererEntry
 
 /**
@@ -82,7 +83,7 @@ export function registeredBlockLangs() {
 
 /**
  * The "language-xxx" hint the sanitizer preserved on the <code> element.
- * @param {HTMLElement} code
+ * @param {Element} code
  * @returns {string|null}
  */
 function langOf(code) {
@@ -175,11 +176,16 @@ export function renderBlocks(root, ctx = {}) {
       return;
     }
 
-    if (out && typeof out.then === 'function') {
-      out.then(node => { fill(host, node); scrubRendered(host); })
-         .catch(e => renderFallback(host, lang, entry.label, source, e));
+    // Thenable is duck-typed rather than `instanceof Promise` so a renderer that
+    // hands back its own library's promise still settles. A typeof test on a
+    // property proves nothing to the checker about the union it came from, so
+    // each branch restates the half the test just established.
+    if (out && typeof (/** @type {Promise<Node>} */ (out)).then === 'function') {
+      /** @type {Promise<Node>} */ (out)
+        .then(node => { fill(host, node); scrubRendered(host); })
+        .catch(e => renderFallback(host, lang, entry.label, source, e));
     } else {
-      fill(host, out);
+      fill(host, /** @type {Node|void} */ (out));
       scrubRendered(host);
     }
   });

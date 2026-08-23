@@ -2,6 +2,7 @@
 // These primitives are used across the editor's canvas, widgets and panels, so
 // they live in one dependency-free place.
 import { elem } from '../dom.js';
+import { auth } from '../auth.js';
 
 /**
  * @param {Element} icon - an icons.js node, e.g. closeIcon()
@@ -45,7 +46,7 @@ export function labeledTextarea(label, value, onChange) {
   return elem('div', 'meta-field', labelEl(label), textarea);
 }
 
-/** One entry in the "+ Add block" / insert menus. @typedef {{type: string, label: string}} BlockMenuItem */
+/** One entry in the "+ Add block" / insert menus. `acl` marks an entry only shown to accounts that may change access rules. @typedef {{type: string, label: string, acl?: boolean}} BlockMenuItem */
 /** The list of block types offered by the "+ Add block" / insert menus. @type {BlockMenuItem[]} */
 const BLOCK_MENU = [
   { type: 'paragraph', label: 'Text' },
@@ -58,9 +59,14 @@ const BLOCK_MENU = [
   { type: 'image', label: 'Image' },
   { type: 'hr', label: 'Divider' },
   { type: 'requirement', label: 'Requirement group' },
-  { type: 'testcase', label: 'Test case' }
+  { type: 'testcase', label: 'Test case' },
+  // Offered only to accounts that may change access rules (see openBlockMenu):
+  // inserting one is a permission change, and the server refuses the save from
+  // anyone else - so showing it to everyone would just be a trap.
+  { type: 'access', label: 'Restricted section', acl: true }
 ];
 
+/** The one open block menu, or null - opening a second closes the first. @type {HTMLElement|null} */
 let menuEl = null;
 /**
  * @param {Element} anchor - the menu is positioned below this element
@@ -69,7 +75,8 @@ let menuEl = null;
 export function openBlockMenu(anchor, pick) {
   if (menuEl) menuEl.remove();
   menuEl = elem('div', 'blk-menu',
-    BLOCK_MENU.map(item => elem('button', { onClick: () => { pick(item.type); close(); } }, item.label)));
+    BLOCK_MENU.filter(item => !item.acl || auth.canEditAccess)
+      .map(item => elem('button', { onClick: () => { pick(item.type); close(); } }, item.label)));
   document.body.appendChild(menuEl);
 
   const rect = anchor.getBoundingClientRect();
@@ -79,6 +86,6 @@ export function openBlockMenu(anchor, pick) {
   function close() { if (menuEl) { menuEl.remove(); menuEl = null; } }
   // Close on the next mousedown outside the menu.
   setTimeout(() => document.addEventListener('mousedown', function off(e) {
-    if (menuEl && !menuEl.contains(e.target)) { close(); document.removeEventListener('mousedown', off); }
+    if (menuEl && !menuEl.contains(/** @type {Node} */ (e.target))) { close(); document.removeEventListener('mousedown', off); }
   }), 0);
 }

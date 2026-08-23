@@ -46,33 +46,12 @@ const MINI_W = 168, MINI_H = 120, MINI_PAD = 6;
  */
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 /**
- * Format a number to (at most) 3 decimal places, for SVG path data.
+ * Format a number to (at most) 3 decimal places. Used for the canvas font
+ * strings render.js builds per zoom level, where the full float would churn the
+ * font cache for no visible difference.
  * @param {number} n
  * @returns {string}
  */
 function fmt(n) { return String(Math.round(n * 1000) / 1000); }
-/**
- * @param {string} id
- * @returns {string} `id` escaped for use in a CSS selector
- */
-function cssEscape(id) {
-  return (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/([^\w-])/g, '\\$1');
-}
 
-// Bezier path through a chain of points (horizontal tangents).
-/**
- * @param {{x: number, y: number}[]} points
- * @returns {string} an SVG path `d` attribute, or '' if fewer than 2 points
- */
-function edgePath(points) {
-  if (points.length < 2) return '';
-  let d = 'M ' + fmt(points[0].x) + ' ' + fmt(points[0].y);
-  for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1], b = points[i];
-    const dx = (b.x - a.x) * 0.5;
-    d += ' C ' + fmt(a.x + dx) + ' ' + fmt(a.y) + ' ' + fmt(b.x - dx) + ' ' + fmt(b.y) + ' ' + fmt(b.x) + ' ' + fmt(b.y);
-  }
-  return d;
-}
-
-export { LO, MIN_K, MAX_K, FIT_MIN_K, DRAG_THRESHOLD, MINI_W, MINI_H, MINI_PAD, clamp, fmt, cssEscape, edgePath };
+export { LO, MIN_K, MAX_K, FIT_MIN_K, DRAG_THRESHOLD, MINI_W, MINI_H, MINI_PAD, clamp, fmt };

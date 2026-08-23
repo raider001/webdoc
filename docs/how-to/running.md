@@ -5,9 +5,10 @@
 # Get WebDocs Running
 
 WebDocs is served by a small, dependency-free server that hands the browser the
-reader app and your Markdown as-is. There is no compile step and no bundler —
-the engine parses and renders each document in the browser at read time. To
-stand up a set of your own:
+reader app and your Markdown as-is. Nothing you write has to be compiled — the
+engine parses and renders each document in the browser at read time — and the
+reader app itself is committed to the repository already built, so standing a set
+up needs a Python interpreter and nothing more. To stand up a set of your own:
 
 - Tell the server where your documents live. Each source folder is declared in
   `config.json` with a name and a component id; the name becomes the first

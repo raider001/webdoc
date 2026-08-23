@@ -7,11 +7,12 @@
 WebDocs has exactly one configuration file, `config.json`, and one program that
 reads it, `serve.py`. Between them they decide what the site is called, which
 folders of Markdown make up the library, what component each folder belongs to,
-which document opens first, and the default theme. There is no build step: the
-server is a thin static file host that also maintains a lightweight search index
-(standard-library `sqlite3`), and everything about *how* the documents render is
-decided in the browser. See [Performance & Scale](Docs/reference/performance) for
-that index and the library sizes it supports.
+which document opens first, and the default theme. Neither needs a build step:
+the server is a thin static file host that also maintains a lightweight search
+index (standard-library `sqlite3`), and everything about *how* the documents
+render is decided in the browser. See
+[Performance & Scale](Docs/reference/performance) for that index and the library
+sizes it supports.
 
 This page is the reference for both files. It assumes you know how to write a
 document; if not, start with the [Authoring Reference](Docs/reference/authoring).
@@ -42,6 +43,7 @@ The fields:
 | `defaultDoc` | string | — | The document id opened when no deep-link is present. |
 | `theme` | string | `"auto"` | Passed through into `/site.json` but **not currently read** by the browser, so it has no effect on the rendered theme. The live theme is `light` or `dark`, chosen from `localStorage["wd-theme"]` (the reader's remembered choice) or, when nothing is stored, the OS `prefers-color-scheme`. |
 | `plugins` | string[] | `[]` | Renderer plugins to enable for rich fenced blocks such as diagrams. Each name loads `app/thirdpartyrenderer/<name>.js`. See [Diagrams & renderer plugins](Docs/features/diagrams). Optional. |
+| `auth` | object | — | Accounts and access groups. Absent, or `"enabled": false`, leaves the server open exactly as it was before accounts existed. See [Accounts and access groups](#accounts-and-access-groups). |
 
 Automated test results are configured **per source** with a `testResults` field
 on each `sources` entry (see [Sources and components](#sources-and-components)); a
@@ -127,6 +129,88 @@ reads and writes each source's sidecar through a small JSON API:
 
 Both `.results.xml` and `.webdoc-tests.json` are dotfiles, so neither shows up in
 the directory listings the browser builds from a source folder.
+
+## Accounts and access groups
+
+The optional `auth` block turns the library from open to private. **It is off
+unless you switch it on**: with no `auth` key, or `"enabled": false`, there is no
+sign-in, no CSRF token and no filtering, and anonymous callers read *and* write
+everything — the behaviour every earlier version had. For the model these
+settings drive, see [Accounts & Access
+Control](Docs/features/access-control); for the steps, [Set up
+accounts](Docs/how-to/accounts).
+
+```json
+"auth": {
+  "enabled": true,
+  "allowRegistration": true,
+  "requireApproval": false,
+  "publicRead": false,
+  "adminGroups": ["admins"],
+  "aclGroups": null,
+  "writeGroups": null,
+  "defaultGroups": [],
+  "propagateVia": ["next"],
+  "groups": {
+    "staff": { "label": "Staff", "color": "#0ea5e9", "description": "Everyone on the team" },
+    "ops":   { "label": "Operations" },
+    "admins":{ "label": "Administrators" }
+  },
+  "usersFile": ".webdoc-auth/users.json",
+  "cookieSecure": false,
+  "trustedProxies": []
+}
+```
+
+### Who may do what
+
+| Field | Type | Default | Meaning |
+| ----- | ---- | ------- | ------- |
+| `enabled` | bool | `false` | Master switch. Everything else is inert while this is false. |
+| `allowRegistration` | bool | `true` | Whether visitors may create their own account. |
+| `requireApproval` | bool | `false` | Registered accounts start disabled until an administrator enables them. |
+| `firstUserIsAdmin` | bool | `true` | The first account on an empty server becomes an administrator. Without it a fresh install has nobody who can grant anything. |
+| `publicRead` | bool | `false` | Unrestricted documents are readable **without** signing in. Restricted ones still are not. |
+| `adminGroups` | string[] | `["admins"]` | Membership of any of these makes an account an administrator. |
+| `aclGroups` | string[] \| null | `null` | Who may create or change an access rule. `null` means the admin groups. This is what stops an author widening their own page's permissions. |
+| `writeGroups` | string[] \| null | `null` | Who may modify a document that carries no explicit `write` rule. `null` means any signed-in account. |
+| `defaultGroups` | string[] | `[]` | Groups a newly registered account joins. |
+| `anonymousGroups` | string[] | `[]` | Groups a *signed-out* visitor is treated as holding. Only meaningful with `publicRead`. |
+| `propagateVia` | string[] | `["next"]` | Which metadata relations an access rule is inherited along. Add `"assumes"` to follow prerequisite edges too — a rule then travels from a prerequisite to the pages that assume it, i.e. in reading order, the same direction `next` runs. |
+
+### Declaring groups
+
+`groups` maps a group name to its presentation. The name — the map key — is what
+you write in a document's `access` rule and what an administrator ticks in the
+accounts panel; it is matched case-insensitively.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `label` | string | The human-readable name shown in the app. Defaults to the group name. |
+| `description` | string | Optional note, shown to administrators. |
+| `color` | string | A `#rgb` or `#rrggbb` colour for this group's band on the map. Anything that is not a literal hex colour is ignored — the value reaches the browser and is used in CSS. Omit it and a stable colour is derived from the name. |
+
+A group that is not declared here cannot be assigned to an account, so a typo in
+the accounts panel cannot silently create a group nothing grants.
+
+### Sessions, passwords and cookies
+
+| Field | Type | Default | Meaning |
+| ----- | ---- | ------- | ------- |
+| `usersFile` | string | `.webdoc-auth/users.json` | The account file, relative to the project root. The server refuses to start if it sits inside a served source folder. Keep it out of version control. |
+| `sessionIdleMinutes` | int | `480` | Idle timeout. |
+| `sessionMaxHours` | int | `720` | Absolute session lifetime. |
+| `passwordMinLength` | int | `10` | Minimum password length (never below 8). |
+| `pbkdf2Iterations` | int | `210000` | PBKDF2-HMAC-SHA256 cost. Higher is stronger and slower; each sign-in pays it once. |
+| `maxLoginFailures` | int | `8` | Failed sign-ins per account before a lockout. The per-address limit is six times this, so one person's typing cannot lock out a whole office. |
+| `lockoutSeconds` | int | `300` | How long a lockout lasts. |
+| `cookieSecure` | bool | `false` | Marks the session cookie `Secure`. **Set this true whenever the site is served over HTTPS.** |
+| `trustedProxies` | string[] | `[]` | Peers whose `X-Forwarded-For` may be believed, for rate limiting. Empty means never — trusting it from anyone would let a caller mint a new identity per guess. |
+| `securityHeaders` | bool | `true` | Send `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`. |
+| `contentSecurityPolicy` | string | — | Replace the generated CSP wholesale. The default is same-origin only, with a hash for the theme-resolving inline script, so it needs no `unsafe-inline`. |
+
+Sessions live in the server's memory and are never written to disk, so a restart
+signs everyone out — the safe default for a documentation server.
 
 ## The server
 

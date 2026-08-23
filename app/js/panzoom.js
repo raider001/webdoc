@@ -51,6 +51,7 @@ export function createPanZoom(content, opts = {}) {
   viewport.appendChild(stage);
 
   let x = 0, y = 0, k = 1;
+  /** @param {number} v - a candidate scale, clamped into the configured zoom range */
   const clamp = (v) => Math.max(minK, Math.min(maxK, v));
   const apply = () => { stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')'; };
   const midX = () => viewport.clientWidth / 2;
@@ -72,7 +73,7 @@ export function createPanZoom(content, opts = {}) {
    */
   function naturalSize() {
     const svg = (content.tagName && content.tagName.toLowerCase() === 'svg')
-      ? content : content.querySelector('svg');
+      ? /** @type {SVGSVGElement} */ (content) : content.querySelector('svg');
     const vb = svg && svg.viewBox && svg.viewBox.baseVal;
     if (vb && vb.width) return { w: vb.width, h: vb.height };
     const r = (svg || content).getBoundingClientRect();
@@ -131,7 +132,7 @@ export function createPanZoom(content, opts = {}) {
   // --- panning (pointer drag) ---
   let dragging = false, px = 0, py = 0;
   viewport.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.pz-controls')) return;
+    if (/** @type {Element} */ (e.target).closest('.pz-controls')) return;
     dragging = true; px = e.clientX; py = e.clientY;
     viewport.classList.add('is-panning');
     try { viewport.setPointerCapture(e.pointerId); } catch (_) {}

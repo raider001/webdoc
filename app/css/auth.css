@@ -1,0 +1,230 @@
+/* auth.css - accounts, access groups and restricted content.
+   ---------------------------------------------------------------------------
+   Every colour here comes from a theme token in app.css. The one exception is
+   the per-group hue, which is DERIVED from the group's name at runtime (see
+   auth.js groupColor) using the --group-sat / --group-light tokens below - so
+   the palette envelope stays theme-controlled while the hue stays stable per
+   group without anyone configuring one.
+
+   OWNERSHIP, after Phase 5 moved the account screens to Svelte. This file is
+   ANNOTATED, NOT SPLIT: the rules below are marked with the component (or the
+   vanilla module) that produces the DOM they style, and each block says whether
+   it may travel with that component if this file is ever broken up. Three groups
+   are explicitly GLOBAL and must not travel:
+
+     - the :root tokens, which auth.js reads back through getComputedStyle;
+     - .doc-lock / .is-locked, which style the Phase 3 drawer tree and search;
+     - .graph-groups* and .access-*, which style DOM that graph/chrome.js and the
+       editor still build by hand, and both are out of scope for the migration.
+   --------------------------------------------------------------------------- */
+
+/* GLOBAL, NOT THE ACCOUNT SCREENS'. auth.js's groupColor() reads --group-sat and
+   --group-light off document.documentElement with getComputedStyle - that is the
+   whole mechanism by which a derived group hue stays theme-controlled - so these
+   have to be declared on :root and nowhere else. --locked-bg is used by
+   .restricted-section below. */
+:root {
+  /* The envelope group colours are generated inside. */
+  --group-sat: 58%;
+  --group-light: 44%;
+  --locked-bg: color-mix(in srgb, var(--faint) 10%, transparent);
+}
+[data-theme="dark"] {
+  --group-sat: 62%;
+  --group-light: 62%;
+}
+
+/* ---- the sign-in wall --------------------------------------------------- */
+/* Rendered by app/svelte/SignInWall.svelte (host: a body-level .wd-mounted div).
+   .modal-field is borrowed from editor.css, which is why the form rule below
+   reaches for it rather than declaring a field style of its own. */
+.auth-wall {
+  position: fixed; inset: 0; z-index: 200;
+  display: grid; place-items: center; padding: 24px;
+  background: var(--bg);
+  background-image: radial-gradient(1200px 600px at 50% -10%, var(--accent-soft), transparent 70%);
+}
+.auth-card {
+  width: min(420px, 100%);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  box-shadow: var(--shadow); padding: 30px 28px 24px;
+}
+.auth-brand {
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  background: var(--accent-grad); -webkit-background-clip: text; background-clip: text;
+  color: transparent; font-weight: 700; margin-bottom: 14px;
+}
+.auth-title { margin: 0 0 6px; font-size: 21px; }
+.auth-sub { margin: 0 0 20px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.auth-form .modal-field { margin-bottom: 14px; }
+.auth-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.auth-wall .auth-actions .btn { min-width: 120px; height: 36px; }
+.auth-switch { margin: 16px 0 0; text-align: center; }
+.auth-link {
+  background: none; border: 0; padding: 0; font: inherit; font-size: 13px;
+  color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.auth-hint { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.auth-status { margin: 4px 0 10px; font-size: 13px; min-height: 18px; color: var(--muted); }
+.auth-status.is-error { color: #dc2626; }
+[data-theme="dark"] .auth-status.is-error { color: #f87171; }
+.auth-status.is-ok { color: var(--accent); }
+.auth-muted { color: var(--muted); font-size: 13px; }
+.auth-label {
+  margin: 14px 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); opacity: .9;
+}
+.auth-rule { border: 0; border-top: 1px solid var(--border); margin: 20px 0 4px; }
+
+/* ---- header account button --------------------------------------------- */
+/* .account-initial is rendered by app/svelte/AccountButton.svelte, INSIDE
+   #accountBtn; the button element itself is declared in app/index.html and its
+   hidden/title/aria-label are still written by auth-ui.js. */
+.account-initial {
+  display: grid; place-items: center; width: 100%; height: 100%;
+  font-size: 12px; font-weight: 700; letter-spacing: .02em;
+}
+#accountBtn[hidden] { display: none; }
+
+/* ---- account + admin panels -------------------------------------------- */
+/* app/svelte/Modal.svelte (.modal-wide), AccountPanel.svelte (.auth-who,
+   .auth-pw), AdminPanel.svelte (.admin-list) and UserRow.svelte (.admin-row and
+   below). .auth-badge is shared by the account panel and the row. */
+.modal-wide { width: min(720px, 94vw); }
+.auth-panel-body { max-height: min(60vh, 560px); overflow: auto; padding-right: 4px; }
+.auth-who { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.auth-who-name { font-size: 16px; font-weight: 600; }
+.auth-who-id { color: var(--muted); font-size: 13px; font-family: ui-monospace, monospace; }
+.auth-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); font-weight: 600;
+}
+.auth-badge.is-warn { background: color-mix(in srgb, #dc2626 16%, transparent); color: #dc2626; }
+.auth-pw { margin-top: 4px; }
+.btn-sm { height: 26px; padding: 0 10px; font-size: 12px; }
+
+.admin-list { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+.admin-row {
+  display: grid; gap: 8px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.admin-row.is-disabled { opacity: .62; }
+.admin-who { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.admin-name { font-weight: 600; font-size: 14px; }
+.admin-id { color: var(--muted); font-size: 12.5px; font-family: ui-monospace, monospace; }
+.admin-groups { display: flex; flex-wrap: wrap; gap: 10px; }
+.admin-group, .admin-flag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--muted); cursor: pointer;
+}
+.admin-flags { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.admin-flags .btn { margin-left: auto; }
+
+/* ---- group chips -------------------------------------------------------- */
+/* .group-chip / .group-dot are rendered by app/svelte/GroupChip.svelte. The
+   CONTAINER, .group-chips, is not: the account panel, the restricted screens,
+   the editor's access panel and its section markers all build one, and the last
+   two are hand-written DOM in app/js/editor/. So .group-chips is shared and
+   .group-chip travels with the component. */
+.group-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.group-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 12.5px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+}
+.group-chip.is-small { font-size: 11.5px; padding: 1px 8px 1px 6px; }
+.group-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.group-chip.is-small .group-dot { width: 7px; height: 7px; }
+
+/* ---- restricted page ---------------------------------------------------- */
+/* app/svelte/RestrictedPage.svelte, mounted into #content in place of the
+   article. */
+.restricted-page {
+  max-width: 520px; margin: 12vh auto; text-align: center;
+  padding: 34px 28px; border: 1px solid var(--border); border-radius: 16px;
+  background: var(--surface); box-shadow: var(--shadow-sm);
+}
+.restricted-icon { color: var(--faint); font-size: 34px; line-height: 1; margin-bottom: 10px; }
+.restricted-title { margin: 0 0 8px; font-size: 20px; }
+.restricted-sub { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.restricted-groups { margin: 0 0 18px; }
+.restricted-groups .group-chips { justify-content: center; }
+.restricted-id {
+  font-family: ui-monospace, monospace; font-size: 12px; color: var(--faint);
+  margin: 0 0 14px; word-break: break-all;
+}
+.restricted-page .auth-actions { justify-content: center; }
+
+/* ---- restricted section (in-document) ---------------------------------- */
+/* app/svelte/RestrictedSection.svelte, mounted inside the article in place of
+   the server's ```wd-restricted placeholder. */
+.restricted-section {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 20px 0; padding: 14px 16px;
+  border: 1px dashed var(--border-strong); border-radius: 12px;
+  background: var(--locked-bg);
+}
+.restricted-section-icon { color: var(--faint); font-size: 18px; line-height: 1; margin-top: 1px; }
+.restricted-section-body { min-width: 0; }
+.restricted-section-title { margin: 0 0 4px; font-weight: 600; font-size: 14px; }
+.restricted-section-sub { margin: 0 0 8px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+/* ---- locked entries in the tree and search ----------------------------- */
+/* GLOBAL, NOT THE ACCOUNT SCREENS'. This styles Phase 3's DocLink.svelte and
+   SearchHit.svelte - the drawer tree and the all-documents results. If this file
+   is ever split, these three rules go with the TREE, not with the account
+   screens. (Noted as a to-do in DocLink.svelte since Phase 3; this is the
+   answer.) */
+.tree a.doc-link.is-locked, .search-hit.is-locked { color: var(--muted); }
+.doc-lock {
+  display: inline-flex; align-items: center; color: var(--faint);
+  font-size: 11px; margin-left: auto; padding-left: 6px; flex: none;
+}
+.tree a.doc-link { display: flex; align-items: center; gap: 6px; }
+
+/* ---- the map's group legend -------------------------------------------- */
+/* GLOBAL, NOT THE ACCOUNT SCREENS'. app/js/graph/chrome.js builds this legend by
+   hand and is not part of the Svelte migration; it borrows .group-dot above but
+   owns everything else here. */
+/* The map's bottom-LEFT corner is already a stack (edge legend, edit-connections
+   toggle, its hint), so the group legend takes the right side: above the zoom
+   controls, below the minimap, clear of all of it. */
+.graph-groups {
+  position: absolute; right: 12px; bottom: 128px; z-index: 5;
+  max-width: 210px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+  max-height: 38vh; overflow: auto;
+  padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border); backdrop-filter: blur(6px);
+}
+.graph-groups-title {
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); opacity: .9; margin: 0 0 2px;
+}
+.graph-group-item {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: none; border: 0; padding: 2px 2px; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--text);
+}
+.graph-group-item .group-dot { width: 9px; height: 9px; }
+.graph-group-item.is-off { opacity: .42; text-decoration: line-through; }
+.graph-groups-note { font-size: 11.5px; color: var(--muted); margin: 2px 0 0; }
+
+/* ---- the editor's access panel ----------------------------------------- */
+/* GLOBAL, NOT THE ACCOUNT SCREENS'. app/js/editor/panels.js and
+   app/js/editor/widgets.js build this DOM by hand; the editor is permanently out
+   of scope for the migration. The only thing it takes from the bundle is a group
+   chip, through auth-ui.js's groupChip() adapter. */
+.access-panel { display: grid; gap: 10px; }
+.access-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.access-pick {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--muted); cursor: pointer;
+}
+.access-note {
+  font-size: 12.5px; color: var(--muted); line-height: 1.5;
+  padding: 8px 10px; border-radius: 8px; background: var(--surface-2);
+}
+.access-note.is-locked { color: var(--text); }
+.access-readonly { opacity: .7; pointer-events: none; }

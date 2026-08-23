@@ -9,6 +9,8 @@
 import { LO, clamp, fmt } from './util.js';
 
 /** @typedef {import('../graph.js').GraphContext} GraphContext */
+/** @typedef {import('../graph.js').GraphBox} GraphBox */
+/** @typedef {import('../graph.js').GraphEdgeItem} GraphEdgeItem */
 /** @typedef {import('./layout.js').ModelGraphNode} ModelGraphNode */
 /** @typedef {import('./layout.js').LayoutNode} LayoutNode */
 /** @typedef {import('../coverage.js').CoverageStatus} CoverageStatus */
@@ -66,7 +68,8 @@ export function positionExternal(g) {
   const layout = g.layout;
   if (g.externalNodes.length) {
     const EXT_W = 172, EXT_H = 46, DROP = 44;
-    const srcOf = new Map();
+    /** @type {Map<string, string[]>} */
+    const srcOf = new Map();                    // external id -> the doc ids that link to it
     for (const pl of g.pageLinks) {
       if (String(pl.to).indexOf('ext:') === 0) {
         if (!srcOf.has(pl.to)) srcOf.set(pl.to, []);
@@ -74,6 +77,11 @@ export function positionExternal(g) {
       }
     }
     const PAD = 16;
+    /**
+     * @param {number} x - candidate top-left for an EXT_W x EXT_H box
+     * @param {number} y
+     * @returns {boolean} whether it would overlap a doc node or an already-placed external box
+     */
     const hits = (x, y) => {
       for (const [, n] of layout.nodes)
         if (x < n.x + n.w + PAD && x + EXT_W + PAD > n.x && y < n.y + n.h + PAD && y + EXT_H + PAD > n.y) return true;
@@ -82,6 +90,12 @@ export function positionExternal(g) {
       return false;
     };
     const STEP = 20, MAXR = 120;
+    /**
+     * @param {number} ax - the wanted top-left (under the linking doc)
+     * @param {number} ay
+     * @returns {{x: number, y: number}} the wanted spot if free, else the first
+     *   free spot on an expanding ring around it, else a slot below everything
+     */
     const nearestFree = (ax, ay) => {
       if (ax >= 0 && ay >= 0 && !hits(ax, ay)) return { x: ax, y: ay };
       for (let r = 1; r <= MAXR; r++) {
@@ -121,6 +135,11 @@ export function positionExternal(g) {
  */
 function readColors(el) {
   const cs = getComputedStyle(el);
+  /**
+   * @param {string} n - CSS custom property name
+   * @param {string} fb - used when the property is unset (canvas has no cascade to fall back on)
+   * @returns {string}
+   */
   const v = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
   return {
     nodeBg: v('--graph-node-bg', '#fff'),
@@ -146,6 +165,9 @@ function readColors(el) {
     }
   };
 }
+// Keyed by GraphEdgeItem.cat, which is a plain string off the edge item - so this
+// is a lookup table, not a fixed-key record.
+/** @type {Object<string, number[]>} */
 const CAT_DASH = { prereq: [], recnext: [6, 5], trace: [2, 3], pagelink: [5, 3] };
 /**
  * @param {Object<string,*>} colors - readColors() result
@@ -156,7 +178,7 @@ function catColor(colors, cat) { return cat === 'recnext' ? colors.recnext : cat
 
 // Point on node n's border in the direction of (tx,ty) - for straight overlay edges.
 /**
- * @param {LayoutNode} n
+ * @param {GraphBox} n
  * @param {number} tx
  * @param {number} ty
  * @returns {{x: number, y: number}}
@@ -226,8 +248,6 @@ export function renderScene(g) {
 
   buildGrid(g);
   buildEdges(g);
-
-  const NODE_W = (g.opts.nodeW || (g.layout.nodes.size ? firstNode(g).w : LO.nodeW)) || LO.nodeW;
 
   // --- resize backing store to the container * devicePixelRatio ---
   g.resize = function () {
@@ -317,7 +337,18 @@ function firstNode(g) { for (const n of g.layout.nodes.values()) return n; retur
 function buildGrid(g) {
   const nodeW = (g.layout.nodes.size ? firstNode(g).w : LO.nodeW);
   const cell = Math.max(256, Math.round(nodeW * 1.5));
+  /** @type {Map<string, string[]>} */
   const map = new Map();
+  /**
+   * File `id` under every grid cell its box overlaps (a box wider than a cell
+   * spans several, so culling never misses a partially-visible node).
+   * @param {string} id
+   * @param {number} x
+   * @param {number} y
+   * @param {number} w
+   * @param {number} h
+   * @returns {void}
+   */
   const add = (id, x, y, w, h) => {
     const c0 = Math.floor(x / cell), c1 = Math.floor((x + w) / cell);
     const r0 = Math.floor(y / cell), r1 = Math.floor((y + h) / cell);
@@ -343,8 +374,19 @@ function buildGrid(g) {
  * @returns {void}
  */
 function buildEdges(g) {
+  /** @type {GraphEdgeItem[]} */
   const items = [];
-  const byNode = new Map();
+  /** @type {Map<string, number[]>} */
+  const byNode = new Map();                       // node id -> INDICES into `items`
+  /**
+   * @param {string} from
+   * @param {string} to
+   * @param {string} type
+   * @param {string} cat - the visibility key looked up in g.vis
+   * @param {{x: number, y: number}[]} pts - world-space polyline
+   * @param {string} head - which end carries the arrowhead, 'start' or 'end'
+   * @returns {void}
+   */
   const push = (from, to, type, cat, pts, head) => {
     let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
     for (const p of pts) { if (p.x < minx) minx = p.x; if (p.x > maxx) maxx = p.x; if (p.y < miny) miny = p.y; if (p.y > maxy) maxy = p.y; }
@@ -394,6 +436,13 @@ function segDist(px, py, ax, ay, bx, by) {
 // FLIP-style relayout tween: interpolate node positions from `from` to their laid-out
 // spot over `dur` ms (replaces the old CSS-transform animation, DOM-only).
 /**
+ * One node in flight during a relayout tween: where it sat before (ox,oy) and
+ * where the new layout puts it (nx,ny), both in world coords. Only nodes that
+ * actually moved get an entry.
+ * @typedef {{id: string, ox: number, oy: number, nx: number, ny: number}} TweenItem
+ */
+
+/**
  * FLIP-style relayout tween: interpolate node positions from `from` to their
  * newly laid-out spot over ~620ms (replaces the old CSS-transform animation).
  * @param {GraphContext} g
@@ -401,6 +450,7 @@ function segDist(px, py, ax, ay, bx, by) {
  * @returns {void}
  */
 export function startTween(g, from) {
+  /** @type {TweenItem[]} */
   const items = [];
   g.layout.nodes.forEach((n, id) => { const o = from.get(id); if (o && (Math.abs(o.x - n.x) > 0.5 || Math.abs(o.y - n.y) > 0.5)) items.push({ id: id, ox: o.x, oy: o.y, nx: n.x, ny: n.y }); });
   if (g.extPos) g.extPos.forEach((p, id) => { const o = from.get(id); if (o && (Math.abs(o.x - p.x) > 0.5 || Math.abs(o.y - p.y) > 0.5)) items.push({ id: id, ox: o.x, oy: o.y, nx: p.x, ny: p.y }); });
@@ -451,8 +501,13 @@ function draw(g) {
   // viewport world-rect (with a small margin)
   const m = nodeW;
   const vx0 = (-tx) / k - m, vy0 = (-ty) / k - m, vx1 = (cw - tx) / k + m, vy1 = (ch - ty) / k + m;
-  const px = (x) => x * k + tx, py = (y) => y * k + ty;
-  const posOf = (id) => { const n = g.nodePos(id); if (!n) return null; if (off) { const d = off.get(id); if (d) return { x: n.x + d.dx, y: n.y + d.dy, w: n.w, h: n.h, cx: n.cx + d.dx, cy: n.cy + d.dy }; } return n; };
+  const px = (/** @type {number} */ x) => x * k + tx, py = (/** @type {number} */ y) => y * k + ty;
+  /**
+   * @param {string} id
+   * @returns {GraphBox|null} the node's world box with the in-flight tween
+   *   offset already folded in, so the draw loop never has to know about it
+   */
+  const posOf = (id) => { const n = g.nodePos(id); if (!n) return null; if (off) { const d = off.get(id); if (d) return { x: n.x + d.dx, y: n.y + d.dy, w: n.w, h: n.h }; } return n; };
   const vis = g.vis;
 
   // ---- Pass A: cull nodes to the viewport (collect; draw in pass C so edges sit under) ----
@@ -588,13 +643,17 @@ function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
   const isHover = id === g.hoverId;
   const missing = meta && meta.missing;
   const near = tier === 2;
+  const fade = dimmed(g, meta);
+  if (fade) ctx.globalAlpha = 0.32;
   const r = near ? Math.min(10 * g.k, Math.min(sw, sh) / 2) : 0;
 
   // ---- FAR: a tiny filled square, no box/text. fillRect is much cheaper than an
   // arc, which matters when the whole 50k-node graph is on screen at fit. ----
   if (tier === 0) {
-    ctx.fillStyle = isCurrent ? C.currentRing : st ? statusColor(C, st.status) : missing ? C.missingBorder : isExt ? C.pagelink : C.muted;
-    ctx.globalAlpha = missing ? 0.55 : 0.9;
+    const farGroup = groupTint(g, meta);
+    ctx.fillStyle = isCurrent ? C.currentRing : st ? statusColor(C, st.status)
+      : missing ? C.missingBorder : isExt ? C.pagelink : (farGroup || C.muted);
+    ctx.globalAlpha = missing ? 0.55 : (dimmed(g, meta) ? 0.35 : 0.9);
     const s = Math.max(1.5, Math.min(sw, sh) * 0.9);
     ctx.fillRect(sx + sw / 2 - s / 2, sy + sh / 2 - s / 2, s, s);
     ctx.globalAlpha = 1;
@@ -618,11 +677,12 @@ function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
   ctx.setLineDash(missing || isExt ? [4, 3] : (st && st.status === 'untested' ? [4, 3] : []));
   if (near) { roundRect(ctx, sx, sy, sw, sh, r); ctx.stroke(); } else ctx.strokeRect(sx, sy, sw, sh);
   ctx.setLineDash([]);
+  drawAccess(g, ctx, meta, sx, sy, sw, sh, tier);
 
   // ---- text (near only; mid draws title only if wide enough) ----
-  if (tier === 1 && sw < 66) return;
+  if (tier === 1 && sw < 66) { if (fade) ctx.globalAlpha = 1; return; }
   const pad = 10, innerW = sw - pad * 2;
-  if (innerW < 24) return;
+  if (innerW < 24) { if (fade) ctx.globalAlpha = 1; return; }
   const title = isExt ? (g.externalNodes.find(e => e.id === id) || {}).url || id : (meta ? meta.title : id);
   ctx.fillStyle = missing ? C.missingText : C.text;
   ctx.font = '600 ' + fmt(13.5 * g.k) + 'px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -645,6 +705,76 @@ function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
     const dtxt = missing ? 'missing' : meta.desc;
     const dLines = wrapLines(ctx, dtxt, innerW, 2);
     for (const ln of dLines) { ctx.fillText(ln, sx + pad, cy + 6 * g.k); cy += 13 * g.k; }
+  }
+  if (fade) ctx.globalAlpha = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Access-group decoration
+// ---------------------------------------------------------------------------
+/**
+ * True when every group that can read this node is toggled off in the map's
+ * group legend. Unrestricted nodes are never dimmed - "no groups" is not a group
+ * you can switch off.
+ * @param {GraphContext} g
+ * @param {ModelGraphNode} meta
+ * @returns {boolean}
+ */
+function dimmed(g, meta) {
+  const groups = (meta && meta.groups) || [];
+  if (!groups.length || !g.hiddenGroups || !g.hiddenGroups.size) return false;
+  return groups.every(name => g.hiddenGroups.has(name));
+}
+
+/**
+ * The first read group's colour, used as a node's identity tint at far zoom.
+ * @param {GraphContext} g
+ * @param {ModelGraphNode} meta
+ * @returns {string|null}
+ */
+function groupTint(g, meta) {
+  const groups = (meta && meta.groups) || [];
+  return groups.length && g.groupColor ? g.groupColor(groups[0]) : null;
+}
+
+/**
+ * Draw a node's access decoration: a stacked colour band down its left edge -
+ * one stripe per group that can read it - and a small lock in the top-right
+ * corner when this reader may see the page exists but not open it.
+ *
+ * The band is drawn INSIDE the border and clipped to the node, so it reads as
+ * part of the node rather than as another edge.
+ * @param {GraphContext} g
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {ModelGraphNode} meta
+ * @param {number} sx
+ * @param {number} sy
+ * @param {number} sw
+ * @param {number} sh
+ * @param {number} tier
+ * @returns {void}
+ */
+function drawAccess(g, ctx, meta, sx, sy, sw, sh, tier) {
+  const groups = (meta && meta.groups) || [];
+  if (!groups.length && !(meta && meta.locked)) return;
+  const bandW = Math.max(2.5, 4 * g.k);
+  if (groups.length && g.groupColor) {
+    const each = sh / groups.length;
+    for (let i = 0; i < groups.length; i++) {
+      ctx.fillStyle = g.groupColor(groups[i]);
+      ctx.fillRect(sx + 0.5, sy + i * each + 0.5, bandW, Math.max(1, each - 1));
+    }
+  }
+  if (meta && meta.locked && tier >= 1) {
+    const size = Math.max(6, 9 * g.k);
+    const x = sx + sw - size - Math.max(3, 5 * g.k), y = sy + Math.max(3, 5 * g.k);
+    ctx.strokeStyle = g.colors.muted;
+    ctx.fillStyle = g.colors.muted;
+    ctx.lineWidth = Math.max(1, 1.2 * g.k);
+    ctx.beginPath();                                  // shackle
+    ctx.arc(x + size / 2, y + size * 0.38, size * 0.26, Math.PI, 0);
+    ctx.stroke();
+    ctx.fillRect(x + size * 0.16, y + size * 0.38, size * 0.68, size * 0.5);   // body
   }
 }
 
@@ -685,7 +815,7 @@ function roundRect(ctx, x, y, w, h, r) {
 function mix(a, b, w) {
   const pa = hex(a), pb = hex(b);
   if (!pa || !pb) return a;
-  const c = (i) => Math.round(pa[i] * w + pb[i] * (1 - w));
+  const c = (/** @type {number} */ i) => Math.round(pa[i] * w + pb[i] * (1 - w));
   return 'rgb(' + c(0) + ',' + c(1) + ',' + c(2) + ')';
 }
 /**

@@ -3,9 +3,27 @@
 // of DOM .closest(), since nodes are no longer DOM elements. Pointer gesture
 // bookkeeping stays local; only the live transform (g.tx/g.ty/g.k), draw-state and
 // the view/edit callbacks are read off the shared context `g`. Sets g.destroy.
+//
+// NOTHING HERE TOUCHES CHROME. The zoom buttons, the search box and the minimap
+// frame used to be wired from this file, which meant the engine could only run
+// inside DOM it had built itself. They are the chrome's own listeners now (see
+// graph/chrome-view.js); the one exception is the click on the minimap SURFACE,
+// because turning a point on it into a pan is transform maths, not chrome.
 import { DRAG_THRESHOLD, MINI_W, MINI_H } from './util.js';
 
 /** @typedef {import('../graph.js').GraphContext} GraphContext */
+
+/**
+ * One live addEventListener registration, remembered so g.destroy can unwind
+ * every one of them. The handler is stored under the erased EventListener
+ * shape: on() already proved the event-name/handler pairing at registration,
+ * and removal only needs the same function identity back.
+ * @typedef {Object} ListenerReg
+ * @property {EventTarget} target
+ * @property {string} type
+ * @property {EventListener} fn
+ * @property {boolean|AddEventListenerOptions} [opt]
+ */
 
 /**
  * Convert client (screen) pixel coordinates to world coordinates under the
@@ -21,19 +39,24 @@ function toWorld(g, clientX, clientY) {
 }
 
 /**
- * Wire up pointer/wheel/keyboard interaction on the canvas + chrome buttons,
- * fit/restore the initial view, and set g.destroy.
+ * Wire up pointer/wheel/keyboard interaction on the canvas, fit/restore the
+ * initial view, and set g.destroy.
  * @param {GraphContext} g
  * @returns {void}
  */
 export function wireInteractions(g) {
+  /** @type {ListenerReg[]} */
   const listeners = [];
   /**
    * addEventListener + remember the registration so g.destroy can remove
    * every listener later.
+   * Generic over the event name so each handler gets its real event type -
+   * 'pointerdown' hands back a PointerEvent with .clientX, 'wheel' a WheelEvent
+   * with .deltaY. Typing fn as (e: Event) made every one of those a silent any.
+   * @template {keyof GlobalEventHandlersEventMap} K
    * @param {EventTarget} target
-   * @param {string} type
-   * @param {(e: Event) => void} fn
+   * @param {K} type
+   * @param {(e: GlobalEventHandlersEventMap[K]) => void} fn
    * @param {boolean|AddEventListenerOptions} [opt]
    * @returns {void}
    */
@@ -42,7 +65,13 @@ export function wireInteractions(g) {
   const svgEl = g.svgEl;   // the <canvas> (kept the name so the CSS/pan code is unchanged)
 
   let dragging = false, moved = false, sx = 0, sy = 0, sTx = 0, sTy = 0;
-  let lastClickId = null, lastClickTime = 0, downNodeId = null, downExtUrl = null, downEdge = null;
+  // What the pointer went DOWN on, so pointerup can tell a click from a pan and
+  // a double click from two singles.
+  /** @type {string|null} */ let lastClickId = null;
+  let lastClickTime = 0;
+  /** @type {string|null} */ let downNodeId = null;
+  /** @type {string|null} */ let downExtUrl = null;
+  /** @type {{from: string, to: string, type: string}|null} */ let downEdge = null;
 
   on(svgEl, 'pointerdown', function (e) {
     if (e.button !== 0) return;
@@ -83,13 +112,13 @@ export function wireInteractions(g) {
     if (!moved && g.editMode) {
       // Edit mode: click node A then node B to connect; click a line to select it.
       if (downNodeId) {
-        if (!g.pendingSource) { g.markSource(downNodeId); g.clearSelectedEdge(); g.updateHint(); }
-        else if (g.pendingSource === downNodeId) { g.clearPending(); g.updateHint(); }
+        if (!g.pendingSource) { g.markSource(downNodeId); g.clearSelectedEdge(); }
+        else if (g.pendingSource === downNodeId) { g.clearPending(); }
         else { const s = g.pendingSource, t = downNodeId; g.clearPending(); if (g.onConnect) g.onConnect(s, t, g.activeConnector); }
       } else if (downEdge) {
         g.selectEdge(downEdge.from, downEdge.to, downEdge.type);
       } else {
-        g.clearPending(); g.clearSelectedEdge(); g.updateHint();
+        g.clearPending(); g.clearSelectedEdge();
       }
       downNodeId = null; downExtUrl = null; downEdge = null;
       return;
@@ -124,17 +153,18 @@ export function wireInteractions(g) {
   // pending connect / selection (capture phase, so it pre-empts the overlay close).
   on(document, 'keydown', function (e) {
     if (!g.editMode) return;
-    const tag = (e.target && e.target.tagName) || '';
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;
+    const tgt = /** @type {HTMLElement} */ (e.target);
+    const tag = (tgt && tgt.tagName) || '';
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (tgt && tgt.isContentEditable)) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (g.selectedEdge && g.onDisconnect) {
         e.preventDefault(); e.stopPropagation();   // consume it here - edit mode's Delete is for links, never the document handler below
-        const se = g.selectedEdge; g.clearSelectedEdge(); g.updateHint();
+        const se = g.selectedEdge; g.clearSelectedEdge();
         g.onDisconnect(se.from, se.to, se.type);
       }
     } else if (e.key === 'Escape' && (g.pendingSource || g.selectedEdge)) {
       e.preventDefault(); e.stopPropagation();
-      g.clearPending(); g.clearSelectedEdge(); g.updateHint();
+      g.clearPending(); g.clearSelectedEdge();
     }
   }, true);
 
@@ -144,23 +174,18 @@ export function wireInteractions(g) {
     if (e.key !== 'Delete') return;
     if (!g.onDelete) return;
     if (g.editMode) return;   // edit-connections mode: Delete only ever removes a selected link, never a document
-    const tag = (e.target && e.target.tagName) || '';
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;
+    const tgt = /** @type {HTMLElement} */ (e.target);
+    const tag = (tgt && tgt.tagName) || '';
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (tgt && tgt.isContentEditable)) return;
     const id = g.currentId;
     if (!id || !g.layout.nodes.has(id)) return;   // need a real, laid-out node selected
     e.preventDefault();
     g.onDelete(id);
   });
 
-  on(g.btnIn, 'click', function () { g.zoomCenter(1.25); });
-  on(g.btnOut, 'click', function () { g.zoomCenter(1 / 1.25); });
-  on(g.btnFit, 'click', function () { g.fit(); });
-
-  on(g.searchInput, 'input', function () { g.search(g.searchInput.value); });
-  on(g.searchInput, 'keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); g.search(g.searchInput.value); } });
-
-  // Click the minimap to recentre.
-  on(g.miniCanvas, 'click', function (e) {
+  // Click the minimap to recentre. The surface is the caller's element, so it is
+  // optional - view.js draws a minimap only when there is one to draw on.
+  if (g.miniCanvas) on(g.miniCanvas, 'click', function (e) {
     try {
       const rect = g.miniCanvas.getBoundingClientRect();
       const mx = (e.clientX - rect.left) * (MINI_W / rect.width);
@@ -202,7 +227,10 @@ export function wireInteractions(g) {
     if (g.themeObs) { try { g.themeObs.disconnect(); } catch (err) {} g.themeObs = null; }
     if (g.drawStop) g.drawStop();
     if (g.flashTimer) { clearTimeout(g.flashTimer); g.flashTimer = null; }
-    g.container.textContent = '';
-    g.container.classList.remove('graph-root');
+    // Remove EXACTLY the one element this engine created. `container.textContent
+    // = ''` used to stand here, which deleted every sibling too - fine while the
+    // engine had built all of them, fatal the moment anything else owns DOM in
+    // the same host.
+    if (g.canvas && g.canvas.parentNode) g.canvas.parentNode.removeChild(g.canvas);
   };
 }

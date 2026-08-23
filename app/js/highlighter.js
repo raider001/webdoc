@@ -77,7 +77,9 @@ function rebuild(code, toks) {
 export function highlightWithin(root) {
   if (!root || typeof root.querySelectorAll !== 'function') return;
   let codes;
-  try { codes = root.querySelectorAll('pre > code'); }
+  // A `pre > code` match is always an HTML element; the selector is too compound
+  // for the checker to work that out for itself.
+  try { codes = /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll('pre > code')); }
   catch (e) { return; }
   codes.forEach(code => {
     try {

@@ -3,13 +3,8 @@
 // service registry; main.js does all the wiring. Keeping these here (instead of in
 // main.js) lets a feature module import them WITHOUT importing main.js - so the
 // modules never form an import cycle with the bootstrap.
-import { computeCoverage, computeTestStatus } from './coverage.js';
 
 /** @typedef {import('./catalog.js').Doc} Doc */
-/** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
-/** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
-/** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
-/** @typedef {import('./coverage.js').CoverageResults} CoverageResults */
 
 /**
  * The single shared app state (discovery result + current doc + scroll-spy
@@ -51,9 +46,9 @@ export function defaultId() {
   return (state.site && state.site.defaultDoc) || (state.docs[0] && state.docs[0].id);
 }
 /**
- * Build a doc stub {id, source, rel, url, name} from an id, matching
- * catalog.makeDoc, so the router can loadDoc it on demand (a 404 is the
- * not-found signal).
+ * Build a doc stub {id, source, rel, url, name} from an id, following the
+ * /docs/<source>/<rel>.md URL convention the server serves, so the router can
+ * loadDoc it on demand (a 404 is the not-found signal).
  * @param {string} id
  * @returns {Doc|null}
  */
@@ -74,21 +69,6 @@ export function getDoc(id) {
   let d = state.byId.get(id);
   if (!d && id) { d = docFromId(id); if (d) state.byId.set(id, d); }
   return d;
-}
-
-/**
- * Combined status map: requirement rollups (which now include their Verified
- * By tests) plus each test case's own pass/fail. Keys never collide (T
- * namespace).
- * @param {RequirementEntry[]} reqs
- * @param {TestCaseEntry[]} tests
- * @param {CoverageResults} results
- * @returns {Map<string, CoverageStatus>}
- */
-export function combinedStatus(reqs, tests, results) {
-  const m = computeCoverage(reqs, results);
-  computeTestStatus(tests, results).forEach((v, k) => m.set(k, v));
-  return m;
 }
 
 /**
@@ -126,6 +106,11 @@ export function isoDate(d) { return d.getFullYear() + '-' + String(d.getMonth() 
  * @property {(testId: string, reqId: string) => Promise<boolean>} [unlinkTestFromRequirement] - remove a test's `verifies` connection
  * @property {(fromId: string, toId: string, field: ('assumes'|'next'), action: ('add'|'remove')) => Promise<boolean>} [editDocRelation] - edit a doc's assumes/next list
  * @property {(id: string, opts?: {rebuildMap?: boolean}) => Promise<void>} [deleteDocFlow] - confirm + delete a document
+ * @property {(docId: string) => Promise<void>} [updateDocActions] - show/hide Edit and Delete for what this account may do to this document
+ * @property {(id: string|null) => void} [setTreeActive] - highlight and reveal a document in the drawer tree
+ * @property {() => void} [invalidateTree] - refetch the drawer tree's open levels, preserving expansion
+ * @property {(docId: string, toc: import('./numbering.js').TocEntry[], assumes: string[], next: string[]) => void} [setDocChrome] - push breadcrumb/TOC/footer into the island store and flush
+ * @property {(host: Element, destroy: () => void) => void} [registerMounted] - record a component mounted inside the article so the next navigation destroys it
  */
 /** @type {AppRegistry} */
 export const app = {};

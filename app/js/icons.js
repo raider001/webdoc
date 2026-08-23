@@ -45,3 +45,7 @@ export const arrowDownIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fil
 export const circleIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>`.firstElementChild;
 
 export const mapIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6H16"/><path d="M7 8L11 16"/><path d="M17 8L13 16"/><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/></svg>`.firstElementChild;
+
+export const lockIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7A4 4 0 0 1 16 7V10"/><circle cx="12" cy="15.5" r="1.2" fill="currentColor" stroke="none"/></svg>`.firstElementChild;
+
+export const userIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21C4 17.13 7.58 14 12 14C16.42 14 20 17.13 20 21"/></svg>`.firstElementChild;

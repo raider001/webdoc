@@ -69,7 +69,9 @@ export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirement
  * @property {string} key
  * @property {string} name
  * @property {TestStep[]} steps
- * @property {string[]} verifiesRaw
+ * @property {string[]} [verifiesRaw] - the ids exactly as authored. Optional
+ *   because testList()'s projection deliberately drops it and carries only the
+ *   resolved `verifies`.
  * @property {string[]} verifies
  */
 
@@ -88,16 +90,18 @@ export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirement
 // browser fetches a compact list; per-document block STRUCTURE (for the in-document
 // tables) is parsed on demand from the displayed doc only (prepareDocGroups).
 /**
- * @param {Doc[]|null} docs - not read by this function; every current call site
+ * @param {Doc[]|null} _docs - not read by this function; every current call site
  *   passes null now that the index comes from the server instead of being built
- *   by scanning docs (kept for call-site/API stability)
+ *   by scanning docs. Underscored, not dropped: the exported signature is the
+ *   API third-party renderer plugins import.
  * @param {SourceConfig[]} sources
  * @returns {Promise<void>}
  */
-export async function buildRequirementIndex(docs, sources) {
+export async function buildRequirementIndex(_docs, sources) {
   index.clear();
   testIndex.clear();
   groupsByDoc.clear();
+  /** @type {Object<string, string>} */
   const cbs = {};
   for (const s of sources || []) cbs[s.name] = s.component;
   setComponentBySource(cbs);
@@ -182,6 +186,7 @@ export function testList() {
 }
 
 // Deep-link: scroll a requirement or test into view and flash it.
+/** @param {string} prefix - the element-id prefix, 'req-' or 'test-' @param {string} id @returns {void} */
 function reveal(prefix, id) {
   if (!id) return;
   const el = document.getElementById(prefix + cssSafe(id));
@@ -196,17 +201,24 @@ export function revealRequirement(reqId) { reveal('req-', reqId); }
 export function revealTest(testId) { reveal('test-', testId); }
 
 // Pull ?req=<id> / ?test=<id> out of a hash-route query string.
-/** @param {string} query @returns {string|null} */
-export function reqFromQuery(query) {
-  if (!query) return null;
-  const m = /(?:^|[?&])req=([^&]+)/.exec(query);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-/** @param {string} query @returns {string|null} */
-export function testFromQuery(query) {
-  if (!query) return null;
-  const m = /(?:^|[?&])test=([^&]+)/.exec(query);
-  return m ? decodeURIComponent(m[1]) : null;
+//
+// The query deliberately lives INSIDE the hash (#/<docId>?req=<ID>) rather than
+// in location.search. It belongs to the route, and the route is the hash: a real
+// search string would survive every later hash navigation, so moving to another
+// document would carry a stale ?req= naming a requirement that is not on the new
+// page. Assigning location.search also RELOADS the document, which would turn
+// every requirement link into a full app restart.
+//
+// Two hand-rolled regexes did this until Phase 2. URLSearchParams already knows
+// about separators, repeated keys and percent-decoding, and unlike two
+// near-identical patterns it cannot drift out of agreement with itself.
+/**
+ * @param {string} query - the part of the hash route after '?', without the '?'
+ * @returns {{req: string|null, test: string|null}}
+ */
+export function routeParams(query) {
+  const p = new URLSearchParams(query || '');
+  return { req: p.get('req'), test: p.get('test') };
 }
 
 /**

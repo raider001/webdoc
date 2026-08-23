@@ -4,7 +4,9 @@
 import { elem, append } from '../dom.js';
 import { smallBtn } from './ui.js';
 import { editable } from './richtext.js';
-import { plusIcon, minusIcon, closeIcon } from '../icons.js';
+import { plusIcon, minusIcon, closeIcon, lockIcon } from '../icons.js';
+import { auth } from '../auth.js';
+import { groupChip, destroyGroupChip } from '../auth-ui.js';
 
 /** @param {string} text @returns {HTMLElement} */
 function span(text) { return elem('span', null, text); }
@@ -154,6 +156,7 @@ export function testCaseWidget(b, getReqs, comp) {
   const preview = elem('div', 'blk-tc-preview');
   const table = elem('div');
   function updatePreview() { preview.textContent = 'id: T_' + (comp || '{component}') + '_' + (b.key || 'key'); }
+  /** @param {string} text @param {HTMLElement} node - the field the label wraps */
   function labeled(text, node) { append(box, elem('label', 'blk-reqgroup', text + ' ', node)); }
 
   labeled('Test key', input(b.key, v => { b.key = v.trim(); updatePreview(); }, 'e.g. login-valid'));
@@ -208,7 +211,10 @@ export function testCaseWidget(b, getReqs, comp) {
 /* ---- reference picker: chips + a live autocomplete dropdown (id + description).
    Generic over the target list (requirements) so both a requirement's Trace-To and
    a test case's Verifies reuse it. ---- */
-let acDrop = null, acItems = [], acActive = -1;
+// One dropdown for the whole page (there is only ever one focused field), so it
+// is module state rather than per-field: acItems is the currently offered slice,
+// acActive the keyboard cursor into it (-1 = nothing highlighted).
+let acDrop = /** @type {HTMLElement|null} */ (null), acItems = /** @type {ReqRef[]} */ ([]), acActive = -1;
 function closeAc() { if (acDrop) acDrop.hidden = true; acItems = []; acActive = -1; }
 
 /**
@@ -245,6 +251,7 @@ function refsField(initial, onChange, getReqs, placeholder) {
       append(chips, elem('span', 'req-chip' + (known.has(ref) ? '' : ' req-chip-unknown'), ref, remove));
     });
   }
+  /** @param {string} v - a typed or picked reference id */
   function addRef(v) {
     v = (v || '').trim().replace(/,+$/, '');
     if (v && !refs.includes(v)) { refs.push(v); drawChips(); sync(); }
@@ -260,7 +267,7 @@ function refsField(initial, onChange, getReqs, placeholder) {
     if (acActive >= acItems.length) acActive = acItems.length - 1;
     acDrop.textContent = '';
     acItems.forEach((match, idx) => append(acDrop,
-      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: e => { e.preventDefault(); addRef(match.id); closeAc(); } },
+      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (/** @type {MouseEvent} */ e) => { e.preventDefault(); addRef(match.id); closeAc(); } },
         elem('span', 'ac-id', match.id),
         elem('span', 'ac-desc', match.description || ''))));
     const rect = input.getBoundingClientRect();
@@ -282,4 +289,64 @@ function refsField(initial, onChange, getReqs, placeholder) {
 
   drawChips();
   return wrap;
+}
+
+/* ---- access-marker blocks ---- */
+/**
+ * The editor view of an `<!--access start-->` / `<!--access end-->` marker.
+ *
+ * These are markers, not containers: the protected content is whatever blocks
+ * sit BETWEEN them. Rendering them as visible bookends is what stops an author
+ * moving or deleting one by accident - and what stops the editor silently
+ * dropping a permission boundary it could not represent.
+ *
+ * The group pickers are disabled for anyone without access-management rights.
+ * That is courtesy, not enforcement: the server compares the access rules in an
+ * incoming save against the ones on disk and refuses the write either way.
+ *
+ * @param {{type: string, read?: string[], label?: string}} b
+ * @param {string[]} [knownGroups] - groups declared in config.json, offered as checkboxes
+ * @returns {HTMLElement}
+ */
+export function accessMarker(b, knownGroups) {
+  if (b.type === 'access-end') {
+    return elem('div', 'access-marker is-end',
+      lockIcon(), elem('span', 'access-marker-label', 'End of restricted section'));
+  }
+  b.read = Array.isArray(b.read) ? b.read : [];
+  const editableAcl = auth.canEditAccess;
+
+  const chips = elem('div', 'group-chips');
+  const drawChips = () => {
+    chips.querySelectorAll('.wd-mounted').forEach(destroyGroupChip);   // chips are islands now; clearing alone would not stop them
+    chips.textContent = '';
+    append(chips, b.read.length
+      ? b.read.map(g => groupChip(g, { small: true }))
+      : elem('span', 'auth-muted', 'No group selected - only administrators will see this section.'));
+  };
+
+  const picker = elem('div', 'access-row');
+  for (const name of (knownGroups || [])) {
+    const box = elem('input', { type: 'checkbox', checked: b.read.indexOf(name) !== -1, disabled: !editableAcl });
+    box.addEventListener('change', () => {
+      const set = new Set(b.read);
+      if (box.checked) set.add(name); else set.delete(name);
+      b.read = [...set].sort();
+      drawChips();
+    });
+    append(picker, elem('label', 'access-pick', box, groupChip(name, { small: true })));
+  }
+
+  const label = elem('input', {
+    class: 'blk-lang', placeholder: 'Section label (optional)', value: b.label || '', disabled: !editableAcl,
+    onInput: (/** @type {Event} */ e) => { b.label = /** @type {HTMLInputElement} */ (e.target).value; }
+  });
+
+  drawChips();
+  return elem('div', 'access-marker is-start' + (editableAcl ? '' : ' access-readonly'),
+    elem('div', 'access-marker-head', lockIcon(),
+      elem('span', 'access-marker-label', 'Restricted section - readable by'), chips),
+    picker, label,
+    !editableAcl && elem('p', 'access-note',
+      'You can edit the text inside this section, but only an account with access-management rights can change who may read it.'));
 }

@@ -15,7 +15,7 @@ import { elem, append } from './dom.js';
 import { arrowUpIcon, arrowDownIcon, plusIcon, closeIcon } from './icons.js';
 import { serializeDoc, htmlToMd, newBlock } from './editor/serialize.js';
 import { editable, listItem, attachInlineToolbar, setLinkDocs, setLinkSearch, setImageResolver } from './editor/richtext.js';
-import { tableEditor, requirementWidget, testCaseWidget } from './editor/widgets.js';
+import { tableEditor, requirementWidget, testCaseWidget, accessMarker } from './editor/widgets.js';
 import { metadataPanel } from './editor/panels.js';
 import { iconBtn, labeledInput, openBlockMenu } from './editor/ui.js';
 import { resolveResourceUrl } from './doclinks.js';
@@ -64,27 +64,42 @@ export { setLinkDocs, setLinkSearch };
  * @typedef {Object} HrBlock
  * @property {'hr'} type
  */
+/**
+ * The opening half of a restricted section. It is a marker, not a container -
+ * the protected blocks are the ones between it and its AccessEndBlock.
+ * @typedef {Object} AccessStartBlock
+ * @property {'access-start'} type
+ * @property {string[]} read - group names allowed to read the section
+ * @property {string} label
+ */
+/**
+ * @typedef {Object} AccessEndBlock
+ * @property {'access-end'} type
+ */
+/** @typedef {import('./editor/serialize.js').MdSourceBlock} MdSourceBlock */
 /** @typedef {import('./editor/widgets.js').TableBlock} TableBlock */
 /** @typedef {import('./editor/widgets.js').ReqBlock} ReqBlock */
 /** @typedef {import('./editor/widgets.js').TestCaseBlock} TestCaseBlock */
 /**
  * A single visual block in the editor canvas. Every widget / serialize.js /
  * blockField branch switches on `type`.
- * @typedef {HeadingBlock|ParagraphBlock|QuoteBlock|ListBlock|CodeBlock|TableBlock|ImageBlock|HrBlock|ReqBlock|TestCaseBlock} Block
+ * @typedef {HeadingBlock|ParagraphBlock|QuoteBlock|ListBlock|CodeBlock|TableBlock|ImageBlock|HrBlock|ReqBlock|TestCaseBlock|AccessStartBlock|AccessEndBlock} Block
  */
 
 /**
  * @typedef {Object} EditorOpts
  * @property {string} docId
- * @property {Object<string, *>} meta - document front-matter (title, assumes, next, description, ...)
+ * @property {import('./editor/serialize.js').DocMeta} meta - document front-matter (title, assumes, next, description, ...)
  * @property {Block[]} blocks
  * @property {Object[]} [sources]
  * @property {{id: string, title: string}[]} allDocs
  * @property {boolean} isNew
- * @property {(markdown: string, meta: Object<string, *>, status: HTMLElement) => void} onSave
+ * @property {(markdown: string, meta: import('./editor/serialize.js').DocMeta, status: HTMLElement) => void} onSave
  * @property {() => void} onClose
  * @property {import('./editor/widgets.js').ReqRef[]} [requirements] - every saved requirement, for Trace-To/Verifies autocomplete
  * @property {string} [component]
+ * @property {string[]} [knownGroups] - groups declared in config.json, offered by the access-marker pickers
+ * @property {import('./auth.js').DocAccess|null} [docAccess] - this document's access state, for the metadata panel
  */
 
 /**
@@ -119,11 +134,22 @@ export function openEditor(opts) {
     return reqs;
   };
 
+  // "Restricted section" is a PAIR of markers with the protected content between
+  // them; every other menu entry makes exactly one block.
+  /**
+   * @param {string} type
+   * @returns {Block[]}
+   */
+  function blocksFor(type) {
+    if (type === 'access') return [newBlock('access'), newBlock('paragraph'), newBlock('access-end')];
+    return [newBlock(type)];
+  }
+
   /** Redraw the block list from scratch. */
   function repaint() {
     list.textContent = '';
     blocks.forEach((b, i) => list.appendChild(renderBlockEditor(b, i)));
-    const add = elem('button', { class: 'blk-add-end', onClick: () => openBlockMenu(add, t => { blocks.push(newBlock(t)); repaint(); }) }, '+ Add block');
+    const add = elem('button', { class: 'blk-add-end', onClick: () => openBlockMenu(add, t => { blocks.push(...blocksFor(t)); repaint(); }) }, '+ Add block');
     list.appendChild(add);
     resolveDisplayImages(list);   // make relative <img>s show (they'd 404 against the app route)
   }
@@ -151,7 +177,7 @@ export function openEditor(opts) {
     const gutter = elem('div', 'blk-gutter',
       iconBtn(arrowUpIcon(), 'Move up', () => { if (i > 0) { [blocks[i - 1], blocks[i]] = [blocks[i], blocks[i - 1]]; repaint(); } }),
       iconBtn(arrowDownIcon(), 'Move down', () => { if (i < blocks.length - 1) { [blocks[i + 1], blocks[i]] = [blocks[i], blocks[i + 1]]; repaint(); } }),
-      iconBtn(plusIcon(), 'Insert below', e => openBlockMenu(e.target, t => { blocks.splice(i + 1, 0, newBlock(t)); repaint(); })),
+      iconBtn(plusIcon(), 'Insert below', e => openBlockMenu(/** @type {Element} */ (e.target), t => { blocks.splice(i + 1, 0, ...blocksFor(t)); repaint(); })),
       iconBtn(closeIcon(), 'Delete', () => { blocks.splice(i, 1); if (!blocks.length) blocks.push(newBlock('paragraph')); repaint(); }));
     return elem('div', 'blk blk-' + b.type, gutter, elem('div', 'blk-body', blockField(b)));
   }
@@ -192,6 +218,7 @@ export function openEditor(opts) {
     if (b.type === 'hr') return elem('div', 'blk-hr', '— divider —');
     if (b.type === 'requirement') return requirementWidget(b, liveReqs);
     if (b.type === 'testcase') return testCaseWidget(b, liveReqs, opts.component);
+    if (b.type === 'access-start' || b.type === 'access-end') return accessMarker(b, opts.knownGroups);
     return elem('div', null, '(unsupported block)');
   }
 
@@ -199,14 +226,17 @@ export function openEditor(opts) {
 
   // --- metadata panel (right) ---
   const meta = { ...opts.meta, assumes: (opts.meta.assumes || []).slice(), next: (opts.meta.next || []).slice() };
-  const panel = metadataPanel(meta, opts.allDocs, opts.docId);
+  const panel = metadataPanel(meta, opts.allDocs, opts.docId, opts.docAccess);
 
   // --- toolbar ---
   const status = elem('span', 'editor-status');
   /** Serialize every block back to Markdown and hand it to opts.onSave. */
   function onSave() {
     // pull inline HTML -> markdown for text blocks; other block types pass through.
-    const out = blocks.map(b => {
+    // The @returns pins each branch's literal `type` to the MdSourceBlock member
+    // it stands for; without it the object literals widen `type` to string and
+    // serializeDoc can no longer tell the block kinds apart.
+    const out = blocks.map(/** @returns {MdSourceBlock} */ b => {
       if (b.type === 'heading') return { type: 'heading', level: b.level || 2, text: htmlToMd(b.html) };
       if (b.type === 'paragraph') return { type: 'paragraph', text: htmlToMd(b.html) };
       if (b.type === 'quote') return { type: 'quote', text: htmlToMd(b.html) };

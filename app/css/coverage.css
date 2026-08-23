@@ -6,6 +6,15 @@
   --cov-pass: #3fb950; --cov-fail: #f85149; --cov-partial: #d29922; --cov-untested: #58a6ff;
 }
 
+/* The overlay's stage - overlays.js builds it, coverage-view.js labels it, and
+   app/svelte/CoverageOverlay.svelte is mounted into it. It used to BE the graph
+   container (which the engine sizes itself); now it holds the graph, the legend,
+   the export button and the report panel, so it has to fill the overlay for
+   .graph-root's height:100% to resolve against anything. Left static-positioned
+   on purpose: the three absolutely-positioned chrome pieces inside it are placed
+   against .cov-overlay, exactly as they were when they were its children. */
+.cov-stage { height: 100%; }
+
 /* Test-case report panel (clicking a test node). */
 .tc-report-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tc-report-sub code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }

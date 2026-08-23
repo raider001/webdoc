@@ -184,4 +184,5 @@ public final class FenceLinter {
 
 Each block above was coloured by the tokenizer named in its fence. Because the
 tokenizers are ordinary JavaScript with no external dependency, they load
-instantly and work offline — consistent with the wider zero-dependency design.
+instantly and work offline — like the rest of the rendering pipeline, which
+pulls in nothing of its own either.

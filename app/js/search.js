@@ -13,6 +13,18 @@
  * @property {string} docId
  * @property {string} title
  * @property {string} snippet
+ * @property {boolean} [locked] - the page exists but this account cannot open it
+ */
+
+/**
+ * One row exactly as the server sends it. Kept separate from SearchResult
+ * because the wire calls the document `id` and searchDocs() renames it - typing
+ * the response is what stops that rename being applied to the wrong field.
+ * @typedef {Object} SearchWireRow
+ * @property {string} id
+ * @property {string} title
+ * @property {string} [snippet] - withheld for a `locked` hit
+ * @property {boolean} [locked]
  */
 
 /**
@@ -35,7 +47,10 @@ export async function searchDocs(query, limit, signal) {
     return [];   // aborted or network error
   }
   if (!res.ok) return [];
+  /** @type {{results?: SearchWireRow[]}} */
   let data;
   try { data = await res.json(); } catch (e) { return []; }
-  return (data.results || []).map(r => ({ docId: r.id, title: r.title, snippet: r.snippet || '' }));
+  // `locked` marks a hit the reader may see listed but not open; the server
+  // already withheld its snippet, and hidden documents never appear at all.
+  return (data.results || []).map(r => ({ docId: r.id, title: r.title, snippet: r.snippet || '', locked: !!r.locked }));
 }

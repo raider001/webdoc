@@ -14,6 +14,14 @@
  */
 
 /**
+ * One child slot as a caller writes it: a single Child, or a list of them, so a
+ * `list.map(...)` drops straight in. append() takes a slot per argument OR a
+ * whole list of slots in one - that second shape is how elem() forwards its
+ * entire rest array in a single call.
+ * @typedef {Child|Child[]} ChildSlot
+ */
+
+/**
  * elem()'s second argument is EITHER a className string (the common case) OR
  * a props object:
  *   class / className        -> element.className
@@ -28,10 +36,16 @@
  */
 
 /**
- * @param {string} tag
+ * Generic over the tag so the call site gets the REAL element type back:
+ * elem('input', ...) is an HTMLInputElement with .value, elem('canvas', ...)
+ * has .getContext. Returning a bare HTMLElement instead was the single largest
+ * source of "property does not exist" across the app, because almost every
+ * element in the UI is built through here.
+ * @template {keyof HTMLElementTagNameMap} K
+ * @param {K} tag
  * @param {string|ElemProps} [props] - a className string, or a props object
- * @param {...(Child|Child[])} children
- * @returns {HTMLElement}
+ * @param {...ChildSlot} children
+ * @returns {HTMLElementTagNameMap[K]}
  */
 export function elem(tag, props, ...children) {
   const node = document.createElement(tag);
@@ -45,15 +59,28 @@ export function elem(tag, props, ...children) {
  * Append a flat list of children to a parent, skipping empties (see Child).
  * Exported so callers can add children to an existing node the same way.
  * @param {Element} node
- * @param {...(Child|Child[])} children
+ * @param {...(ChildSlot|ChildSlot[])} children
  * @returns {Element}
  */
 export function append(node, ...children) {
-  for (const child of children.flat(Infinity)) {
+  // flat(Infinity) really does level the whole tree, but the checker only models
+  // one level of it, so the result is spelled out here.
+  for (const child of /** @type {Child[]} */ (children.flat(Infinity))) {
     if (child == null || child === false) continue;
-    node.append(child.nodeType ? child : document.createTextNode(String(child)));
+    node.append(isNode(child) ? child : document.createTextNode(String(child)));
   }
   return node;
+}
+
+/**
+ * Nodes go in as-is, everything else is stringified. Duck-typed on nodeType
+ * rather than `instanceof Node` so a node built in another document (an
+ * imported template, an iframe) is still recognised as one.
+ * @param {Child} child
+ * @returns {child is Node}
+ */
+function isNode(child) {
+  return typeof child === 'object' && child !== null && 'nodeType' in child;
 }
 
 /**
@@ -69,7 +96,11 @@ function applyProps(node, props) {
     else if (key === 'html' || key === 'innerHTML') node.innerHTML = value;
     else if (key === 'style') node.setAttribute('style', value);
     else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2).toLowerCase(), value);
-    else if (key in node) node[key] = value;
+    // `key in node` IS the check that this property exists; the checker cannot
+    // follow it into an indexed write, and the set is genuinely open-ended
+    // (value, checked, href, disabled, ...), so the write goes through the same
+    // heterogeneous-bag view of the node that ElemProps already describes.
+    else if (key in node) /** @type {Object<string, *>} */ (node)[key] = value;
     else node.setAttribute(key, value);
   }
 }

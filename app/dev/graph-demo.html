@@ -6,15 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <title>Graph / Map view — dev harness</title>
 <!-- Resolve theme before first paint, same policy as the real app. -->
-<script>
-  (function () {
-    try {
-      var stored = localStorage.getItem('wd-theme');
-      var sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-theme', stored || (sysDark ? 'dark' : 'light'));
-    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
-  })();
-</script>
+<script src="/dev/theme-boot.js"></script>
 <!-- Base tokens/theme FIRST, then the graph styles. -->
 <link rel="stylesheet" href="/css/app.css">
 <link rel="stylesheet" href="/css/graph.css">
@@ -41,6 +33,9 @@
 <body>
 <div class="harness-bar">
   <h1>Map view — dev harness</h1>
+  <!-- No zoom buttons, search box, legend or minimap on the stage: this harness
+       drives the BARE engine (createGraphController), and all of that is the
+       app's chrome, not the graph's. These buttons stand in for it. -->
   <span class="note">Wheel = zoom · drag = pan · click a node = open</span>
   <div class="spacer"></div>
   <span id="log" aria-live="polite"></span>
@@ -50,47 +45,6 @@
 </div>
 <div id="stage"></div>
 
-<script type="module">
-  import { createGraph } from '/js/graph.js';
-
-  // ~8 docs forming a small DAG, plus: one edge to a MISSING id, one CYCLE,
-  // and a separate disconnected component (glossary/appendix).
-  const docs = [
-    { id: 'intro',       title: 'Introduction',      description: 'What this system is and why it exists.',              assumes: [],                     next: ['setup'] },
-    { id: 'setup',       title: 'Installation',      description: 'Get the toolchain onto your machine.',                assumes: ['intro'],              next: ['config', 'cli'] },
-    { id: 'config',      title: 'Configuration',     description: 'Project settings, environment variables and files.',  assumes: ['setup'],              next: ['deploy'] },
-    { id: 'cli',         title: 'The CLI',           description: 'Command-line interface reference and everyday flags.', assumes: ['setup'],              next: ['deploy'] },
-    { id: 'deploy',      title: 'Deploying',         description: 'Ship a build to a running environment safely.',       assumes: ['config', 'cli'],      next: ['advanced', 'monitoring'] },
-    { id: 'advanced',    title: 'Advanced patterns', description: 'Power-user techniques and composition.',              assumes: ['deploy', 'internals'], next: ['intro'] }, // internals = MISSING; next:intro = CYCLE
-    { id: 'monitoring',  title: 'Monitoring',        description: 'Metrics, logs and alerting for live systems.',        assumes: ['deploy'],             next: [] },
-    { id: 'troubleshoot',title: 'Troubleshooting',   description: 'Diagnose and fix the usual failure modes.',           assumes: ['cli'],                next: ['advanced'] },
-    // Disconnected component:
-    { id: 'glossary',    title: 'Glossary',          description: 'Definitions of the terms used throughout.',           assumes: [],                     next: ['appendix'] },
-    { id: 'appendix',    title: 'Appendix A',        description: 'Reference tables and extra material.',                assumes: ['glossary'],           next: [] }
-  ];
-
-  const stage = document.getElementById('stage');
-  const log = document.getElementById('log');
-
-  const graph = createGraph(stage, docs, {
-    currentId: 'deploy',
-    onOpenDoc: id => { log.textContent = 'open → ' + id; }
-  });
-
-  document.getElementById('fitBtn').addEventListener('click', () => graph.fit());
-  document.getElementById('findBtn').addEventListener('click', () => {
-    const hit = graph.search('deploy');
-    log.textContent = hit ? 'found → ' + hit : 'no match';
-  });
-  document.getElementById('themeBtn').addEventListener('click', () => {
-    const root = document.documentElement;
-    const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    root.setAttribute('data-theme', next);
-    try { localStorage.setItem('wd-theme', next); } catch (e) {}
-  });
-
-  // Expose for manual poking in the console.
-  window.__graph = graph;
-</script>
+<script type="module" src="/dev/graph-demo.js"></script>
 </body>
 </html>

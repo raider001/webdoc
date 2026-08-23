@@ -1,5 +1,5 @@
 <!--meta
-{ "title": "Switch Day and Night", "description": "Toggle the light and dark themes; the choice is remembered and applied to all content automatically.", "assumes": ["Docs/how-to/coverage"], "next": ["Docs/reference/authoring"] }
+{ "title": "Switch Day and Night", "description": "Toggle the light and dark themes; the choice is remembered and applied to all content automatically.", "assumes": ["Docs/how-to/coverage"], "next": ["Docs/how-to/accounts"] }
 -->
 
 # Switch Day and Night

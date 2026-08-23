@@ -102,6 +102,7 @@ export function resolveResourceUrl(baseId, src) {
  */
 export function resolveDocId(path, baseId, ids) {
   if (!path || !ids) return null;
+  /** @param {string} c @returns {string|null} */
   const match = c => {
     if (!c) return null;
     if (ids.has(c)) return c;

@@ -1,3 +1,12 @@
+<!--meta
+{
+  "title": "Navigation",
+  "description": "",
+  "assumes": [],
+  "next": []
+}
+-->
+
 # Navigation Tests
 
 Each test case is its own table: the meta header names the test and the

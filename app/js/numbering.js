@@ -1,9 +1,10 @@
-// numbering.js - hierarchical heading numbers + table of contents.
+// numbering.js - hierarchical heading numbers.
 // A post-parse decoration on the sanitized DOM: the Markdown is never mutated,
 // so it has no bearing on CommonMark compliance. Content numbers and TOC
 // numbers come from a single pass, so they can never drift apart.
-import { elem, append } from './dom.js';
+import { elem } from './dom.js';
 
+/** @param {string} text @returns {string} */
 function slugify(text) {
   return text.toLowerCase().trim()
     .replace(/[^\w\s-]/g, '')
@@ -30,9 +31,10 @@ function slugify(text) {
  * @returns {TocEntry[]}
  */
 export function numberHeadings(root) {
-  const heads = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
+  const heads = /** @type {NodeListOf<HTMLHeadingElement>} */ (root.querySelectorAll('h1,h2,h3,h4,h5,h6'));
   const counters = [0, 0, 0, 0, 0, 0];
   const used = new Set();
+  /** @type {TocEntry[]} */
   const toc = [];
 
   heads.forEach(h => {
@@ -56,35 +58,4 @@ export function numberHeadings(root) {
   });
 
   return toc;
-}
-
-/**
- * Build a nested-looking TOC list from the flat array. Clicking an entry
- * scrolls the content pane to the heading without touching the router hash.
- * @param {TocEntry[]} toc
- * @param {HTMLElement} contentEl
- * @returns {HTMLElement}
- */
-export function buildTOC(toc, contentEl) {
-  const ol = elem('ol');
-  for (const item of toc) {
-    const a = elem('a', {
-      href: '#' + item.id, 'data-target': item.id,
-      onClick: ev => {
-        ev.preventDefault();
-        const target = contentEl.querySelector('#' + cssEscape(item.id));
-        if (target) {
-          target.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          target.setAttribute('tabindex', '-1');
-          target.focus({ preventScroll: true });
-        }
-      }
-    }, elem('span', 'n', item.number), item.text);   // item.text as a text node auto-escapes
-    append(ol, elem('li', 'lvl-' + item.level, a));
-  }
-  return ol;
-}
-
-function cssEscape(id) {
-  return (window.CSS && CSS.escape) ? CSS.escape(id) : id.replace(/([^\w-])/g, '\\$1');
 }

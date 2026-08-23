@@ -1,15 +1,29 @@
-// coverage-view.js - the full-screen Test Coverage overlay: the requirement/test
-// status graph, the status legend filter, the per-node report panel (steps, run
-// info, verifying-test linking, automated-test connection) and the exportable HTML
-// report. Extracted from main.js; cross-cutting handles (closing the other overlay,
-// linking tests to requirements) come through the shared `app` registry.
-import { elem, append } from './dom.js';
-import { state, el, downloadFile, isoDate, combinedStatus, app } from './app-shell.js';
-import { requirementList, testList, setCoverageStatus } from './requirements.js';
+// coverage-view.js - the full-screen Test Coverage overlay's SHELL: open, close,
+// and the exportable HTML report.
+//
+// Everything you can see inside the overlay - the requirement/test status graph,
+// the legend filter, the detail panel with its steps, verifying-test linking and
+// automated-test connection - is app/svelte/CoverageOverlay.svelte now, mounted
+// into the stage host app/js/overlays.js created at boot. What is left here is
+// the part that must NOT move.
+//
+// WHY exportReport() STAYS VANILLA. It calls app/js/report.js, which writes a
+// self-contained HTML file: one document, no imports, opened later from a
+// file:// URL on somebody else's machine with no server and no bundle anywhere
+// near it. downloadFile() and isoDate() stay in app-shell.js for the same
+// reason. Pulling any of that into the island would make a shareable artefact
+// depend on a build output that is not shipped with it.
+//
+// The button is wired by main.js, not here: this module is fetched lazily on the
+// first press, so the click that paid for the load is already over by the time
+// setupCoverageView() runs, and main.js calls open() for it.
+import { state, el, downloadFile, isoDate, app } from './app-shell.js';
+import { requirementList, testList } from './requirements.js';
 import { loadResults, computeCoverage, computeTestStatus, testsFor } from './coverage.js';
 import { generateReportHtml } from './report.js';
-import { createGraph } from './graph.js';
-import { showReport } from './coverage-report.js';
+import { coverageOverlay } from './overlays.js';
+import { loadIslands } from './islands.js';
+import { announce } from './announce.js';
 
 /** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
 /** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
@@ -30,137 +44,69 @@ import { showReport } from './coverage-report.js';
  */
 
 /**
- * The small context object (`cov`) handed to coverage-report.js's panel
- * builders, giving them the panel DOM, a live-results getter/setter, and
- * callbacks to rebuild the graph or close the overlay - lets the detail-panel
- * module stay decoupled from the overlay's own state.
- * @typedef {Object} CovContext
- * @property {HTMLElement} panel
- * @property {HTMLElement} resizeHandle
- * @property {() => CoverageResults} results
- * @property {(r: CoverageResults) => void} setResults
- * @property {() => void} renderGraph
- * @property {() => void} close
- */
-
-let covApi = null;
-let covTransform = null;   // last pan/zoom of the coverage map, persisted across reopen + rebuilds
-/**
- * Wire up the full-screen Test Coverage overlay (button, legend, resize grip,
- * detail panel) and expose close() through the shared `app` registry.
- * @returns {void}
+ * Set up the full-screen Test Coverage overlay: expose close() through the
+ * shared `app` registry, and return the handle main.js drives the header button
+ * with.
+ * @returns {import('./map-view.js').OverlayHandle}
  */
 export function setupCoverageView() {
   const btn = el('covBtn');
-  const stage = elem('div');
-  const legend = elem('div', 'cov-legend');
-  const panel = elem('aside', { class: 'cov-report', hidden: true });
-  const overlay = elem('div', { class: 'graph-overlay cov-overlay', id: 'covOverlay', hidden: true },
-    stage,
-    legend,
-    // Export a self-contained, shareable test report (downloads an .html file).
-    elem('button', { class: 'cov-export-btn', type: 'button', title: 'Download a self-contained test report (HTML) you can share anywhere', onClick: () => exportReport() }, '⤓ Export report'),
-    panel);
-  document.body.appendChild(overlay);
-
-  // Status legend, each entry a toggle that hides/shows nodes of that status
-  // (and any edges that touch a hidden node), like the map's category legend.
-  const statusOff = new Set();
-  /** Sync the current legend on/off filter to the canvas renderer. */
-  function applyStatusFilter() {
-    // Canvas draw-state (was per-node DOM display toggles): the renderer culls
-    // hidden-status nodes and any edge touching one.
-    if (covApi && covApi.setStatusFilter) covApi.setStatusFilter(statusOff);
-  }
-  [['pass', 'Passing'], ['fail', 'Failing'], ['partial', 'Partial'], ['untested', 'Untested']].forEach(([k, label]) => {
-    const item = elem('button', { type: 'button', class: 'cov-legend-item', 'aria-pressed': 'true', title: 'Toggle ' + label + ' requirements' },
-      elem('span', 'cov-swatch cov-swatch-' + k), label);
-    item.addEventListener('click', () => {
-      const off = !statusOff.has(k);
-      if (off) statusOff.add(k); else statusOff.delete(k);
-      item.classList.toggle('is-off', off);
-      item.setAttribute('aria-pressed', off ? 'false' : 'true');
-      applyStatusFilter();
-    });
-    append(legend, item);
-  });
-
-  // Left-edge grip to drag the report panel wider/narrower (persists per session).
-  const resizeHandle = elem('div', { class: 'cov-report-resize', title: 'Drag to resize' });
-  resizeHandle.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    const startX = e.clientX, startW = panel.getBoundingClientRect().width;
-    try { resizeHandle.setPointerCapture(e.pointerId); } catch (err) {}
-    const move = (ev) => { panel.style.width = Math.min(window.innerWidth - 60, Math.max(320, startW + (startX - ev.clientX))) + 'px'; };
-    const up = () => { resizeHandle.removeEventListener('pointermove', move); resizeHandle.removeEventListener('pointerup', up); };
-    resizeHandle.addEventListener('pointermove', move);
-    resizeHandle.addEventListener('pointerup', up);
-  });
-
-  let results = null;
+  // The host and its stage are created eagerly at boot by
+  // overlays.ensureOverlayHosts(); this module only fills the stage. The class
+  // is added here rather than there because it is this view's requirement: the
+  // stage stops being the graph's own container (which sized itself) and becomes
+  // the island's mount target, which has to be told to fill the overlay.
+  const { host: overlay, stage } = coverageOverlay();
+  stage.classList.add('cov-stage');
 
   /**
-   * Build (or REBUILD) the graph from the current index + results. Called on
-   * open and again whenever a requirement<->test link changes, so the view
-   * (nodes AND edges) reflects an add/remove immediately.
+   * The mounted island, or null while the view is closed. Kept because
+   * unmounting is what stops the graph's requestAnimationFrame loop and releases
+   * window.__graph - detaching the DOM would not.
+   * @type {{destroy: () => void}|null}
    */
-  const renderGraph = () => {
-    const reqs = requirementList();
-    if (!reqs.length) { if (covApi) { covApi.destroy(); covApi = null; } stage.innerHTML = '<p class="cov-empty">No requirements found to test.</p>'; return; }
-    const tests = testList();
-    const status = combinedStatus(reqs, tests, results);
-    setCoverageStatus(status);   // keep in-document badges (requirement + test tables) in sync
-    const parents = {}; reqs.forEach(r => (parents[r.id] = []));
-    reqs.forEach(p => (p.traceFrom || []).forEach(c => { if (parents[c]) parents[c].push(p.id); }));
-    const reqPseudo = reqs.map(r => ({ id: r.id, title: r.id, description: r.description, assumes: parents[r.id] || [], next: [] }));
-    // Test cases are their own nodes, linked FROM each requirement they verify
-    // (assumes = verifies -> a prereq edge requirement -> test).
-    const testPseudo = tests.map(t => ({
-      id: t.id, title: t.name || t.id,
-      description: (t.steps || []).length + ' step' + ((t.steps || []).length === 1 ? '' : 's'),
-      assumes: (t.verifies || []).slice(), next: []
-    }));
-    const nodeKind = new Map();
-    reqs.forEach(r => nodeKind.set(r.id, 'req'));
-    tests.forEach(t => nodeKind.set(t.id, 'test'));
-    if (covApi) { covTransform = covApi.getTransform(); covApi.destroy(); }   // remember the live view before rebuild
-    covApi = createGraph(stage, reqPseudo.concat(testPseudo), {
-      nodeStatus: status, nodeKind: nodeKind, hideLegend: true,
-      autoSize: true, maxNodeW: 360, maxNodeH: 240,   // size boxes to fit the largest node
-      initialTransform: covTransform,                 // restore last pan/zoom (null on first open -> fit)
-      onSelect: (id) => showReport(id, cov),
-      onActivate: (id) => showReport(id, cov)
-    });
-    applyStatusFilter();   // keep any active legend filter across reopen/rebuild
-  };
+  let island = null;
+  /**
+   * The last results the island loaded, mirrored here so exportReport() reports
+   * on what the reader is actually looking at.
+   * @type {CoverageResults}
+   */
+  let results = null;
 
-  /** Open the coverage overlay, loading results and rendering the graph. */
-  const open = async () => {
-    if (app.closeMapView) app.closeMapView();     // only one overlay view at a time
-    overlay.hidden = false;
-    btn.setAttribute('aria-pressed', 'true');
-    panel.hidden = true;
-    results = await loadResults(state.site && state.site.sources);
-    renderGraph();
-    el('live').textContent = 'Opened the test coverage view. Click a requirement for its test report.';
-  };
-  /** Close the coverage overlay, remembering its pan/zoom transform. */
+  /** Close the coverage overlay. @returns {void} */
   const close = () => {
     if (overlay.hidden) return;
     overlay.hidden = true;
     btn.setAttribute('aria-pressed', 'false');
-    if (covApi) { covTransform = covApi.getTransform(); covApi.destroy(); covApi = null; }   // remember the view
+    if (island) { island.destroy(); island = null; }
   };
 
-  /** @type {CovContext} */
-  const cov = {
-    panel: panel, resizeHandle: resizeHandle,
-    results: () => results,
-    setResults: (r) => { results = r; },
-    renderGraph: renderGraph, close: close
+  /** Open the coverage overlay, loading results before it mounts. @returns {Promise<void>} */
+  const open = async () => {
+    if (app.closeMapView) app.closeMapView();     // only one overlay view at a time
+    overlay.hidden = false;
+    btn.setAttribute('aria-pressed', 'true');
+    // Loaded HERE rather than inside the component so the first frame is the
+    // real graph, and so exportReport() has something to report on even if the
+    // reader presses it before touching anything.
+    results = await loadResults(state.site && state.site.sources);
+    const islands = await loadIslands();
+    // Two awaits is two chances for the reader to have closed it again.
+    if (overlay.hidden) return;
+    if (island) island.destroy();
+    island = islands.mountCoverageOverlay(stage, {
+      results: results,
+      onResults: (r) => { results = r; },
+      onExport: () => { exportReport(); },
+      onClose: close,
+    });
+    announce('Opened the test coverage view. Click a requirement for its test report.');
   };
 
-  /** Build and download a self-contained, shareable Test Coverage Report. */
+  /**
+   * Build and download a self-contained, shareable Test Coverage Report.
+   * @returns {Promise<void>}
+   */
   async function exportReport() {
     const res = results || await loadResults(state.site && state.site.sources);
     const reqs = requirementList();
@@ -174,26 +120,22 @@ export function setupCoverageView() {
       reqStatus: computeCoverage(reqs, res),
       testStatus: computeTestStatus(tests, res),
       detail: tests.map(t => {
-        const d = Object.assign({ id: t.id }, testsFor(t.id, res));
         const m = res.manual[t.id];
-        d.run = (m && m.run) ? m.run : null;   // run metadata (when / who)
-        return d;
+        // run metadata (when / who) rides along with the evidence
+        return Object.assign({ id: t.id }, testsFor(t.id, res), { run: (m && m.run) ? m.run : null });
       })
     });
     const base = ((state.site && state.site.siteTitle) || 'webdocs').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'webdocs';
     downloadFile(base + '-test-report-' + isoDate(now) + '.html', html, 'text/html');
-    el('live').textContent = 'Test report downloaded.';
-  }
-
-  // Recompute status and repaint node colours in place (keeps pan/zoom).
-  function recolor() {
-    const status = combinedStatus(requirementList(), testList(), results);
-    setCoverageStatus(status); // keep the in-document table badges (requirement + test) in sync too
-    if (covApi && covApi.setStatus) covApi.setStatus(status);   // repaint node colours on the canvas
-    applyStatusFilter();   // a node's status may have changed; re-apply the legend filter
+    announce('Test report downloaded.');
   }
 
   app.closeCoverageView = close;
-  btn.addEventListener('click', () => (overlay.hidden ? open() : close()));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) { if (!panel.hidden) panel.hidden = true; else close(); } });
+  // No Escape listener here any more. It used to be a permanent `document`
+  // listener guarded by `!overlay.hidden`, doing two jobs (dismiss the report
+  // panel, else close the view) and needing to know whether the panel was up.
+  // CoverageOverlay.svelte owns both now, on a listener that exists only while
+  // the overlay does - which is the same guard, expressed as a lifetime.
+
+  return { open: open, close: close, toggle: () => (overlay.hidden ? open() : close()) };
 }

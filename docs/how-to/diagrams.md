@@ -4,11 +4,11 @@
 
 # Add a Diagram
 
-WebDocs' core renders everything itself and ships no third-party code, so heavy
-diagram engines are not baked in. Instead a renderer plugin system lets you opt
-in: enable the Mermaid plugin and a fenced block tagged `mermaid` becomes a
-diagram; enable nothing, the default, and the same block is just highlightable
-code. Write the diagram as a `mermaid`-tagged fence:
+WebDocs' core renders everything itself and ships no third-party rendering
+library, so heavy diagram engines are not baked in. Instead a renderer plugin
+system lets you opt in: enable the Mermaid plugin and a fenced block tagged
+`mermaid` becomes a diagram; enable nothing, the default, and the same block is
+just highlightable code. Write the diagram as a `mermaid`-tagged fence:
 
 ````text
 ```mermaid
@@ -45,8 +45,8 @@ To enable the plugin, add its name to the `plugins` array in `config.json`:
 
 On the next reload the loader imports the Mermaid facade from
 `app/thirdpartyrenderer/`, which registers itself for the `mermaid` language. The
-heavy Mermaid library is never committed, so a default checkout stays
-dependency-free — you supply the engine, and without it the block falls back
+heavy Mermaid library is never committed, so a default checkout vendors no
+third-party library — you supply the engine, and without it the block falls back
 gracefully to its source plus a short notice.
 [Diagrams & Renderer Plugins](Docs/features/diagrams) covers writing your own
 renderer.

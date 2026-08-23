@@ -152,17 +152,4 @@ retries = 3      // inline note
 path = '/var/log'
 </code></pre>
 
-<script type="module">
-  import { highlightWithin } from '/js/highlighter.js';
-  highlightWithin(document.body);
-
-  const root = document.documentElement;
-  const which = document.getElementById('which');
-  const show = () => { which.textContent = 'data-theme = ' + root.getAttribute('data-theme'); };
-  document.getElementById('toggle').addEventListener('click', () => {
-    root.setAttribute('data-theme',
-      root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-    show();
-  });
-  show();
-</script>
+<script type="module" src="/dev/highlight-demo.js"></script>

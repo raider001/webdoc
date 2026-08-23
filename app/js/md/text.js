@@ -50,6 +50,7 @@ export function normalizeUri(uri) {
    editing intact (a literal U+00A0/zero-width char is indistinguishable from a
    normal space in source).
    =========================================================================== */
+/** @type {Object<string, string>} entity name (without & and ;) -> the character(s) it stands for */
 const NAMED = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00A0', copy: '©',
   reg: '®', trade: '™', hellip: '…', mdash: '—', ndash: '–',

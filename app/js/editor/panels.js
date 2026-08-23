@@ -3,6 +3,8 @@
 import { elem, append } from '../dom.js';
 import { labelEl, labeledInput, labeledTextarea } from './ui.js';
 import { closeIcon } from '../icons.js';
+import { auth } from '../auth.js';
+import { groupChip, destroyGroupChip } from '../auth-ui.js';
 
 /** @typedef {import('./serialize.js').DocMeta} DocMeta */
 /** @typedef {import('../authoring.js').NewDocModalOpts} NewDocModalOpts */
@@ -21,16 +23,102 @@ import { closeIcon } from '../icons.js';
  * @param {Partial<DocMeta>} meta - edited in place: title/description directly, assumes/next via docPicker
  * @param {DocPickerEntry[]} allDocs
  * @param {string} selfId - the document being edited, excluded from both pickers
+ * @param {import('../auth.js').DocAccess|null} [access] - GET /api/index/access for this
+ *   document; absent when accounts are switched off, in which case no access field is drawn
  * @returns {HTMLElement}
  */
-export function metadataPanel(meta, allDocs, selfId) {
+export function metadataPanel(meta, allDocs, selfId, access) {
   return elem('aside', 'editor-meta',
     elem('h2', 'editor-meta-h', 'Document metadata'),
     labeledInput('Title', meta.title || '', v => meta.title = v),
     labeledTextarea('Description', meta.description || '', v => meta.description = v),
     docPicker('Assumed knowledge', meta.assumes, allDocs, selfId),
-    docPicker('Recommended next', meta.next, allDocs, selfId)
+    docPicker('Recommended next', meta.next, allDocs, selfId),
+    auth.enabled ? accessField(meta, access) : null
   );
+}
+
+/**
+ * The document-level access rule, edited as a set of group checkboxes.
+ *
+ * Three states are shown distinctly, because conflating them is what makes ACL
+ * UIs confusing: a page with its OWN rule, a page that INHERITED one from an
+ * upstream `Recommended next` chain, and a page with no rule at all. Only the
+ * first is editable here - to change an inherited lock you edit the page it came
+ * from, which is also the only edit that is meaningful.
+ *
+ * @param {Object<string, *>} meta - edited in place; `access` is written back into the header
+ * @param {Object<string, *>|null} access - GET /api/index/access for this document
+ * @returns {HTMLElement}
+ */
+function accessField(meta, access) {
+  const known = (access && access.knownGroups) || [];
+  const mayEdit = !!(access && access.canEditAccess);
+  const eff = (access && access.effective) || {};
+  const inherited = (eff.inheritedFrom || []);
+
+  /** The groups this page's OWN rule names right now. @returns {string[]} */
+  const current = () => (meta.access && Array.isArray(meta.access.read)) ? meta.access.read.slice() : [];
+  const chips = elem('div', 'group-chips');
+  const note = elem('p', 'access-note');
+
+  function redraw() {
+    const read = current();
+    chips.querySelectorAll('.wd-mounted').forEach(destroyGroupChip);   // chips are islands now; clearing alone would not stop them
+    chips.textContent = '';
+    append(chips, read.length
+      ? read.map(g => groupChip(g, { small: true }))
+      : elem('span', 'auth-muted', 'Not restricted by this page'));
+    note.className = 'access-note' + (read.length || inherited.length ? ' is-locked' : '');
+    if (read.length) {
+      note.textContent = 'This page and everything reachable from it through '
+        + '"Recommended next" is readable only by these groups.';
+    } else if (inherited.length) {
+      note.textContent = 'Inherited from ' + inherited.join(', ')
+        + '. Edit that page to change it, or set a rule here to override it.';
+    } else {
+      note.textContent = 'Anyone signed in can read this page.';
+    }
+  }
+
+  const picker = elem('div', 'access-row');
+  for (const name of known) {
+    const box = elem('input', { type: 'checkbox', checked: current().indexOf(name) !== -1, disabled: !mayEdit });
+    box.addEventListener('change', () => {
+      const set = new Set(current());
+      if (box.checked) set.add(name); else set.delete(name);
+      const read = [...set].sort();
+      // Drop the whole block when nothing is selected, so an unrestricted page's
+      // header stays exactly as it was rather than gaining an empty rule.
+      if (!read.length) {
+        if (meta.access) { delete meta.access.read; if (!Object.keys(meta.access).length) meta.access = null; }
+      } else {
+        meta.access = Object.assign({}, meta.access || {}, { read: read });
+      }
+      redraw();
+    });
+    append(picker, elem('label', 'access-pick', box, groupChip(name, { small: true })));
+  }
+
+  const hidden = elem('input', {
+    type: 'checkbox', disabled: !mayEdit,
+    checked: !!(meta.access && meta.access.hidden),
+  });
+  hidden.addEventListener('change', () => {
+    if (hidden.checked) meta.access = Object.assign({}, meta.access || {}, { hidden: true });
+    else if (meta.access) { delete meta.access.hidden; if (!Object.keys(meta.access).length) meta.access = null; }
+    redraw();
+  });
+
+  redraw();
+  return elem('div', 'meta-field access-panel' + (mayEdit ? '' : ' access-readonly'),
+    elem('label', null, 'Who can read this'),
+    chips, picker,
+    elem('label', 'access-pick', hidden,
+      'Hide completely (not shown on the map or in search)'),
+    note,
+    !mayEdit && known.length ? elem('p', 'auth-muted',
+      'Only an account with access-management rights can change this.') : null);
 }
 
 /**
@@ -150,6 +238,7 @@ export function confirmDialog(opts) {
   return new Promise(resolve => {
     const alertOnly = opts.cancelLabel === null;
     let done = false;
+    /** @param {boolean} value */
     function finish(value) {
       if (done) return;
       done = true;
@@ -159,6 +248,7 @@ export function confirmDialog(opts) {
     }
     // Capture phase so Enter / Escape here don't also trigger the map / coverage
     // overlay's own key handlers underneath (which would e.g. close the map).
+    /** @param {KeyboardEvent} e */
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
       else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); finish(true); }

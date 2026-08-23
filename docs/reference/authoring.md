@@ -4,12 +4,12 @@
 
 # Authoring Reference
 
-A WebDocs document is a plain Markdown file. There is no build step and no
-front-matter processor to install — you save a `.md` file inside a configured
-source folder and it is discovered the next time the library loads. This page is
-the practical reference for the five things every author touches: the metadata
-header, headings and their automatic numbering, fenced code blocks, links, and
-requirement-group tables.
+A WebDocs document is a plain Markdown file. There is no build step for a
+document and no front-matter processor to install — you save a `.md` file inside
+a configured source folder and it is discovered the next time the library loads.
+This page is the practical reference for the five things every author touches:
+the metadata header, headings and their automatic numbering, fenced code blocks,
+links, and requirement-group tables.
 
 Everything below is parsed and rendered in the browser by hand-written vanilla
 JavaScript. Nothing here depends on a plugin, a theme package, or a CDN.
@@ -51,11 +51,65 @@ The recognised fields:
 | `description` | string | A one-line summary. Rendered as a lede beneath the H1. |
 | `assumes` | string[] | Prerequisite document ids. Drawn as **prerequisite** edges on the map. |
 | `next` | string[] | Recommended-next document ids. Drawn as **recommended-next** edges on the map. |
+| `access` | object | Who may read and modify this document. Only meaningful on a server with accounts enabled; inert otherwise. See [Access rules](#access-rules). |
 
 `assumes` and `next` are arrays of document ids, and either may hold several
 entries. A reference to an id that does not resolve to a real document is not an
 error — it is flagged as a dangling link and shown as a placeholder node on the
 map, which is a useful way to spot a document you have not written yet.
+
+### Access rules
+
+On a server with [accounts](Docs/features/access-control) enabled, an `access`
+object restricts the document:
+
+```json
+"access": {
+  "read":  ["staff"],
+  "write": ["release"],
+  "hidden": false,
+  "propagate": true,
+  "inherit": true
+}
+```
+
+| Key | Type | Meaning |
+| --- | ---- | ------- |
+| `read` | string[] | Groups that may open the page. Omit for unrestricted. An empty array locks it to administrators only. |
+| `write` | string[] | Groups that may modify it. Omit to fall back to the server's `writeGroups`. |
+| `hidden` | bool | When the reader is not allowed, make the page indistinguishable from one that does not exist rather than showing it locked. |
+| `propagate` | bool | Whether this rule is inherited by everything downstream of `next`. Default `true`. |
+| `inherit` | bool | Whether this page accepts a rule coming down `next` at it. Default `true`. |
+
+A rule applies to the page that declares it **and, recursively, to everything it
+recommends next** — so locking a chapter's entry point locks the chapter. Writing
+one needs access-management rights, which are separate from write access to the
+page: an author who may edit a locked page must not be able to unlock it.
+
+To restrict part of a page instead, wrap it in a matching pair of markers in the
+body — these are ordinary HTML comments, so they vanish from the rendered page
+for anyone allowed to see the section, and the server removes the whole region
+before sending the file to anyone who is not:
+
+```markdown
+<!--access start {"read": ["ops"], "label": "Production runbook"}-->
+
+Content only the ops group is served.
+
+<!--access end-->
+```
+
+A marker inside a fenced code block or an inline code span is ignored, so you can
+write about the syntax without restricting anything.
+
+On a server with accounts enabled, a metadata header that does not parse makes
+the page administrators-only rather than unrestricted — otherwise a typo in a
+locked page's header would publish it. Fix the JSON and the page returns to
+normal on the next save.
+
+Keep requirement groups and test cases *outside* a restricted section: content
+inside one is deliberately excluded from the index entirely, so anything in there
+would drop out of search and traceability for everybody.
 
 Keep the `title` in the header identical to the H1 that follows it; the H1 is the
 human-visible heading while the metadata `title` feeds the navigation surfaces.

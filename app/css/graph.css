@@ -29,6 +29,13 @@
 }
 
 /* ---- Root container ------------------------------------------------------- */
+/* The island's mount target inside #graphOverlay. The stage used to BE the
+   graph's container and sized itself off .graph-root; now .graph-root is the
+   component's own root INSIDE it, so the stage has to be told to fill the
+   overlay or the component measures a zero-height box. Same job .cov-stage does
+   for the coverage overlay. */
+.map-stage { height:100%; }
+
 .graph-root {
   position:relative;
   width:100%;
@@ -42,6 +49,13 @@
   -webkit-user-select:none;
 }
 .graph-search input { user-select:text; -webkit-user-select:text; }
+
+/* The element GraphCanvas.svelte gives away to the engine: the canvas lives in
+   here and nowhere else, so Svelte can never sweep it up while destroying one of
+   the chrome blocks around it. It carries no look of its own - it exists to be
+   the same box as .graph-root, because the engine measures its container when it
+   sizes and fits itself. */
+.graph-canvas-host { position:absolute; inset:0; }
 
 .graph-svg {
   position:absolute;
@@ -166,17 +180,11 @@
 .graph-edit-toggle:hover { border-color:var(--accent); }
 .graph-edit-toggle.is-on { background:var(--accent); color:#fff; border-color:var(--accent); }
 
-/* New-document button (top-right of the map overlay). */
-.graph-new-btn {
-  position:absolute; left:12px; top:54px; z-index:4;   /* under the search field, clear of the minimap */
-  display:inline-flex; align-items:center; gap:6px;
-  height:32px; padding:0 14px; border-radius:8px;
-  border:1px solid var(--graph-overlay-border); background:var(--graph-minimap-bg); color:var(--text);
-  cursor:pointer; font-size:13px;
-}
-.graph-new-btn:hover { border-color:var(--accent); background:var(--accent); color:#fff; }
-
-/* Focus-mode toggle (top-left of the map overlay, below the New-document button). */
+/* Focus-mode toggle (top-left of the map overlay, under the search field).
+   The `.graph-new-btn` rule that used to sit here is gone with the button it
+   styled: the map's in-view "New document" affordance was removed once the
+   header's ＋ became always available, and a rule for an element nothing builds
+   is a rule the next reader has to prove is dead. */
 .graph-focus-toggle {
   position:absolute; left:12px; top:94px; z-index:4;
   display:inline-flex; align-items:center; gap:6px;

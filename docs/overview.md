@@ -6,7 +6,8 @@
   "next": [
     "Docs/design/architecture",
     "Docs/features/markdown",
-    "Docs/roadmap"
+    "Docs/roadmap",
+    "Docs/tests/navigation"
   ]
 }
 -->
@@ -17,8 +18,10 @@ WebDocs is a documentation reader with a deliberately small footprint: a folder
 of Markdown files, a tiny Python standard-library server, and a single-page
 browser application that does all of the real work. Point it at a directory of
 `.md` files and it becomes a navigable, cross-linked, traceable documentation
-site — no build step, no bundler, and nothing to install beyond a Python
-interpreter you almost certainly already have.
+site — nothing to install beyond a Python interpreter you almost certainly
+already have. The browser application is compiled, but its bundle is committed
+to the repository, so a clean clone needs no toolchain and no network: `python
+serve.py` and you are reading.
 
 This document set *is* WebDocs documenting itself. Everything you read here was
 authored as Markdown, discovered by the browser from the server's `/site.json`
@@ -30,11 +33,17 @@ parsed and rendered in your browser by the same engine it describes.
 
 Four principles shape every part of the tool.
 
-- **Zero third-party runtime dependencies.** There is no framework, no Markdown
-library, no syntax-highlighter package, and no CSS toolkit. The parser, the
-sanitizer, the highlighters, the map, and the theming layer are all
-hand-written vanilla JavaScript. The only development dependency is Playwright
-(Python), used to run the test suite.
+- **One third-party runtime dependency, and no more.** The browser ships a
+compiled Svelte 5 runtime, which the interactive chrome was moved onto once
+hand-wiring DOM updates across a growing number of views had become the largest
+single source of the reader's state bugs. Nothing arrived with it: there is
+still no Markdown library, no syntax-highlighter package, no CSS toolkit and no
+diagram engine in the core, and the parser, the sanitizer, the highlighters, the
+map, the WYSIWYG editor and the theming layer are all still hand-written. The
+server keeps the original rule outright — `serve.py` is Python standard library
+only — and every npm package in the repository is build-time development
+tooling, so the manifest's runtime `dependencies` object is empty. Playwright
+(Python) is the other development dependency, used to run the test suite.
 - **Effectively static.** Documents are plain files. The optional server exists
 only to enumerate them and hand them to the browser; it renders nothing. The
 Markdown files themselves are static, but the reader relies on the bundled
@@ -74,6 +83,11 @@ new-document modal or the in-page edit button, that normalises back to Markdown
 and saves it to the server. See [Authoring](Docs/reference/authoring).
 - **Search** — an all-documents search over titles and headings, from the drawer.
 See [Search](Docs/features/search).
+- **Access control** — optional accounts and access groups, with per-document
+read and modify rules that flow recursively down the Recommended-next chain, and
+restrictions on individual sections. Off by default; on a server without it
+nothing changes. See [Accounts & Access
+Control](Docs/features/access-control).
 - **Theming** — light and dark themes built on CSS custom-property design tokens,
 resolved before the first paint. See [Theming](Docs/design/theming).
 - **Scale** — a standard-library SQLite index on the server and a culled canvas
@@ -96,7 +110,7 @@ If you just want to *use* WebDocs — read the set, search it, author and link
 documents, add diagrams, trace requirements, check coverage — the
 [How-To Guide](Docs/how-to) is the practical starting point: a recipe per job.
 If you want to know *what shipped when*, [the roadmap](Docs/roadmap) lays out the
-seven stages in which these capabilities were built. Otherwise, the
+twelve stages in which these capabilities were built. Otherwise, the
 [Architecture](Docs/design/architecture) is the natural next read, followed by
 the [Markdown & GFM](Docs/features/markdown) showcase that exercises the renderer
 in place.

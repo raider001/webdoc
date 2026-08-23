@@ -85,7 +85,7 @@ export function collectRefs(block, refs) {
 function parseRefDef(text) {
   const m = /^ {0,3}\[/.exec(text);
   if (!m) return null;
-  let i = 1, label = '', depth = 1;
+  let i = 1, label = '';
   while (i < text.length) {
     const c = text[i];
     if (c === '\\' && i + 1 < text.length) { label += c + text[i + 1]; i += 2; continue; }

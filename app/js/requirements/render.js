@@ -1,21 +1,32 @@
-// requirements/render.js - build the in-document requirement / test-case tables
-// from the parsed block structures, and swap them in for the fenced placeholders
-// after sanitize. This is the DOM half of the subsystem. Extracted from
-// requirements.js. Reads the shared index/status (./store.js) and the ref
-// resolver + id-slugger (./parse.js); renders cell markdown through the engine.
+// requirements/render.js - swap the fenced `reqgroup` placeholders that survived
+// sanitize for the components that draw a requirement group or a test case, and
+// keep the two Markdown-to-fragment helpers those components render prose with.
+//
+// FROM PHASE 6 THIS FILE BUILDS NO TABLES. It used to hand-build every row, cell,
+// badge and link with elem(); app/svelte/ReqTable.svelte and
+// app/svelte/TestCase.svelte own that markup now. What is left here is the SEAM:
+// find the placeholder, put a `.wd-mounted` host in its place, mount the right
+// component into it, and register the teardown so the next navigation destroys
+// it. The placeholder pass itself (parse.js's preprocessRequirements) is
+// untouched - it is a pure string-to-string rewrite of raw Markdown, runs before
+// the parser, and knows nothing about any of this.
+//
+// blockMarkdown / inlineMarkdown STAY HERE, and stay vanilla. They are the
+// document's prose: commonmark -> app/js/sanitize.js -> DocumentFragment, with
+// the sanitizer as the one and only producer of trusted markup in the product.
+// The components inject what they return through `use:fragment` rather than
+// rendering it themselves, so the result is ordinary DOM that reader.js's block
+// renderers and the syntax highlighter can go on mutating afterwards.
 // ---------------------------------------------------------------------------
 import { elem } from '../dom.js';
-import { html } from '../html.js';
+import { app } from '../app-shell.js';
 import { renderInline, renderMarkdown } from '../commonmark.js';
 import { sanitizeToFragment } from '../sanitize.js';
-import { index, testIndex, groupsByDoc, statusOf } from './store.js';
-import { resolveReqRef, cssSafe } from './parse.js';
-import { warningIcon, playIcon } from '../icons.js';
+import { groupsByDoc } from './store.js';
+import { loadIslands, loadedIslands } from '../islands.js';
 
-/** @typedef {import('../requirements.js').RequirementEntry} RequirementEntry */
-/** @typedef {import('../editor/widgets.js').TestStep} TestStep */
-/** @typedef {import('./parse.js').ReqGroupBlock} ReqGroupBlock */
-/** @typedef {import('./parse.js').TestCaseDocBlock} TestCaseDocBlock */
+/** @typedef {import('./parse.js').ReqOrTestBlock} ReqOrTestBlock */
+/** @typedef {import('../islands.js').IslandModule} IslandModule */
 
 /**
  * INLINE markdown (code / emphasis / links, no block constructs) -> sanitized
@@ -36,150 +47,64 @@ export function blockMarkdown(text) {
   return sanitizeToFragment(renderMarkdown(String(text == null ? '' : text)));
 }
 
-/** @param {string} composedId - resolved requirement id, assumed present in index @returns {HTMLElement} */
-function reqLink(composedId) {
-  const rec = index.get(composedId);
-  return elem('a', { class: 'req-link', href: '#/' + rec.docId + '?req=' + encodeURIComponent(composedId) }, composedId);
-}
-/** @param {string} testId - resolved test id, assumed present in testIndex @returns {HTMLElement} */
-function testLink(testId) {
-  const rec = testIndex.get(testId);
-  return elem('a', { class: 'req-link tc-link', href: '#/' + rec.docId + '?test=' + encodeURIComponent(testId) }, testId);
-}
-/** @param {string} raw - the unresolved reference text @returns {HTMLElement} */
-function missingChip(raw) {
-  return elem('span', { class: 'req-missing', title: 'Not found: ' + raw }, warningIcon(), ' ' + raw);
-}
-/** @returns {HTMLElement} the em-dash placeholder for an empty trace cell */
-function noneCell() { return elem('span', 'req-none', '—'); }
 /**
- * Comma-join a list of nodes for a text-flow cell (a trace list, a Verifies line).
- * @param {Node[]} nodes
- * @param {string} sep
- * @returns {(Node|string)[]}
+ * A placeholder that has already been replaced by its host, waiting for the
+ * bundle so the component can go in.
+ * @typedef {Object} PendingMount
+ * @property {HTMLElement} host
+ * @property {ReqOrTestBlock} block
  */
-function joinNodes(nodes, sep) {
-  const out = [];
-  nodes.forEach((n, i) => { if (i) out.push(sep); out.push(n); });
-  return out;
-}
+
 /**
- * A trace cell's content: its comma-joined links/chips, or the em-dash placeholder.
- * @param {HTMLElement[]} nodes
- * @returns {(Node|string)[]|HTMLElement}
+ * Mount every pending block, then APPLY THE RESULT SYNCHRONOUSLY.
+ *
+ * The flush is the non-obvious half. main.js resolves a `?req=<ID>` deep link
+ * inside a single requestAnimationFrame after route() returns, by
+ * document.getElementById('req-' + id) - so every row has to be in the document
+ * by the end of this tick. Anything Svelte defers to a microtask lands after
+ * that frame, and the deep link then fails with no error, no warning and a page
+ * that simply did not scroll. tests/test_coverage_ui.py has the deep-link test
+ * that catches it.
+ * @param {IslandModule} mod
+ * @param {PendingMount[]} pending
+ * @returns {void}
  */
-function traceCell(nodes) { return nodes.length ? joinNodes(nodes, ', ') : noneCell(); }
-/** @param {HTMLElement} badge @param {string} id @returns {void} */
-function badgeStatus(badge, id) { const s = statusOf(id); if (s) badge.classList.add('req-badge-st-' + s.status); }
-/** @param {string} testId @returns {HTMLElement} */
-function resultBadge(testId) {
-  const st = (statusOf(testId) || {}).status || 'untested';
-  const label = st === 'pass' ? 'Pass' : st === 'fail' ? 'Fail' : st === 'partial' ? 'Partial' : 'Untested';
-  return elem('span', 'tc-result tc-result-' + st, label);
-}
-
-const REQ_HEADERS = ['Requirement', 'Description', 'Trace To', 'Trace From', 'Verified By'];
-
-/**
- * One row: an id badge (coloured by status), inline-markdown description, and
- * three trace cells (raw refs resolved against this row, plain ids for the rest).
- * @param {RequirementEntry} rec
- * @returns {HTMLElement}
- */
-function reqRow(rec) {
-  const badge = elem('span', 'req-badge', rec.id);
-  badgeStatus(badge, rec.id);
-  const to = rec.traceTo.map(raw => { const t = resolveReqRef(raw, rec); return t ? reqLink(t) : missingChip(raw); });
-  const from = rec.traceFrom.map(id => reqLink(id));
-  const verified = (rec.verifiedBy || []).map(id => testLink(id));
-  const tr = html`
-    <tr>
-      <td class="req-idcell">${badge}</td>
-      <td>${inlineMarkdown(rec.description)}</td>
-      <td>${traceCell(to)}</td>
-      <td>${traceCell(from)}</td>
-      <td>${traceCell(verified)}</td>
-    </tr>
-  `.firstElementChild;
-  if (rec.component && rec.group) tr.id = 'req-' + cssSafe(rec.id);
-  return tr;
+function mountBlocks(mod, pending) {
+  for (const { host, block } of pending) {
+    // The article was replaced before the bundle arrived (only reachable on the
+    // asynchronous path below). Mounting into a detached host would start
+    // effects nothing will ever stop: the teardown for THIS article has already
+    // run, so registering now would only add a leak to the registry.
+    if (!host.isConnected) continue;
+    const instance = block.kind === 'test'
+      ? mod.mountTestCase(host, block)
+      : mod.mountReqTable(host, block);
+    // Through the registry, not an import: reader.js imports requirements.js,
+    // which re-exports this file, so importing reader.js back would close a
+    // cycle. main.js publishes registerMounted for exactly this. The guard is
+    // for a shell that never booted (a harness) - a missed registration costs a
+    // leak, a thrown TypeError costs the whole document.
+    if (app.registerMounted) app.registerMounted(host, instance.destroy);
+  }
+  mod.flushSync();
 }
 
 /**
- * @param {ReqGroupBlock} g
- * @returns {HTMLElement}
- */
-function buildReqTable(g) {
-  const rows = g.rows.map(reqRow);
-  return html`
-    <figure class="req-group">
-      <figcaption class="req-cap">Requirements — ${g.group}</figcaption>
-      ${g.error && html`<p class="req-error">${warningIcon()} ${g.error}</p>`}
-      <div class="req-scroll">
-        <table class="req-tbl">
-          <thead><tr>${REQ_HEADERS.map(h => html`<th>${h}</th>`)}</tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </figure>
-  `.firstElementChild;
-}
-
-const TC_HEADERS = ['#', 'Action', 'Expected response'];
-
-/**
- * @param {TestStep} s
- * @param {number} i
- * @returns {DocumentFragment}
- */
-function testStepRow(s, i) {
-  return html`
-    <tr>
-      <td class="tc-stepno">${i + 1}</td>
-      <td class="tc-md">${blockMarkdown(s.action)}</td>
-      <td class="tc-steps tc-md">${blockMarkdown(s.expected)}</td>
-    </tr>
-  `;
-}
-
-/**
- * A test case renders as: a caption (name + id + Result [+ Run]), a "Verifies"
- * line, and the numbered action / expected-response step table.
- * @param {TestCaseDocBlock} block
- * @returns {HTMLElement}
- */
-function buildTestCase(block) {
-  const rec = block.rec;
-  const runBtn = (rec.component && rec.key) && elem('button', {
-    type: 'button', class: 'tc-run', title: 'Run this test case',
-    onClick: () => document.dispatchEvent(new CustomEvent('webdoc:run-test', { detail: { testId: rec.id } }))
-  }, playIcon(), 'Run');
-  const verifies = rec.verifies.length ? joinNodes(rec.verifies.map(id => reqLink(id)), ', ') : noneCell();
-
-  const fig = html`
-    <figure class="req-group test-case">
-      <figcaption class="req-cap tc-cap">Test case — ${rec.name} <span class="tc-id">${rec.id}</span>${resultBadge(rec.id)}${runBtn}</figcaption>
-      ${block.error && html`<p class="req-error">${warningIcon()} ${block.error}</p>`}
-      <p class="tc-verifies">Verifies: ${verifies}</p>
-      <div class="req-scroll">
-        <table class="req-tbl test-steps-tbl">
-          <thead><tr>${TC_HEADERS.map(h => html`<th>${h}</th>`)}</tr></thead>
-          <tbody>${rec.steps.map(testStepRow)}</tbody>
-        </table>
-      </div>
-    </figure>
-  `.firstElementChild;
-  if (rec.component && rec.key) fig.id = 'test-' + cssSafe(rec.id);
-  return fig;
-}
-
-/**
- * Replace each reqgroup placeholder with its built table (post-sanitize).
+ * Replace each reqgroup placeholder with the component that draws it
+ * (post-sanitize).
+ *
+ * Two-pass on purpose. The DOM swap happens for every placeholder FIRST, while
+ * this function is still synchronous, so the article's shape is final before
+ * anything else in renderDoc's pipeline (link resolution, block renderers, the
+ * highlighter) looks at it - and so the asynchronous fallback has a stable host
+ * to check `isConnected` on.
  * @param {Element} article
  * @param {string} docId
  * @returns {void}
  */
 export function renderRequirements(article, docId) {
+  /** @type {PendingMount[]} */
+  const pending = [];
   article.querySelectorAll('pre > code.language-reqgroup').forEach(code => {
     const pre = code.parentElement;
     const key = code.textContent.trim();
@@ -189,6 +114,22 @@ export function renderRequirements(article, docId) {
     const blocks = groupsByDoc.get(dId);
     const g = blocks && blocks[n];
     if (!g) { pre.remove(); return; }
-    pre.replaceWith(g.kind === 'test' ? buildTestCase(g) : buildReqTable(g));
+    // `.wd-mounted` is display:contents, so the host is not a box: the figure
+    // lays out exactly where the <pre> did. It is also the marker reader.js's
+    // find-in-page, link resolution and image resolution use to leave this
+    // subtree alone, because Svelte owns it from here on.
+    const host = elem('div', 'wd-mounted');
+    pre.replaceWith(host);
+    pending.push({ host: host, block: g });
   });
+  if (!pending.length) return;
+
+  // The bundle is normally already here - boot() awaits mountShellIslands()
+  // before the first route resolves - and when it is, mounting inline is what
+  // keeps renderDoc synchronous end to end (see mountBlocks). The fallback is
+  // for the cold case only, and accepts that a deep link into that one render
+  // may not scroll; the tables themselves still appear.
+  const mod = loadedIslands();
+  if (mod) { mountBlocks(mod, pending); return; }
+  loadIslands().then(m => mountBlocks(m, pending));
 }

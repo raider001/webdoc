@@ -36,6 +36,8 @@ Read them in order for a tour, or jump straight to the job at hand:
 - [Check test coverage](Docs/how-to/coverage) — see which requirements are
   verified and record manual results.
 - [Switch day and night](Docs/how-to/theming) — the light and dark themes.
+- [Set up accounts](Docs/how-to/accounts) — turn on sign-in, declare access
+  groups, and lock a chapter down.
 
 ## Where to go next
 

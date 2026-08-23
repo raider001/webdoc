@@ -26,6 +26,7 @@ const DROP_SUBTREE = new Set([
 
 const EMPTY = new Set();
 
+/** @type {Object<string, Set<string>>} tag name -> the attributes it may keep; anything not listed here keeps none */
 const ALLOWED_ATTRS = {
   a: new Set(['href', 'title']),
   img: new Set(['src', 'alt', 'title']),
@@ -125,7 +126,7 @@ function walk(node) {
     const next = child.nextSibling;
     if (child.nodeType === 1) {        // element
       walk(child);
-      scrubElement(child);
+      scrubElement(/** @type {Element} */ (child));
     } else if (child.nodeType === 8) { // comment
       child.remove();
     }

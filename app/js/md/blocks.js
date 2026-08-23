@@ -52,8 +52,12 @@ import { extractTables } from './tables.js';
  * @returns {MdBlockNode}
  */
 export function makeBlock(type, extra) {
+  /** @type {MdBlockNode} */
   const b = { type: type, children: [], open: true, lines: [], lastLineBlank: false };
-  if (extra) for (const k in extra) b[k] = extra[k];
+  // `extra` is a bag of the node's optional, type-specific fields, keyed by name
+  // at runtime; the loose view exists only for the copy itself, so callers still
+  // see a properly-typed MdBlockNode back.
+  if (extra) for (const k in extra) /** @type {Object<string, *>} */ (b)[k] = extra[k];
   return b;
 }
 
@@ -119,7 +123,7 @@ export function parseDocument(src) {
           if (b.children.length === 0) break;
           matched = d + 1; rest = rest.replace(/^[ \t]*/, '');
         }
-        else if (m.spaces >= b.marker) { rest = removeIndent(rest, b.marker); matched = d + 1; }
+        else if (m.spaces >= /** @type {number} */ (b.marker)) { rest = removeIndent(rest, /** @type {number} */ (b.marker)); matched = d + 1; }
         else break;
       } else if (b.type === 'list' || b.type === 'document') {
         matched = d + 1;
@@ -169,7 +173,7 @@ export function parseDocument(src) {
           if (tipB.kind === 'fenced') matched = path.length;
           else if (leading(rest).spaces >= 4 || reBlank.test(rest)) matched = path.length;
         } else if (tipB.type === 'htmlblock') {
-          if (!(tipB.kind >= 6 && reBlank.test(rest))) matched = path.length;
+          if (!(/** @type {number} */ (tipB.kind) >= 6 && reBlank.test(rest))) matched = path.length;
         }
       }
     }
@@ -348,7 +352,7 @@ export function parseDocument(src) {
       }
     } else if (cur.type === 'htmlblock') {
       cur.lines.push(rest);
-      if (htmlBlockCloses(cur.kind, rest)) closeBlock(path.pop());
+      if (htmlBlockCloses(/** @type {number} */ (cur.kind), rest)) closeBlock(path.pop());
     } else if (cur.type === 'paragraph') {
       cur.lines.push(rest.replace(/^ {0,3}/, ''));
     } else if (cur.type === 'heading') {
@@ -400,11 +404,11 @@ function maybeCloseParagraph(container, path) {
  * ordered start other than 1) apply only then. When a matching list is the
  * container instead, any marker of that list simply opens a sibling item.
  * @param {string} rest
- * @param {MdBlockNode} leaf - the open paragraph
+ * @param {MdBlockNode} _leaf - the open paragraph; not consulted, because every construct that can begin a block here is decided from `rest` and `interrupting` alone
  * @param {boolean} interrupting
  * @returns {boolean}
  */
-function startsNewBlock(rest, leaf, interrupting) {
+function startsNewBlock(rest, _leaf, interrupting) {
   const sp = leading(rest).spaces;
   if (sp >= 4) return false; // indented code can't interrupt a paragraph
   if (reThematic.test(rest)) return true;

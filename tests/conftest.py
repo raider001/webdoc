@@ -3,15 +3,21 @@
 These tests drive Playwright's OWN Chromium (via the Python binding only). They
 never touch any in-app / shared browser, and they never edit application source.
 
-The suite assumes the app is served at http://127.0.0.1:8017. In normal use that
-is `serve.py` (which also answers /site.json and the /docs/ JSON listings the app
-needs). If nothing is listening there, this fixture starts a plain
-`python -m http.server` on that port as a fallback for the session and tears it
-down afterwards. NOTE: the plain http.server can serve the static conformance
-harnesses, but it does NOT emit /site.json or /docs/ listings, so the end-to-end
-tests need serve.py to be the thing running. The fixture prefers whatever is
-already up.
+The suite runs against the real `serve.py`, started by the fixture below with
+`tests/fixtures-config.json`. That config mounts ONE source - `Guides`, from
+`tests/fixtures/` - so the suite owns its corpus outright and the product's own
+documentation under `docs/` is never what is being asserted. It also points the
+index at `.webdoc-index-test/`, so a test run never clobbers the real index.
+
+Running the real server (rather than the `python -m http.server` fallback this
+file used to fall back to) is what makes the suite trustworthy: only `serve.py`
+answers `/site.json`, the `/api/index/*` endpoints and the `/docs/` listings, and
+only `serve.py` sends the Content-Security-Policy. A harness that silently
+degraded to a plain static server was testing the app under a policy no real
+user ever gets.
 """
+import os
+import socket
 import subprocess
 import sys
 import time
@@ -19,9 +25,10 @@ import urllib.request
 
 import pytest
 
-APP_DIR = "C:/Users/panda/Web_Doc/app"
-PORT = 8017
-HOST = "127.0.0.1"
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+SERVE_PY = os.path.join(ROOT, "serve.py")
+FIXTURE_CONFIG = os.path.join(HERE, "fixtures-config.json")
 
 
 def _server_responding(url, timeout=1.5):
@@ -32,31 +39,68 @@ def _server_responding(url, timeout=1.5):
         return False
 
 
+def _serves_fixtures(base):
+    """True only if whatever is listening is OUR server on OUR corpus.
+
+    A stale `serve.py` on the product's own `docs/` answers /site.json perfectly
+    well, so "something responded" is not enough - the suite would then assert
+    fixture ids against the product corpus and fail with a confusing diff.
+    """
+    try:
+        with urllib.request.urlopen(base.rstrip("/") + "/site.json", timeout=2) as resp:
+            import json
+            cfg = json.load(resp)
+    except Exception:
+        return False
+    names = [s.get("name") for s in cfg.get("sources", [])]
+    return names == ["Guides"] and cfg.get("defaultDoc") == "Guides/getting-started"
+
+
+def _port_of(base):
+    return int(base.rsplit(":", 1)[-1].rstrip("/"))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def static_server(base_url):
-    """Ensure something is serving the app at base_url for the whole session."""
-    root = base_url.rstrip("/") + "/"
-    if _server_responding(root):
-        # Already up (normally serve.py). Leave it exactly as we found it.
-        yield base_url
-        return
+    """Serve the fixture corpus with the real serve.py for the whole session."""
+    base = base_url.rstrip("/")
 
+    if _server_responding(base + "/"):
+        if _serves_fixtures(base):
+            # Already up on our corpus (a developer running it by hand). Leave it.
+            yield base_url
+            return
+        raise RuntimeError(
+            f"Something is already listening on {base} but it is not serving the "
+            f"fixture corpus. That is almost certainly a serve.py running the "
+            f"product's own docs/. Stop it, or point pytest at another port with "
+            f"--base-url http://127.0.0.1:<port>."
+        )
+
+    port = _port_of(base)
+    log_path = os.path.join(HERE, ".serve-e2e.log")
+    log = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "http.server", str(PORT),
-         "--bind", HOST, "--directory", APP_DIR],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [sys.executable, SERVE_PY, "--config", FIXTURE_CONFIG,
+         "--host", "127.0.0.1", "--port", str(port)],
+        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, text=True,
     )
     try:
-        deadline = time.time() + 15
+        deadline = time.time() + 30
         while time.time() < deadline:
-            if _server_responding(root):
+            if proc.poll() is not None:
+                log.flush()
+                raise RuntimeError(
+                    "serve.py exited immediately:\n" + _tail(log_path)
+                )
+            # Wait for the corpus, not merely for a socket: the index builds on a
+            # background thread, and /api/index/* 503s until it is ready.
+            if _serves_fixtures(base) and _index_ready(base):
                 break
             time.sleep(0.25)
         else:
-            proc.terminate()
             raise RuntimeError(
-                f"Could not start a static server on {root}. "
-                "Start serve.py manually and retry."
+                f"serve.py did not come up on {base} within 30s:\n" + _tail(log_path)
             )
         yield base_url
     finally:
@@ -65,6 +109,25 @@ def static_server(base_url):
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        log.close()
+
+
+def _index_ready(base):
+    """The tree, search and map all need the SQLite index; wait for it."""
+    try:
+        with urllib.request.urlopen(base.rstrip("/") + "/api/index/status", timeout=2) as resp:
+            import json
+            return json.load(resp).get("state") in ("ready", "error")
+    except Exception:
+        return False
+
+
+def _tail(path, n=40):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return "".join(fh.readlines()[-n:])
+    except OSError:
+        return "(no log)"
 
 
 @pytest.fixture(scope="session")
