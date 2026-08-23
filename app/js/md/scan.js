@@ -1,20 +1,10 @@
-// md/scan.js - link-syntax scanners shared by the block phase (link reference
+// md/scan.ts - link-syntax scanners shared by the block phase (link reference
 // definitions) and the inline phase (inline + reference links/images):
 // link destinations, titles, bracket labels, and link-label normalization.
 // No dependencies.
 // ---------------------------------------------------------------------------
 /**
- * Result of scanning a link destination (either `<...>` or a bare,
- * parenthesis-balanced run) starting at a source index; consumed wherever a
- * link or ref-def destination is parsed (md/blockpost.js, md/inline.js).
- * @typedef {Object} LinkDestScan
- * @property {string} dest
- * @property {number} pos
- */
-/**
- * @param {string} text
- * @param {number} i - index to start scanning from
- * @returns {LinkDestScan|null}
+ * @param i index to start scanning from
  */
 export function scanDest(text, i) {
     if (text[i] === '<') {
@@ -67,17 +57,7 @@ export function scanDest(text, i) {
     return { dest: dest, pos: j };
 }
 /**
- * Result of scanning an optional link title (quoted or parenthesized) starting
- * at a source index; consumed by both the ref-def parser (md/blockpost.js) and
- * the inline link/image closer (md/inline.js).
- * @typedef {Object} LinkTitleScan
- * @property {string} title
- * @property {number} pos
- */
-/**
- * @param {string} text
- * @param {number} i - index to start scanning from
- * @returns {LinkTitleScan|null}
+ * @param i index to start scanning from
  */
 export function scanTitle(text, i) {
     const open = text[i];
@@ -105,21 +85,11 @@ export function scanTitle(text, i) {
 // it does NOT resolve backslash escapes or entities, so `[foo\!]` and `[foo!]`
 // are different labels.
 /**
- * @param {string} s
- * @returns {string} the case-folded, whitespace-collapsed label used as the refs map key
+ * @returns the case-folded, whitespace-collapsed label used as the refs map key
  */
 export function normLabel(s) { return s.replace(/[ \t\r\n]+/g, ' ').trim().toLowerCase().toUpperCase().toLowerCase(); }
 /**
- * Result of scanning a `[...]` bracket label, used by md/inline.js to resolve
- * the collapsed/full reference-link form `[text][label]`.
- * @typedef {Object} BracketLabelScan
- * @property {string} label
- * @property {number} pos
- */
-/**
- * @param {string} s
- * @param {number} i - index to start scanning from (must point at the opening '[')
- * @returns {BracketLabelScan|null}
+ * @param i index to start scanning from (must point at the opening '[')
  */
 export function scanBracketLabel(s, i) {
     if (s[i] !== '[')

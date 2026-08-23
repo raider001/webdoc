@@ -1,52 +1,8 @@
-// catalog.js - site config and document loading.
+// catalog.ts - site config and document loading.
 // The server owns "what documents exist": the tree, search and map are all fed
 // by its /api/index/* endpoints. All that is left here is the two fetches the
 // browser still makes for itself - /site.json at boot, and one document's text
 // on demand (whose <!--meta--> header is split off client-side).
-/**
- * One entry of site.json's `sources` array, describing a doc source folder;
- * different consumers read different subsets of its fields (component for
- * requirement-id prefixing, testResults for xUnit discovery). This is the
- * canonical definition - referenced elsewhere via a type-only import.
- * @typedef {Object} SourceConfig
- * @property {string} name
- * @property {string} url
- * @property {string} [component]
- * @property {string} [testResults]
- */
-/**
- * The parsed contents of /site.json.
- * @typedef {Object} SiteConfig
- * @property {string} siteTitle
- * @property {string} defaultDoc
- * @property {string} [theme]
- * @property {SourceConfig[]} sources
- */
-/**
- * The canonical in-memory document record: starts as a bare stub built from an
- * id (app-shell.js's docFromId) and is filled in with parsed metadata/body by
- * loadDoc(); this is the shape almost everything else in the app (graph, links,
- * requirements, reader, editor) is keyed on. This is the canonical definition -
- * referenced elsewhere via a type-only import.
- * @typedef {Object} Doc
- * @property {string} id
- * @property {string} source
- * @property {string} rel
- * @property {string} url
- * @property {string} name
- * @property {Object<string, *>} [meta] - raw parsed frontmatter
- * @property {string} [body]
- * @property {string|null} [metaError]
- * @property {string} [title]
- * @property {string} [description]
- * @property {string[]} [assumes]
- * @property {string[]} [next]
- * @property {boolean} [_loaded]
- * @property {number} [_rev] - bumped by loadDoc every time the body is (re)read;
- *   see the comment at that assignment for who needs it and why the id alone
- *   is not enough to tell two renders of this object apart
- */
-/** @returns {Promise<SiteConfig>} */
 export async function loadSite() {
     const res = await fetch('/site.json', { cache: 'no-cache' });
     if (!res.ok)
@@ -57,8 +13,7 @@ export async function loadSite() {
 // in an HTML comment: <!--meta { ... } -->  at the very top of the file.
 const META_RE = /^﻿?\s*<!--\s*meta\b([\s\S]*?)-->\s*/i;
 /**
- * @param {string} text - raw file contents
- * @returns {{meta: Object<string, *>, body: string, metaError: string|null}}
+ * @param text - raw file contents
  */
 export function splitMeta(text) {
     const m = text.match(META_RE);
@@ -77,14 +32,36 @@ export function splitMeta(text) {
  * What loadDoc throws on a 401/403: an ordinary Error with the server's
  * explanation attached, so a catch can tell "you may not read this" apart from
  * "no such document" (main.js's router branches on `.restricted`).
- * @typedef {Error & {restricted: true, detail: Object<string, *>}} RestrictedError
+ *
+ * A class, not a monkey-patched Error, because the two extra properties are the
+ * whole point of the value and a caller has no other way to discover them. The
+ * RUNTIME shape is deliberately unchanged from the hand-patched version it
+ * replaces - `name` is left inherited as 'Error' so the message text and
+ * `String(err)` read exactly as before, and `restricted` is still a plain own
+ * property that a `.restricted` check in untyped code finds.
  */
+export class RestrictedError extends Error {
+    restricted = true;
+    detail;
+    constructor(message, detail) {
+        super(message);
+        this.detail = detail;
+    }
+}
+/**
+ * Narrow a caught value to the refusal above. Written as a duck-type test on
+ * `restricted` rather than `instanceof`, because that is what the untyped
+ * callers already do and because an error that crossed a module boundary is not
+ * guaranteed to be an instance of THIS realm's class.
+ */
+export function isRestrictedError(e) {
+    return !!e && typeof e === 'object' && e.restricted === true;
+}
 /**
  * Fetch a single document's text and parse its metadata. Caches on the doc
  * (mutates and returns the same object; a no-op if already loaded).
- * @param {Doc} doc
- * @returns {Promise<Doc>}
- * @throws {RestrictedError} when the server refuses the document (401/403)
+ *
+ * Throws a RestrictedError when the server refuses the document (401/403).
  */
 export async function loadDoc(doc) {
     if (doc._loaded)
@@ -101,10 +78,7 @@ export async function loadDoc(doc) {
         catch (e) {
             detail = {};
         }
-        const err = /** @type {RestrictedError} */ (new Error('Restricted: ' + doc.id));
-        err.restricted = true;
-        err.detail = detail;
-        throw err;
+        throw new RestrictedError('Restricted: ' + doc.id, detail);
     }
     if (!res.ok)
         throw new Error('Document not found: ' + doc.id);
@@ -136,10 +110,6 @@ export async function loadDoc(doc) {
     doc._loaded = true;
     return doc;
 }
-/**
- * @param {Doc} doc
- * @returns {string}
- */
 function fallbackTitle(doc) {
     const base = doc.name.replace(/\.md$/i, '').replace(/[-_]+/g, ' ');
     return base.replace(/\b\w/g, c => c.toUpperCase());

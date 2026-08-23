@@ -1,4 +1,4 @@
-// main.js - application entry point. Wires the shell together:
+// main.ts - application entry point. Wires the shell together:
 // theme, discovery, hash routing, the render pipeline, the drawer and search.
 import { loadSite, loadDoc } from './catalog.js';
 import { searchDocs } from './search.js';
@@ -18,51 +18,7 @@ import { sunIcon, moonIcon } from './icons.js';
 import { auth, loadAuth, signInRequired, invalidateAccess } from './auth.js';
 import { setupAccountButton, mountSignInWall, restrictedPanel } from './auth-ui.js';
 import { announce } from './announce.js';
-/** @typedef {import("./catalog.js").SourceConfig} SourceConfig */
-/** @typedef {import("./coverage.js").CoverageResults} CoverageResults */
-/** @typedef {import("./requirements.js").TestCaseEntry} TestCaseEntry */
-/**
- * The drawer's open/close handle returned by setupDrawer(); stashed as
- * `appDrawer` and handed to setupDrawerSearch and app.closeDrawer.
- * @typedef {Object} DrawerHandle
- * @property {() => void} open
- * @property {() => void} close
- */
-/**
- * Detail payload of the `webdoc:run-test` CustomEvent, dispatched by a
- * document's per-test-case Run button and consumed by setupTestRun.
- * @typedef {Object} RunTestEventDetail
- * @property {string} testId
- */
-/**
- * The JSON body of GET /api/index/status, polled by waitForIndex while the
- * server builds its first-run SQLite index.
- * @typedef {Object} IndexStatus
- * @property {string} state - e.g. 'building' | 'ready' | 'error'
- * @property {number} pct - percent complete (0 while unknown)
- * @property {number} docs - documents indexed so far (0 while unknown)
- */
-/**
- * The first-run index-build overlay's live DOM handle, held in the
- * module-level `indexOverlay` while the overlay is shown.
- * @typedef {Object} IndexOverlayHandle
- * @property {Element} ov - the overlay root, appended to <body>
- * @property {HTMLElement} track - the progress bar track (toggles .is-indeterminate)
- * @property {HTMLElement} fill - the progress bar fill (width set to a percentage)
- * @property {HTMLElement} stat - the status line text
- */
-/**
- * The options object built for a single ad-hoc test run (triggered by a
- * document's per-test Run button) and handed to runner.js's openRunner, which
- * reads every field back out to render the run screen and later save results.
- * @typedef {Object} RunnerOpts
- * @property {TestCaseEntry[]} tests
- * @property {CoverageResults} results
- * @property {SourceConfig[]} sources
- * @property {() => void} onSaved
- */
 // The drawer handle (open/close), created at boot; exposed to modules via app.closeDrawer.
-/** @type {DrawerHandle|null} */
 let appDrawer = null;
 // ---- Theme ----------------------------------------------------------------
 function setupTheme() {
@@ -90,16 +46,15 @@ function setupTheme() {
  * Mount the Svelte drawer tree and search-results list, and publish the two
  * calls the rest of the shell makes into them on the `app` registry.
  *
- * The registry, not an import: reader.js marks the active document on EVERY
- * render and authoring.js invalidates after every create/delete, and neither
+ * The registry, not an import: reader.ts marks the active document on EVERY
+ * render and authoring.ts invalidates after every create/delete, and neither
  * should have to await a dynamic import on a hot path or grow a dependency on
  * the bundle. Both call sites already guard (`if (app.setTreeActive)`), so the
  * shell degrades to an unhighlighted tree rather than throwing if the island
  * ever fails to load.
- * @returns {Promise<void>}
  */
 async function mountShellIslands() {
-    const select = (/** @type {string} */ id) => { navigate(id); if (appDrawer)
+    const select = (id) => { navigate(id); if (appDrawer)
         appDrawer.close(); };
     const islands = await loadIslands();
     // Drawer.
@@ -108,9 +63,9 @@ async function mountShellIslands() {
     app.setTreeActive = islands.setActive;
     app.invalidateTree = islands.invalidateTree;
     // The article's teardown registry, published so a module that MOUNTS something
-    // inside the article can register it without importing reader.js. auth-ui.js is
-    // the first caller and the reason this is a registry entry at all: reader.js
-    // imports auth-ui.js for the restricted-section notice, so the reverse import
+    // inside the article can register it without importing reader.ts. auth-ui.ts is
+    // the first caller and the reason this is a registry entry at all: reader.ts
+    // imports auth-ui.ts for the restricted-section notice, so the reverse import
     // would close a cycle.
     app.registerMounted = registerMounted;
     // Reading-view satellites. Mounted ONCE, here, and driven by props for the
@@ -122,7 +77,7 @@ async function mountShellIslands() {
         islands.setCrumbs(docId);
         islands.setToc(toc);
         islands.setFootLinks(assumes, next);
-        // Apply NOW, not on the next microtask: reader.js reads the produced TOC
+        // Apply NOW, not on the next microtask: reader.ts reads the produced TOC
         // links back in this same tick for scroll-spy, and boot sets
         // data-app-ready="1" as soon as route() returns.
         islands.flushSync();
@@ -133,7 +88,6 @@ async function mountShellIslands() {
 }
 // The island's export surface, stashed at mount so setupDrawerSearch can push
 // results into the store without re-importing the bundle on every keystroke.
-/** @type {import('./islands.js').IslandModule|null} */
 let searchIsland = null;
 // ---- Lazy feature modules -------------------------------------------------
 /**
@@ -149,13 +103,9 @@ let searchIsland = null;
  * itself: by the time the module has loaded, the click that triggered the load
  * is over, so THIS listener has to open it for that first press. If the module
  * also attached its own listener, every later click would toggle twice.
- * @param {string} btnId
- * @param {() => Promise<import('./map-view.js').OverlayHandle>} load
- * @returns {void}
  */
 function lazyOverlayButton(btnId, load) {
     const btn = el(btnId);
-    /** @type {Promise<import('./map-view.js').OverlayHandle>|null} */
     let ready = null;
     btn.addEventListener('click', async () => {
         const first = !ready;
@@ -173,18 +123,17 @@ function lazyOverlayButton(btnId, load) {
     });
 }
 // ---- Drawer ---------------------------------------------------------------
-/** @returns {DrawerHandle} */
 function setupDrawer() {
     const drawer = el('doc-tree'), scrim = el('scrim'), btn = el('hamburger');
-    /** Where focus was before the drawer took it, to hand back on close. @type {HTMLElement|null} */
+    /** Where focus was before the drawer took it, to hand back on close. */
     let lastFocus = null;
     const open = () => {
-        lastFocus = /** @type {HTMLElement} */ (document.activeElement);
+        lastFocus = document.activeElement;
         drawer.hidden = false;
         scrim.hidden = false;
         btn.setAttribute('aria-expanded', 'true');
         document.documentElement.style.overflow = 'hidden';
-        /** @type {HTMLElement} */ (drawer.querySelector('#treeSearch') || drawer).focus();
+        (drawer.querySelector('#treeSearch') || drawer).focus();
     };
     const close = () => {
         drawer.hidden = true;
@@ -203,10 +152,10 @@ function setupDrawer() {
 }
 // ---- All-documents search (titles + headings) in the drawer ---------------
 function setupDrawerSearch() {
-    const input = /** @type {HTMLInputElement} */ (el('treeSearch'));
+    const input = el('treeSearch');
     const results = el('searchResults');
     const tree = el('treeList');
-    let seq = 0, ctrl = /** @type {AbortController|null} */ (null), timer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
+    let seq = 0, ctrl = null, timer = null;
     input.addEventListener('input', () => {
         const q = input.value.trim();
         if (timer)
@@ -238,7 +187,6 @@ function setupDrawerSearch() {
             ctrl = new AbortController();
             if (searchIsland)
                 searchIsland.beginSearch(q);
-            /** @type {import('./search.js').SearchResult[]} */
             let hits = [];
             try {
                 hits = await searchDocs(q, 50, ctrl.signal);
@@ -261,7 +209,6 @@ function setupDrawerSearch() {
  * Hash-route handler: resolves the current #/<id>?req=...&test=... route to a
  * document (lazily loading it via getDoc/loadDoc), renders it, and reveals any
  * deep-linked requirement or test.
- * @returns {Promise<void>}
  */
 async function route() {
     const hash = location.hash || '';
@@ -296,9 +243,6 @@ async function route() {
 /**
  * Render the "this page is restricted" screen in place of the document, and
  * reset the chrome around it so nothing from the previous page lingers.
- * @param {string} docId
- * @param {Object<string, *>} detail
- * @returns {void}
  */
 function showRestricted(docId, detail) {
     // Clear the current document first. Leaving it set meant Edit and Delete stayed
@@ -330,14 +274,12 @@ function showRestricted(docId, detail) {
     document.title = 'Restricted — ' + ((state.site && state.site.siteTitle) || 'Documentation');
     announce('This page is restricted.');
 }
-/** @param {string} msg */
 function showError(msg) {
     const content = el('content');
     teardownMounted(content); // this replaces the article too
     content.textContent = '';
     content.appendChild(elem('div', 'doc-error', msg));
 }
-/** @param {string} id */
 function navigate(id) {
     if (location.hash === '#/' + id)
         route();
@@ -346,7 +288,7 @@ function navigate(id) {
 }
 // Wire the shell's own handles onto the service registry so the feature modules
 // (map, coverage, authoring) can route, report errors and close the drawer without
-// importing main.js. The rest of the registry is set by those modules at load.
+// importing main.ts. The rest of the registry is set by those modules at load.
 app.navigate = navigate;
 app.showError = showError;
 app.closeDrawer = () => { if (appDrawer)
@@ -358,7 +300,7 @@ app.closeDrawer = () => { if (appDrawer)
  * badges after saving.
  */
 function setupTestRun() {
-    document.addEventListener('webdoc:run-test', /** @param {CustomEvent<RunTestEventDetail>} e */ async (e) => {
+    document.addEventListener('webdoc:run-test', async (e) => {
         const id = e.detail && e.detail.testId;
         const t = testList().find(x => x.id === id);
         if (!t)
@@ -382,7 +324,6 @@ function setupTestRun() {
 // the /api/index/* endpoints aren't ready - so show a progress bar (driven by
 // /api/index/status) instead of a blank app. Warm restarts report "ready" at once,
 // so this returns immediately and nothing is shown.
-/** @type {IndexOverlayHandle|null} */
 let indexOverlay = null;
 function showIndexOverlay() {
     if (indexOverlay)
@@ -406,7 +347,6 @@ function showIndexOverlay() {
     announce('Preparing the document index.');
     indexOverlay = { ov: ov, track: track, fill: fill, stat: stat };
 }
-/** @param {IndexStatus} s */
 function updateIndexOverlay(s) {
     if (!indexOverlay)
         return;
@@ -426,7 +366,6 @@ function hideIndexOverlay() {
     indexOverlay = null;
 }
 // Block boot until the server index is ready, showing progress if it's a cold build.
-/** @returns {Promise<void>} */
 async function waitForIndex() {
     for (;;) {
         let s;
@@ -452,9 +391,8 @@ async function waitForIndex() {
 // so .md files added/edited/removed OUTSIDE the app (a text editor, git, etc)
 // are picked up without a restart. Poll the same /api/index/status endpoint
 // boot already uses and react when its "generation" counter moves.
-/** The last index generation seen; null until the first poll sets the baseline. @type {number|null} */
+/** The last index generation seen; null until the first poll sets the baseline. */
 let lastGeneration = null;
-/** @returns {Promise<void>} */
 async function pollForChanges() {
     let s;
     try {
@@ -477,13 +415,11 @@ async function pollForChanges() {
     lastGeneration = s.generation;
     onExternalChange();
 }
-/** @returns {void} */
 function startChangeWatcher() { setInterval(pollForChanges, 4000); }
 /**
  * Refresh the tree/map/current doc after the server reports files changed on
  * disk. Never touches an in-progress edit - an open editor buffer is left
  * alone (just a status note) so unsaved work is never silently discarded.
- * @returns {Promise<void>}
  */
 async function onExternalChange() {
     invalidateGraphModel();
@@ -526,7 +462,6 @@ const REQUIRED_OVERLAY_IDS = ['graphOverlay', 'covOverlay'];
 /**
  * Fail fast, and once, if index.html and the code have drifted apart. One error
  * naming every missing id beats discovering them a null dereference at a time.
- * @returns {void}
  */
 function assertShellIds() {
     const missing = REQUIRED_IDS.filter(id => !el(id));
@@ -538,12 +473,11 @@ function assertShellIds() {
     throw err;
 }
 /**
- * The same check for the hosts overlays.js builds. Separate because it can only
+ * The same check for the hosts overlays.ts builds. Separate because it can only
  * run after ensureOverlayHosts(), and because a failure here means a different
  * thing: not "the template drifted" but "the host module stopped building them",
  * which is what would silently reintroduce the null dereference this contract
  * exists to remove.
- * @returns {void}
  */
 function assertOverlayIds() {
     const missing = REQUIRED_OVERLAY_IDS.filter(id => !el(id));
@@ -558,7 +492,6 @@ function assertOverlayIds() {
  * Application entry point: wires theme/drawer/search/graph/coverage/authoring,
  * loads site config and the server-backed requirement/test index, renders the
  * initial tree, and resolves the starting route.
- * @returns {Promise<void>}
  */
 async function boot() {
     // Before anything touches a node: prove the template still has what we ask for.

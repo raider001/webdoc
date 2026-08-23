@@ -1,4 +1,4 @@
-// graph/render.js - the CANVAS scene: one <canvas> for the whole graph, drawn with
+// graph/render.ts - the CANVAS scene: one <canvas> for the whole graph, drawn with
 // a uniform-grid spatial index + viewport culling + 3-tier level-of-detail so a
 // 10k-50k node map stays fast (draw cost tracks what's ON SCREEN, not the corpus).
 // Replaces the old one-SVG-<foreignObject>-per-node renderer. Public surface is
@@ -7,18 +7,10 @@
 // the shared context `g` and is consulted each frame - there are no per-node DOM
 // elements to toggle classes on anymore.
 import { LO, clamp, fmt } from './util.js';
-/** @typedef {import('../graph.js').GraphContext} GraphContext */
-/** @typedef {import('../graph.js').GraphBox} GraphBox */
-/** @typedef {import('../graph.js').GraphEdgeItem} GraphEdgeItem */
-/** @typedef {import('./layout.js').ModelGraphNode} ModelGraphNode */
-/** @typedef {import('./layout.js').LayoutNode} LayoutNode */
-/** @typedef {import('../coverage.js').CoverageStatus} CoverageStatus */
 // A test case is pass/fail/untested; a requirement shows its % passing.
 /**
  * The status label shown under a node's title.
- * @param {CoverageStatus} st
- * @param {string} kind - 'test' | 'req' (g.kindOf(id))
- * @returns {string}
+ * @param kind - 'test' | 'req' (g.kindOf(id))
  */
 function covLabel(st, kind) {
     if (kind === 'test')
@@ -28,10 +20,6 @@ function covLabel(st, kind) {
 // Uniform auto-sizing (opts.autoSize, coverage view): pick ONE box size big enough
 // for the widest title + the content lines. Uses CANVAS text measurement - no DOM,
 // no forced reflow (the old version did ~2 reflows per node; this does none).
-/**
- * @param {GraphContext} g
- * @returns {{nodeW: number, nodeH: number}}
- */
 export function computeNodeSize(g) {
     const ctx = document.createElement('canvas').getContext('2d');
     ctx.font = '600 13.5px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -63,15 +51,12 @@ export function computeNodeSize(g) {
  * Sets g.extPos (id -> box) and g.nodePos (resolves either a doc node or an
  * external node by id); extends layout.width/height so fit()/minimap frame
  * the external boxes too.
- * @param {GraphContext} g
- * @returns {void}
  */
 export function positionExternal(g) {
     const extPos = new Map();
     const layout = g.layout;
     if (g.externalNodes.length) {
         const EXT_W = 172, EXT_H = 46, DROP = 44;
-        /** @type {Map<string, string[]>} */
         const srcOf = new Map(); // external id -> the doc ids that link to it
         for (const pl of g.pageLinks) {
             if (String(pl.to).indexOf('ext:') === 0) {
@@ -82,9 +67,8 @@ export function positionExternal(g) {
         }
         const PAD = 16;
         /**
-         * @param {number} x - candidate top-left for an EXT_W x EXT_H box
-         * @param {number} y
-         * @returns {boolean} whether it would overlap a doc node or an already-placed external box
+         * @param x - candidate top-left for an EXT_W x EXT_H box
+         * @returns whether it would overlap a doc node or an already-placed external box
          */
         const hits = (x, y) => {
             for (const [, n] of layout.nodes)
@@ -97,10 +81,9 @@ export function positionExternal(g) {
         };
         const STEP = 20, MAXR = 120;
         /**
-         * @param {number} ax - the wanted top-left (under the linking doc)
-         * @param {number} ay
-         * @returns {{x: number, y: number}} the wanted spot if free, else the first
-         *   free spot on an expanding ring around it, else a slot below everything
+         * @param ax - the wanted top-left (under the linking doc)
+         * @returns the wanted spot if free, else the first free spot on an expanding
+         *   ring around it, else a slot below everything
          */
         const nearestFree = (ax, ay) => {
             if (ax >= 0 && ay >= 0 && !hits(ax, ay))
@@ -136,22 +119,15 @@ export function positionExternal(g) {
     g.extPos = extPos;
     g.nodePos = (id) => layout.nodes.get(id) || extPos.get(id) || null;
 }
-// ---------------------------------------------------------------------------
-// Colour tokens: read the live CSS variables ONCE (so canvas matches the theme).
-// A MutationObserver on <html data-theme> refreshes them + repaints on toggle.
-// ---------------------------------------------------------------------------
 /**
- * @param {Element} el
- * @returns {Object<string, *>} colour tokens read from `el`'s computed CSS
- *   custom properties (with fallbacks), plus a nested `st` sub-object for
- *   coverage-status colours
+ * @returns colour tokens read from `el`'s computed CSS custom properties (with
+ *   fallbacks), plus a nested `st` sub-object for coverage-status colours
  */
 function readColors(el) {
     const cs = getComputedStyle(el);
     /**
-     * @param {string} n - CSS custom property name
-     * @param {string} fb - used when the property is unset (canvas has no cascade to fall back on)
-     * @returns {string}
+     * @param n - CSS custom property name
+     * @param fb - used when the property is unset (canvas has no cascade to fall back on)
      */
     const v = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
     return {
@@ -180,21 +156,14 @@ function readColors(el) {
 }
 // Keyed by GraphEdgeItem.cat, which is a plain string off the edge item - so this
 // is a lookup table, not a fixed-key record.
-/** @type {Object<string, number[]>} */
 const CAT_DASH = { prereq: [], recnext: [6, 5], trace: [2, 3], pagelink: [5, 3] };
 /**
- * @param {Object<string,*>} colors - readColors() result
- * @param {string} cat - edge category ('prereq'|'recnext'|'trace'|'pagelink')
- * @returns {string} CSS colour for that edge category
+ * @param colors - readColors() result
+ * @param cat - edge category ('prereq'|'recnext'|'trace'|'pagelink')
+ * @returns CSS colour for that edge category
  */
 function catColor(colors, cat) { return cat === 'recnext' ? colors.recnext : cat === 'trace' ? colors.trace : cat === 'pagelink' ? colors.pagelink : colors.prereq; }
 // Point on node n's border in the direction of (tx,ty) - for straight overlay edges.
-/**
- * @param {GraphBox} n
- * @param {number} tx
- * @param {number} ty
- * @returns {{x: number, y: number}}
- */
 function borderPoint(n, tx, ty) {
     const cx = n.x + n.w / 2, cy = n.y + n.h / 2;
     const dx = tx - cx, dy = ty - cy;
@@ -206,13 +175,6 @@ function borderPoint(n, tx, ty) {
     return { x: cx + dx * s, y: cy + dy * s };
 }
 // Wrap `text` to at most maxLines lines within maxW px (canvas ctx), ellipsizing.
-/**
- * @param {CanvasRenderingContext2D} ctx
- * @param {string} text
- * @param {number} maxW
- * @param {number} maxLines
- * @returns {string[]}
- */
 function wrapLines(ctx, text, maxW, maxLines) {
     const words = String(text == null ? '' : text).split(/\s+/).filter(Boolean);
     if (!words.length)
@@ -249,8 +211,6 @@ function wrapLines(ctx, text, maxW, maxLines) {
 /**
  * Build the canvas + spatial grid index + precomputed edge polylines, then
  * install the draw loop and hit-test helpers. Called once per createGraph.
- * @param {GraphContext} g
- * @returns {void}
  */
 export function renderScene(g) {
     const canvas = document.createElement('canvas');
@@ -355,8 +315,6 @@ export function renderScene(g) {
 /**
  * Any one laid-out node (for its shared box size), or the LO default if the
  * layout is empty.
- * @param {GraphContext} g
- * @returns {LayoutNode|{w: number, h: number}}
  */
 function firstNode(g) { for (const n of g.layout.nodes.values())
     return n; return { w: LO.nodeW, h: LO.nodeH }; }
@@ -366,23 +324,14 @@ function firstNode(g) { for (const n of g.layout.nodes.values())
  * Build a uniform spatial grid over world space (cell size ~ a few node
  * widths) mapping cell key -> node ids overlapping that cell, for O(visible)
  * hit-testing and culling instead of scanning every node.
- * @param {GraphContext} g
- * @returns {void}
  */
 function buildGrid(g) {
     const nodeW = (g.layout.nodes.size ? firstNode(g).w : LO.nodeW);
     const cell = Math.max(256, Math.round(nodeW * 1.5));
-    /** @type {Map<string, string[]>} */
     const map = new Map();
     /**
      * File `id` under every grid cell its box overlaps (a box wider than a cell
      * spans several, so culling never misses a partially-visible node).
-     * @param {string} id
-     * @param {number} x
-     * @param {number} y
-     * @param {number} w
-     * @param {number} h
-     * @returns {void}
      */
     const add = (id, x, y, w, h) => {
         const c0 = Math.floor(x / cell), c1 = Math.floor((x + w) / cell);
@@ -412,22 +361,14 @@ function buildGrid(g) {
  * (structural layout edges, requirement-trace edges, and doc page-link
  * edges), and index them by endpoint node id (g.edgesByNode) so the draw loop
  * can pull only the edges touching a visible node.
- * @param {GraphContext} g
- * @returns {void}
  */
 function buildEdges(g) {
-    /** @type {GraphEdgeItem[]} */
     const items = [];
-    /** @type {Map<string, number[]>} */
     const byNode = new Map(); // node id -> INDICES into `items`
     /**
-     * @param {string} from
-     * @param {string} to
-     * @param {string} type
-     * @param {string} cat - the visibility key looked up in g.vis
-     * @param {{x: number, y: number}[]} pts - world-space polyline
-     * @param {string} head - which end carries the arrowhead, 'start' or 'end'
-     * @returns {void}
+     * @param cat - the visibility key looked up in g.vis
+     * @param pts - world-space polyline
+     * @param head - which end carries the arrowhead, 'start' or 'end'
      */
     const push = (from, to, type, cat, pts, head) => {
         let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
@@ -475,13 +416,6 @@ function buildEdges(g) {
 }
 /**
  * Distance from point (px,py) to the segment (ax,ay)-(bx,by).
- * @param {number} px
- * @param {number} py
- * @param {number} ax
- * @param {number} ay
- * @param {number} bx
- * @param {number} by
- * @returns {number}
  */
 function segDist(px, py, ax, ay, bx, by) {
     const dx = bx - ax, dy = by - ay;
@@ -491,23 +425,12 @@ function segDist(px, py, ax, ay, bx, by) {
     const x = ax + t * dx, y = ay + t * dy;
     return Math.hypot(px - x, py - y);
 }
-// FLIP-style relayout tween: interpolate node positions from `from` to their laid-out
-// spot over `dur` ms (replaces the old CSS-transform animation, DOM-only).
-/**
- * One node in flight during a relayout tween: where it sat before (ox,oy) and
- * where the new layout puts it (nx,ny), both in world coords. Only nodes that
- * actually moved get an entry.
- * @typedef {{id: string, ox: number, oy: number, nx: number, ny: number}} TweenItem
- */
 /**
  * FLIP-style relayout tween: interpolate node positions from `from` to their
  * newly laid-out spot over ~620ms (replaces the old CSS-transform animation).
- * @param {GraphContext} g
- * @param {Map<string, {x: number, y: number}>} from - previous world position per node/external-node id
- * @returns {void}
+ * @param from - previous world position per node/external-node id
  */
 export function startTween(g, from) {
-    /** @type {TweenItem[]} */
     const items = [];
     g.layout.nodes.forEach((n, id) => { const o = from.get(id); if (o && (Math.abs(o.x - n.x) > 0.5 || Math.abs(o.y - n.y) > 0.5))
         items.push({ id: id, ox: o.x, oy: o.y, nx: n.x, ny: n.y }); });
@@ -523,8 +446,6 @@ export function startTween(g, from) {
  * Advance the active relayout tween one frame, writing per-node screen
  * offsets into g.tweenOffset (eased with easeInOutCubic); clears g.tween/
  * g.tweenOffset once it completes.
- * @param {GraphContext} g
- * @returns {void}
  */
 function stepTween(g) {
     const tw = g.tween;
@@ -549,8 +470,6 @@ function stepTween(g) {
  * draw only the edges touching a visible node, then draw the visible nodes on
  * top. Cost tracks what's on screen, not the corpus (viewport culling + a
  * 3-tier level-of-detail keyed on projected node size).
- * @param {GraphContext} g
- * @returns {void}
  */
 function draw(g) {
     g.dirty = false;
@@ -567,11 +486,10 @@ function draw(g) {
     // viewport world-rect (with a small margin)
     const m = nodeW;
     const vx0 = (-tx) / k - m, vy0 = (-ty) / k - m, vx1 = (cw - tx) / k + m, vy1 = (ch - ty) / k + m;
-    const px = (/** @type {number} */ x) => x * k + tx, py = (/** @type {number} */ y) => y * k + ty;
+    const px = (x) => x * k + tx, py = (y) => y * k + ty;
     /**
-     * @param {string} id
-     * @returns {GraphBox|null} the node's world box with the in-flight tween
-     *   offset already folded in, so the draw loop never has to know about it
+     * @returns the node's world box with the in-flight tween offset already
+     *   folded in, so the draw loop never has to know about it
      */
     const posOf = (id) => { const n = g.nodePos(id); if (!n)
         return null; if (off) {
@@ -669,30 +587,19 @@ function draw(g) {
         drawNode(g, ctx, vn.id, vn.meta, vn.isExt, vn.st, vn.sx, vn.sy, vn.sw, vn.sh, tier);
 }
 /**
- * @param {Map<string,{dx:number,dy:number}>|null} off - g.tweenOffset
- * @param {string} id
- * @param {'x'|'y'} ax
- * @returns {number} the tween offset along that axis, or 0 if none
+ * @param off - g.tweenOffset
+ * @returns the tween offset along that axis, or 0 if none
  */
 function doff(off, id, ax) { if (!off)
     return 0; const d = off.get(id); return d ? (ax === 'x' ? d.dx : d.dy) : 0; }
 /**
- * @param {GraphContext} g
- * @param {{from: string, to: string}} e
- * @returns {boolean} whether either endpoint is a missing (dangling-reference) node
+ * @returns whether either endpoint is a missing (dangling-reference) node
  */
 function touchesMissing(g, e) { const a = g.model.nodes.get(e.from), b = g.model.nodes.get(e.to); return (a && a.missing) || (b && b.missing); }
 /**
  * Draw the arrowhead at an edge's head end (prereq edges point AT the
  * prerequisite, i.e. the visually inverted end).
- * @param {CanvasRenderingContext2D} ctx
- * @param {{x: number, y: number}[]} pts
- * @param {{type: string, head: string}} e
- * @param {number} k - current zoom scale
- * @param {number} tx
- * @param {number} ty
- * @param {string} color
- * @returns {void}
+ * @param k - current zoom scale
  */
 function drawArrow(ctx, pts, e, k, tx, ty, color) {
     // effective head end: prereq points AT the prerequisite (inverted), like the SVG.
@@ -717,18 +624,8 @@ function drawArrow(ctx, pts, e, k, tx, ty, color) {
  * Draw one node's box + border + text at its screen rect, at the given
  * level-of-detail tier (0 far: a filled dot only; 1 mid: plain rect, title
  * only if wide enough; 2 near: rounded box, title + coverage label + description).
- * @param {GraphContext} g
- * @param {CanvasRenderingContext2D} ctx
- * @param {string} id
- * @param {ModelGraphNode|undefined} meta - undefined for an external-link node
- * @param {boolean} isExt
- * @param {CoverageStatus|null} st
- * @param {number} sx
- * @param {number} sy
- * @param {number} sw
- * @param {number} sh
- * @param {number} tier - 0 | 1 | 2
- * @returns {void}
+ * @param meta - undefined for an external-link node
+ * @param tier - 0 | 1 | 2
  */
 function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
     const C = g.colors;
@@ -816,7 +713,7 @@ function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
             ctx.globalAlpha = 1;
         return;
     }
-    const title = isExt ? (g.externalNodes.find(e => e.id === id) || {}).url || id : (meta ? meta.title : id);
+    const title = isExt ? g.externalNodes.find(e => e.id === id)?.url || id : (meta ? meta.title : id);
     ctx.fillStyle = missing ? C.missingText : C.text;
     ctx.font = '600 ' + fmt(13.5 * g.k) + 'px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     const lineH = 15 * g.k;
@@ -856,9 +753,6 @@ function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
  * True when every group that can read this node is toggled off in the map's
  * group legend. Unrestricted nodes are never dimmed - "no groups" is not a group
  * you can switch off.
- * @param {GraphContext} g
- * @param {ModelGraphNode} meta
- * @returns {boolean}
  */
 function dimmed(g, meta) {
     const groups = (meta && meta.groups) || [];
@@ -868,9 +762,6 @@ function dimmed(g, meta) {
 }
 /**
  * The first read group's colour, used as a node's identity tint at far zoom.
- * @param {GraphContext} g
- * @param {ModelGraphNode} meta
- * @returns {string|null}
  */
 function groupTint(g, meta) {
     const groups = (meta && meta.groups) || [];
@@ -883,15 +774,6 @@ function groupTint(g, meta) {
  *
  * The band is drawn INSIDE the border and clipped to the node, so it reads as
  * part of the node rather than as another edge.
- * @param {GraphContext} g
- * @param {CanvasRenderingContext2D} ctx
- * @param {ModelGraphNode} meta
- * @param {number} sx
- * @param {number} sy
- * @param {number} sw
- * @param {number} sh
- * @param {number} tier
- * @returns {void}
  */
 function drawAccess(g, ctx, meta, sx, sy, sw, sh, tier) {
     const groups = (meta && meta.groups) || [];
@@ -918,20 +800,12 @@ function drawAccess(g, ctx, meta, sx, sy, sw, sh, tier) {
     }
 }
 /**
- * @param {Object<string,*>} C - g.colors
- * @param {string} s - a CoverageStatus.status value
- * @returns {string}
+ * @param C - g.colors
+ * @param s - a CoverageStatus.status value
  */
 function statusColor(C, s) { return C.st[s] || C.muted; }
 /**
  * Trace a rounded-rect path (caller does the fill/stroke).
- * @param {CanvasRenderingContext2D} ctx
- * @param {number} x
- * @param {number} y
- * @param {number} w
- * @param {number} h
- * @param {number} r
- * @returns {void}
  */
 function roundRect(ctx, x, y, w, h, r) {
     r = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -946,22 +820,18 @@ function roundRect(ctx, x, y, w, h, r) {
 // Approximate CSS color-mix: blend hex `a` toward hex `b` by (1-t)*a + t*... actually
 // return `a` at weight `w` over `b`. Falls back to a if parsing fails.
 /**
- * @param {string} a
- * @param {string} b
- * @param {number} w - weight toward `a` (1 = pure a, 0 = pure b)
- * @returns {string} an "rgb(r,g,b)" string, or `a` unchanged on parse failure
+ * @param w - weight toward `a` (1 = pure a, 0 = pure b)
+ * @returns an "rgb(r,g,b)" string, or `a` unchanged on parse failure
  */
 function mix(a, b, w) {
     const pa = hex(a), pb = hex(b);
     if (!pa || !pb)
         return a;
-    const c = (/** @type {number} */ i) => Math.round(pa[i] * w + pb[i] * (1 - w));
+    const c = (i) => Math.round(pa[i] * w + pb[i] * (1 - w));
     return 'rgb(' + c(0) + ',' + c(1) + ',' + c(2) + ')';
 }
 /**
  * Parse a hex (#rgb / #rrggbb) or rgb(a)(...) color string to an [r,g,b] triple.
- * @param {string} s
- * @returns {[number,number,number]|null}
  */
 function hex(s) {
     s = String(s).trim();

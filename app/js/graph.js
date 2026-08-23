@@ -1,4 +1,4 @@
-// graph.js - the document-relationship "Map" view (entry point).
+// graph.ts - the document-relationship "Map" view (entry point).
 // ---------------------------------------------------------------------------
 // A pannable / zoomable directed graph of documents, rendered on a <canvas> with
 // no graph library. This module is the orchestrator: createGraphController builds
@@ -30,300 +30,9 @@ import { wireInteractions } from './graph/interactions.js';
 import { groupColor } from './auth.js';
 // Re-exported for isolated unit testing of the layout math.
 export { buildModel, layoutGraph } from './graph/layout.js';
-/** @typedef {import('./requirements.js').DocEdgeRef} DocEdgeRef */
-/** @typedef {import('./doclinks.js').ExternalLinkNode} ExternalLinkNode */
-/** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
-/** @typedef {import('./graph/layout.js').GraphBuildModel} GraphBuildModel */
-/** @typedef {import('./graph/layout.js').ModelGraphNode} ModelGraphNode */
-/** @typedef {import('./graph/layout.js').LayoutNode} LayoutNode */
-/** @typedef {import('./graph/layout.js').GraphLayoutResult} GraphLayoutResult */
-/** @typedef {import('./graph/render.js').TweenItem} TweenItem */
-/**
- * The whole of what the graph needs from a "document" - buildModel reads these
- * fields and nothing else. Deliberately NOT catalog.js's Doc: neither caller has
- * one. The doc map feeds the server index's slim node records (no source/rel/
- * url/name), and the coverage view feeds requirement/test pseudo-docs that were
- * never files at all. Only `id` is load-bearing; every other field defaults.
- * @typedef {Object} GraphInputDoc
- * @property {string} id
- * @property {string} [title]
- * @property {string} [description]
- * @property {string[]} [assumes] - prerequisite ids: each P yields edge P -> this
- * @property {string[]} [next] - recommended-next ids: each S yields edge this -> S
- * @property {string[]} [groups] - access groups that may read it (doc map only)
- * @property {boolean} [locked] - visible to this reader but not openable (doc map only)
- */
-/**
- * The options object accepted by createGraphController(): a large config /
- * callback bag mixing doc-map-only features (onDelete/mapModes/focus),
- * coverage-view-only features (nodeStatus/nodeKind/autoSize), and edge data
- * (traceEdges/pageLinks/externalNodes). This file defines/defaults every
- * field; coverage-view.js is one concrete caller building an instance.
- * @typedef {Object} GraphOptions
- * @property {string|null} [currentId]
- * @property {(id: string) => void} [onOpenDoc] - fallback used for onSelect/onActivate when they are not given
- * @property {(id: string) => void} [onSelect] - single click / Enter
- * @property {(id: string) => void} [onActivate] - double click
- * @property {(from: string, to: string, type: string) => void} [onConnect]
- * @property {(from: string, to: string, type: string) => void} [onDisconnect]
- * @property {(id: string) => void} [onDelete]
- * @property {{value: string, label: string, swatch: string}[]} [mapModes]
- * @property {string|null} [mapMode]
- * @property {(mode: string) => void} [onMapMode]
- * @property {string[]} [accessGroups] - every access group named in this payload (doc map)
- * @property {Set<string>} [hiddenGroups] - groups toggled off in the group legend
- * @property {boolean} [focusMode]
- * @property {string|null} [focusId]
- * @property {() => void} [onFocusToggle]
- * @property {DocEdgeRef[]} [traceEdges]
- * @property {DocEdgeRef[]} [pageLinks]
- * @property {ExternalLinkNode[]} [externalNodes]
- * @property {Map<string,CoverageStatus>|Object<string,CoverageStatus>|null} [nodeStatus] - mutable via setStatus
- * @property {Map<string,string>|Object<string,string>|null} [nodeKind] - id -> 'req' | 'test' (coverage view)
- * @property {boolean} [autoSize]
- * @property {number} [maxNodeW]
- * @property {number} [maxNodeH]
- * @property {boolean} [hideLegend] - chrome-view.js only; the engine has no legend to hide
- * @property {HTMLCanvasElement|null} [minimapCanvas] - the surface to paint the minimap on. The
- *   engine draws it and handles clicks on it, but never creates it: the frame around it is chrome.
- * @property {{tx: number, ty: number, k: number}|null} [initialTransform]
- * @property {Map<string,{x:number,y:number}>|null} [animateFrom]
- */
-/**
- * A positioned box in world space. Both a laid-out document node and an
- * external-link box resolve to this shape, which is why g.nodePos can return
- * either without the callers caring which they got.
- *
- * cx/cy are the tell between the two: a laid-out doc node always carries its
- * centre, an external box never does (positionExternal only ever sets x/y/w/h),
- * which is why code that wants a centre tests `cx != null` and falls back to
- * x + w/2 rather than branching on where the box came from.
- * @typedef {Object} GraphBox
- * @property {number} x
- * @property {number} y
- * @property {number} w
- * @property {number} h
- * @property {number} [cx] - laid-out doc nodes only
- * @property {number} [cy] - laid-out doc nodes only
- */
-/**
- * One precomputed edge in the draw list: its world polyline, bounding box and
- * category, built once per layout by render.js so the draw loop never
- * recomputes geometry.
- * @typedef {Object} GraphEdgeItem
- * @property {string} from
- * @property {string} to
- * @property {string} type
- * @property {string} cat - the visibility key looked up in g.vis
- * @property {{x: number, y: number}[]} pts
- * @property {[number, number, number, number]} aabb - [minx, miny, maxx, maxy]; an array, not an object, because the cull test indexes it per edge per frame
- * @property {string} head - which end carries the arrowhead, 'start' or 'end'
- */
-/**
- * `g` - the shared mutable context created by createGraph() and threaded through
- * the whole pipeline. Every stage attaches its own fields to the same object, so
- * the context type is the intersection of what each stage contributes, and the
- * five stage typedefs below mirror the modules in ./graph/ one for one.
- *
- * Keep them in sync when a stage grows a field. This used to be a partial list
- * that openly admitted it was partial, which meant 85 of the 105 fields were
- * undeclared - and an undeclared field on a typed object is not an error at the
- * assignment, it is a silent `any` at every read site downstream.
- * @typedef {GraphCoreCtx & GraphRenderCtx & GraphViewCtx & GraphEditCtx & GraphInteractionCtx} GraphContext
- */
-/**
- * Stage 1, this file: config, callbacks, edge data and the live transform.
- * @typedef {Object} GraphCoreCtx
- * @property {HTMLElement} container
- * @property {GraphOptions} opts
- * @property {GraphBuildModel} model
- * @property {ModelGraphNode[]} nodeList
- * @property {string[]} sortedIds - deterministic search order
- * @property {GraphLayoutResult} layout
- * @property {string|null} currentId
- * @property {(id: string) => void} onSelect - single click / Enter
- * @property {(id: string) => void} onActivate - double click
- * @property {DocEdgeRef[]} traceEdges
- * @property {DocEdgeRef[]} pageLinks
- * @property {ExternalLinkNode[]} externalNodes
- * @property {Map<string,CoverageStatus>|Object<string,CoverageStatus>|null} nodeStatus - mutable via setStatus
- * @property {(id: string) => (CoverageStatus|null)} statusOf
- * @property {(id: string) => (string|null)} kindOf
- * @property {((from: string, to: string, type: string) => void)|null} onConnect
- * @property {((from: string, to: string, type: string) => void)|null} onDisconnect
- * @property {boolean} editable - true when either connect callback was supplied
- * @property {((id: string) => void)|null} onDelete
- * @property {string|null} mapMode
- * @property {((mode: string) => void)|null} onMapMode
- * @property {Set<string>} hiddenGroups
- * @property {(name: string) => string} groupColor
- * @property {string|null} focusId
- * @property {{change: ((e: GraphChangeEvent) => void)[]}} listeners - subscribers, by event name
- * @property {() => void} emitChange - snapshot the reportable state and hand it to every subscriber
- * @property {number} tx - live transform: world -> screen translate x
- * @property {number} ty
- * @property {number} k - scale
- * @property {number} minK - lowered by fit() so a fitted whole-graph view can zoom back out
- * @property {boolean} editMode
- * @property {string} activeConnector
- * @property {string|null} pendingSource
- * @property {{from: string, to: string, type: string}|null} selectedEdge
- * @property {number|null} flashTimer
- * @property {ResizeObserver|null} ro
- * @property {boolean} fitted
- */
-/**
- * Stage 2, ./graph/render.js: the canvas surface, the draw loop and the spatial
- * indexes the loop and hit-testing read.
- * @typedef {Object} GraphRenderCtx
- * @property {HTMLCanvasElement} canvas
- * @property {HTMLCanvasElement} svgEl - the same canvas; view.js/interactions.js address the surface under this name
- * @property {CanvasRenderingContext2D} ctx
- * @property {number} dpr
- * @property {number} cssW
- * @property {number} cssH
- * @property {Object<string,*>} colors - re-read from CSS custom properties on theme change
- * @property {Object<string,boolean>} vis - per-edge-category visibility, keyed by GraphEdgeItem.cat
- * @property {Set<string>} hiddenStatuses
- * @property {Map<string,GraphBox>} extPos - external-link boxes by id
- * @property {(id: string) => (GraphBox|null)} nodePos - resolves a doc node or an external box
- * @property {string|null} hoverId
- * @property {string|null} flashId
- * @property {number} flashUntil
- * @property {{items: TweenItem[], start: number, dur: number}|null} tween
- * @property {Map<string,{dx: number, dy: number}>|null} tweenOffset - per-node DELTA from the tweened-from position, not a position; nulled when the tween ends
- * @property {boolean} dirty
- * @property {boolean} running
- * @property {boolean} rafPending
- * @property {number} rafId
- * @property {() => void} resize
- * @property {() => void} requestDraw
- * @property {() => void} drawStop
- * @property {() => void} drawNow - synchronous full frame (perf harness / tests)
- * @property {MutationObserver} themeObs
- * @property {{cell: number, map: Map<string,string[]>}} grid - uniform spatial index for hit-testing
- * @property {(wx: number, wy: number) => (string|null)} nodeAtWorld
- * @property {(wx: number, wy: number, tol?: number) => ({from: string, to: string, type: string}|null)} edgeAtWorld - a bare edge ref, matching selectedEdge; the hit item itself is never handed out
- * @property {GraphEdgeItem[]} edgeItems
- * @property {Map<string,number[]>} edgesByNode - INDEXES into edgeItems, so an edge touching two visible nodes is de-duplicated by index rather than by object identity
- */
-/**
- * Stage 3, ./graph/view.js: transform maths, framing, search and the minimap.
- * @typedef {Object} GraphViewCtx
- * @property {() => {w: number, h: number, rect: DOMRect}} viewSize
- * @property {() => void} applyTransform
- * @property {() => void} fit
- * @property {(px: number, py: number, factor: number) => void} zoomAround
- * @property {(factor: number) => void} zoomCenter
- * @property {(id: string) => void} flash
- * @property {(id: string) => boolean} focus
- * @property {(id: string) => void} setCurrent
- * @property {(query: string) => (string|null)} search
- * @property {() => void} buildMinimap
- * @property {() => void} updateMinimap
- * @property {number} miniScale
- * @property {number} miniOX
- * @property {number} miniOY
- * @property {HTMLCanvasElement} [miniCache] - offscreen minimap cache, created lazily
- * @property {HTMLCanvasElement|null} miniCanvas - opts.minimapCanvas, or null for no minimap
- * @property {CanvasRenderingContext2D|null} miniCtx
- */
-/**
- * Stage 4, ./graph/chrome.js: the edit-mode state machine. No DOM: every one of
- * these mutates draw state and then reports through g.emitChange().
- * @typedef {Object} GraphEditCtx
- * @property {(type: string) => void} setConnector
- * @property {(on: boolean) => void} setEditMode
- * @property {(id: string) => void} markSource
- * @property {() => void} clearPending
- * @property {() => void} clearSelectedEdge
- * @property {(from: string, to: string, type: string) => void} selectEdge
- */
-/**
- * Stage 5, ./graph/interactions.js: teardown. Pointer, wheel and keyboard
- * listeners are closed over rather than attached to the context.
- * @typedef {Object} GraphInteractionCtx
- * @property {() => void} destroy
- */
-/**
- * One node's world-space box as nodePositions() reports it - a GraphBox with the
- * centre promised, since it only ever describes laid-out doc nodes.
- * @typedef {Object} GraphTestBox
- * @property {number} x
- * @property {number} y
- * @property {number} w
- * @property {number} h
- * @property {number} cx
- * @property {number} cy
- */
-/**
- * The hit-test hook parked on `window.__graph`. The map is one <canvas> with no
- * per-node DOM, so an e2e driver has nothing to query for; this is how it turns
- * a document id into screen pixels and back. Coordinates crossing this boundary
- * are CLIENT (viewport) pixels, not world units.
- * @typedef {Object} GraphTestApi
- * @property {(clientX: number, clientY: number) => (string|null)} nodeAt
- * @property {(clientX: number, clientY: number) => (string|null)} hitTest - alias of nodeAt
- * @property {() => Object<string, GraphTestBox>} nodePositions - world space
- * @property {(id: string) => ({x: number, y: number}|null)} center - client pixels
- * @property {() => {tx: number, ty: number, k: number}} transform
- * @property {(t: {tx?: number, ty?: number, k?: number}) => void} setTransform
- * @property {() => void} redraw
- * @property {() => number} count
- */
-/**
- * What the controller REPORTS. One immutable snapshot of everything a chrome
- * implementation could need in order to draw itself, handed to every on('change')
- * subscriber and returned verbatim by getEditState().
- *
- * `pendingSourceTitle`, not `pendingSource`: the only thing a hint or a label
- * ever did with the pending id was look its title up in the model, and handing
- * out an id would push a model lookup - and therefore the model - across a
- * boundary that exists precisely to keep it in here.
- *
- * `visibility` and `hiddenGroups` are copies. A subscriber that mutated the live
- * g.vis would change what the renderer draws without anything asking for a
- * repaint, which is the exact class of bug this inversion is meant to end.
- * @typedef {Object} GraphChangeEvent
- * @property {boolean} editMode
- * @property {string} connector - the armed connection type, 'prereq' | 'recnext'
- * @property {string|null} pendingSourceTitle - first node of a half-finished connect gesture
- * @property {{from: string, to: string, type: string}|null} selectedEdge
- * @property {Object<string,boolean>} visibility - per-edge-category, keyed by GraphEdgeItem.cat
- * @property {Set<string>} hiddenGroups
- */
-/**
- * The controller: everything the outside world may do to a live graph.
- *
- * Deliberately small and deliberately one-way. Commands go in as method calls,
- * state comes back as change events, and nothing in here hands out the context,
- * the model, an element or a listener. Anything a caller cannot express through
- * this surface is a rebuild - build a new controller and destroy the old one,
- * which is what a re-layout has always been.
- * @typedef {Object} GraphController
- * @property {() => void} destroy
- * @property {() => void} fit
- * @property {(id: string) => boolean} focus
- * @property {(query: string) => (string|null)} search
- * @property {(id: string) => void} setCurrent
- * @property {(on: boolean) => void} setEditMode
- * @property {(type: string) => void} setConnector
- * @property {(mode: string) => void} setMapMode
- * @property {(cat: string, on: boolean) => void} setVisibility
- * @property {(names: Iterable<string>) => void} setHiddenGroups
- * @property {(m: Map<string,CoverageStatus>|Object<string,CoverageStatus>) => void} setStatus
- * @property {(hidden: Iterable<string>) => void} setStatusFilter
- * @property {(factor: number) => void} zoomBy
- * @property {() => {tx: number, ty: number, k: number}} getTransform
- * @property {() => GraphChangeEvent} getEditState
- * @property {() => Map<string,{x: number, y: number}>} getNodePositions
- * @property {(evt: string, cb: (e: GraphChangeEvent) => void) => (() => void)} on
- */
 /**
  * Snapshot the reportable state. Built fresh on every emit rather than mutated,
  * so a subscriber can keep the object it was handed.
- * @param {GraphContext} g
- * @returns {GraphChangeEvent}
  */
 function changeEvent(g) {
     const src = g.pendingSource ? g.model.nodes.get(g.pendingSource) : null;
@@ -347,17 +56,14 @@ function changeEvent(g) {
  * given - DOM this engine did not create. Two `container.textContent = ''` calls
  * used to say otherwise, and either of them would have deleted a live chrome
  * component's nodes out from under it.
- * @param {HTMLElement} canvasEl - the element the engine's <canvas> lives in
- * @param {GraphInputDoc[]} docs
- * @param {GraphOptions} [options]
- * @returns {GraphController}
+ * @param canvasEl - the element the engine's <canvas> lives in
  */
 export function createGraphController(canvasEl, docs, options) {
     const opts = options || {};
     // `g` is only a whole GraphContext once every stage below has attached its own
     // fields, so it is declared as one up front rather than accumulating an
     // inferred shape that each stage would then have to be trusted to widen.
-    const g = /** @type {GraphContext} */ ({ container: canvasEl, opts: opts });
+    const g = { container: canvasEl, opts: opts };
     // --- config / callbacks ---
     g.currentId = opts.currentId || null;
     const onOpenDoc = typeof opts.onOpenDoc === 'function' ? opts.onOpenDoc : function () { };
@@ -369,9 +75,9 @@ export function createGraphController(canvasEl, docs, options) {
     // Both lookups accept a Map OR a plain object, so `.get` doubles as the probe
     // for which one arrived; the cast just tells the checker what that probe proved.
     g.nodeStatus = opts.nodeStatus || null; // Map/obj id -> {status, pct} for the coverage view (mutable via setStatus)
-    g.statusOf = (id) => g.nodeStatus ? (g.nodeStatus.get ? /** @type {Map<string,CoverageStatus>} */ (g.nodeStatus).get(id) : /** @type {Object<string,CoverageStatus>} */ (g.nodeStatus)[id]) : null;
+    g.statusOf = (id) => g.nodeStatus ? (g.nodeStatus.get ? g.nodeStatus.get(id) : g.nodeStatus[id]) : null;
     const nodeKind = opts.nodeKind || null; // Map/obj id -> 'req' | 'test' (coverage view)
-    g.kindOf = (id) => nodeKind ? (nodeKind.get ? /** @type {Map<string,string>} */ (nodeKind).get(id) : /** @type {Object<string,string>} */ (nodeKind)[id]) : null;
+    g.kindOf = (id) => nodeKind ? (nodeKind.get ? nodeKind.get(id) : nodeKind[id]) : null;
     // Edit-connections mode (enabled when connect/disconnect callbacks are given).
     g.onConnect = typeof opts.onConnect === 'function' ? opts.onConnect : null;
     g.onDisconnect = typeof opts.onDisconnect === 'function' ? opts.onDisconnect : null;
@@ -437,12 +143,7 @@ export function createGraphController(canvasEl, docs, options) {
         // The ring = every DOC node directly linked to the focus by ANY edge type:
         // prereq/recnext + requirement-trace + doc page links. In focus view only the
         // edges that TOUCH the focused node stay visible (see render.js edgeShown).
-        /** @type {Set<string>} */
         const nb = new Set();
-        /**
-         * @param {string} a
-         * @param {string} b
-         */
         const rel = (a, b) => { if (a === g.focusId)
             nb.add(b);
         else if (b === g.focusId)
@@ -482,13 +183,11 @@ export function createGraphController(canvasEl, docs, options) {
     // live graph", which is the only thing a driver can safely assume it means.
     // `__graph` is ours, not the DOM's, so both the install and hitTest's read-back
     // go through one alias that says so.
-    const testWindow = /** @type {typeof window & {__graph: GraphTestApi|null}} */ ( /** @type {unknown} */(window));
-    /** @type {GraphTestApi} */
+    const testWindow = window;
     const hook = {
         nodeAt: function (clientX, clientY) { const r = g.svgEl.getBoundingClientRect(); return g.nodeAtWorld((clientX - r.left - g.tx) / g.k, (clientY - r.top - g.ty) / g.k); },
         hitTest: function (clientX, clientY) { return hook.nodeAt(clientX, clientY); },
         nodePositions: function () {
-            /** @type {Object<string, GraphTestBox>} */
             const m = {};
             g.layout.nodes.forEach((n, id) => { m[id] = { x: n.x, y: n.y, w: n.w, h: n.h, cx: n.cx, cy: n.cy }; });
             return m;
@@ -590,10 +289,7 @@ export function createGraphController(canvasEl, docs, options) {
  * whole stage element and expect a map with zoom controls, a search box and a
  * minimap in it. It is a composition, not a layer: it adds no behaviour of its
  * own, and everything it returns is the controller's.
- * @param {HTMLElement} container - a stage element the graph and its chrome may fill
- * @param {GraphInputDoc[]} docs
- * @param {GraphOptions} [options]
- * @returns {GraphController}
+ * @param container - a stage element the graph and its chrome may fill
  */
 export function createGraph(container, docs, options) {
     const opts = options || {};
@@ -629,8 +325,6 @@ export function createGraph(container, docs, options) {
 // previous positions to the renderer's time-based tween (interpolated in the rAF
 // draw loop; see startTween in graph/render.js).
 /**
- * @param {GraphContext} g
- * @param {Map<string,{x:number,y:number}>} from - previous world position per node/external-node id
- * @returns {void}
+ * @param from - previous world position per node/external-node id
  */
 function animateRelayout(g, from) { startTween(g, from); }

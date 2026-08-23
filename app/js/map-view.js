@@ -1,4 +1,4 @@
-// map-view.js - the document-relationship "Map" overlay's SHELL: open, close,
+// map-view.ts - the document-relationship "Map" overlay's SHELL: open, close,
 // and the one fetch that feeds it.
 //
 // Everything you can see inside the overlay - the canvas scene, the zoom
@@ -36,7 +36,6 @@ import { announce } from './announce.js';
  * The mounted island, or null while the map is closed. Kept because unmounting
  * is what stops the graph's requestAnimationFrame loop and releases
  * window.__graph - detaching the DOM would not.
- * @type {{destroy: () => void}|null}
  */
 let island = null;
 // (Re)build the document map. Restoring the current pan/zoom is the DEFAULT (so
@@ -47,9 +46,8 @@ let island = null;
 // island's store and seeds the next mount, which is exactly what open() below
 // relies on.
 /**
- * @param {boolean} [animate] - animate nodes from their prior positions (tween) into the new layout
- * @param {boolean} [refit] - fit fresh to the new layout frame instead of restoring the saved pan/zoom (used on a focus change)
- * @returns {Promise<void>}
+ * @param animate - animate nodes from their prior positions (tween) into the new layout
+ * @param refit - fit fresh to the new layout frame instead of restoring the saved pan/zoom (used on a focus change)
  */
 export async function buildDocGraph(animate, refit) {
     // Fetch the (cached) model BEFORE touching the live graph, so the current map
@@ -60,16 +58,8 @@ export async function buildDocGraph(animate, refit) {
     islands.setMapModel(model, { animate: !!animate, refit: !!refit });
 }
 /**
- * An overlay's open/close handle, returned to main.js so it can own the button.
- * @typedef {Object} OverlayHandle
- * @property {() => (void|Promise<void>)} open
- * @property {() => void} close
- * @property {() => (void|Promise<void>)} toggle
- */
-/**
  * Set up the map overlay: expose close() through the shared `app` registry, and
  * return the handle main.js drives the header button with.
- * @returns {OverlayHandle}
  */
 export function setupGraphButton() {
     const btn = el('graphBtn');
@@ -85,7 +75,7 @@ export function setupGraphButton() {
     // height to measure.
     const { host: overlay, stage } = mapOverlay();
     stage.classList.add('map-stage');
-    /** Close the map overlay. @returns {void} */
+    /** Close the map overlay. */
     const close = () => {
         if (overlay.hidden)
             return;
@@ -97,7 +87,7 @@ export function setupGraphButton() {
         } // stops the rAF loop and releases window.__graph
         el('content').focus({ preventScroll: true });
     };
-    /** Open the map overlay, loading the graph model before it mounts. @returns {Promise<void>} */
+    /** Open the map overlay, loading the graph model before it mounts. */
     const open = async () => {
         if (app.closeCoverageView)
             app.closeCoverageView(); // only one overlay view at a time

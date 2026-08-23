@@ -1,4 +1,4 @@
-// editor/serialize.js - conversion between the editor's visual block model and
+// editor/serialize.ts - conversion between the editor's visual block model and
 // Markdown, in both directions.
 //   * inline HTML (<strong>/<em>/<code>/<a>) -> Markdown
 //   * blocks -> Markdown (serializeDoc, normalize-on-save)
@@ -6,30 +6,6 @@
 // Zero UI here - pure data transforms (plus the shared renderer/sanitizer).
 import { renderMarkdown } from '../commonmark.js';
 import { sanitizeToFragment } from '../sanitize.js';
-/** @typedef {import('../editor.js').Block} Block */
-/** @typedef {import('../editor.js').ImageBlock} ImageBlock */
-/** @typedef {import('../editor.js').HrBlock} HrBlock */
-/** @typedef {import('../editor.js').CodeBlock} CodeBlock */
-/** @typedef {import('../editor.js').AccessStartBlock} AccessStartBlock */
-/** @typedef {import('../editor.js').AccessEndBlock} AccessEndBlock */
-/** @typedef {import('./widgets.js').TableBlock} TableBlock */
-/** @typedef {import('./widgets.js').ReqBlock} ReqBlock */
-/** @typedef {import('./widgets.js').RequirementRow} RequirementRow */
-/** @typedef {import('./widgets.js').TestCaseBlock} TestCaseBlock */
-/** @typedef {import('./widgets.js').TestStep} TestStep */
-/**
- * The normalized document front-matter bundle read from / written to the
- * <!--meta ...--> header. serializeDoc/parseDoc (this file) are the canonical
- * write/read; editor.js's working `meta` object and editor/panels.js's
- * metadataPanel share and mutate the same shape.
- * @typedef {Object} DocMeta
- * @property {string} title
- * @property {string} description
- * @property {string[]} assumes
- * @property {string[]} next
- * @property {Object<string, *>} [access] - the document's access-control block, when it has one
- * @property {Object<string, *>} [_extra] - every OTHER header key, carried through untouched
- */
 // Header keys this editor understands. Everything else is preserved verbatim
 // through _extra rather than dropped: serializeDoc used to rebuild the header
 // from a fixed field list, so any key it did not know about vanished on the next
@@ -48,11 +24,8 @@ const ACCESS_TOKEN_RE = /<!--\s*access\s+(start|end)\b\s*(\{[\s\S]*?\})?\s*-->/g
  * ``` example is left alone. Same line-scan as requirements/parse.js and the
  * server's webdoc_access.fenced_ranges - all three must agree, or the editor
  * and the server disagree about where a restricted section begins.
- * @param {string} body
- * @returns {[number, number][]}
  */
 function fencedRanges(body) {
-    /** @type {[number, number][]} */
     const ranges = [];
     let offset = 0, open = null;
     for (const line of String(body).split('\n')) {
@@ -81,11 +54,8 @@ function fencedRanges(body) {
  * crosses a newline - that is what excluding \n from the class enforces.
  * Mirrors the server's webdoc_access.INLINE_CODE_RE; the two must agree, or the
  * editor moves a marker the server ignores.
- * @param {string} body
- * @returns {[number, number][]}
  */
 function codeSpanRanges(body) {
-    /** @type {[number, number][]} */
     const out = [];
     const re = /`[^`\n]*`/g;
     let m;
@@ -93,60 +63,16 @@ function codeSpanRanges(body) {
         out.push([m.index, m.index + m[0].length]);
     return out;
 }
-/**
- * @param {[number, number][]} ranges
- * @param {number} pos
- * @returns {boolean}
- */
 function inFence(ranges, pos) {
     for (const [a, b] of ranges)
         if (pos >= a && pos < b)
             return true;
     return false;
 }
-/**
- * @typedef {Object} HeadingMdBlock
- * @property {'heading'} type
- * @property {number} level
- * @property {string} text - Markdown source (already converted from HTML via htmlToMd)
- */
-/**
- * @typedef {Object} ParagraphMdBlock
- * @property {'paragraph'} type
- * @property {string} text - Markdown source
- */
-/**
- * @typedef {Object} QuoteMdBlock
- * @property {'quote'} type
- * @property {string} text - Markdown source
- */
-/**
- * @typedef {Object} ListMdBlock
- * @property {'list'} type
- * @property {boolean} ordered
- * @property {string[]} items - Markdown source, one entry per list item
- */
-/**
- * What blockToMd()/serializeDoc() actually consume: editor.js's onSave already
- * converts the four inline-HTML block types (heading/paragraph/quote/list) from
- * their visual, HTML-holding Block form to Markdown source (text/items) before
- * calling serializeDoc; every other block type is passed through unchanged and
- * keeps its original Block shape. Deliberately distinct from both editor.js's
- * HTML-based `Block` and md/blocks.js's parser-tree node `MdBlockNode`.
- * @typedef {HeadingMdBlock|ParagraphMdBlock|QuoteMdBlock|ListMdBlock|CodeBlock|TableBlock|ImageBlock|HrBlock|ReqBlock|TestCaseBlock|AccessStartBlock|AccessEndBlock} MdSourceBlock
- */
 /* ---- Inline HTML -> Markdown ---- */
-/**
- * @param {string} s
- * @returns {string}
- */
 function escInline(s) {
     return s.replace(/([\\`*_[\]<>])/g, '\\$1');
 }
-/**
- * @param {Node} node
- * @returns {string}
- */
 function inlineToMd(node) {
     let out = '';
     node.childNodes.forEach(n => {
@@ -156,7 +82,7 @@ function inlineToMd(node) {
         }
         if (n.nodeType !== 1)
             return;
-        const el = /** @type {Element} */ (n);
+        const el = n;
         const tag = el.tagName.toLowerCase();
         const inner = inlineToMd(el);
         if (tag === 'strong' || tag === 'b')
@@ -184,20 +110,12 @@ function inlineToMd(node) {
 }
 // A Markdown link destination. Bare form breaks on spaces or parentheses, so use
 // the angle-bracket form <...> for those, escaping backslash / < / > within.
-/**
- * @param {string} url
- * @returns {string}
- */
 function mdDest(url) {
     const u = String(url).replace(/[\r\n]+/g, '');
     if (/[\s()<>]/.test(u))
         return '<' + u.replace(/([\\<>])/g, '\\$1') + '>';
     return u;
 }
-/**
- * @param {string} html
- * @returns {string}
- */
 export function htmlToMd(html) {
     const d = document.createElement('div');
     d.innerHTML = html || '';
@@ -205,9 +123,15 @@ export function htmlToMd(html) {
 }
 /* ---- Blocks -> Markdown ---- */
 /**
- * @param {MdSourceBlock} b
- * @returns {string}
+ * The exhaustiveness guard for blockToMd's switch below. Its parameter is
+ * `never`, so the call only type-checks while every member of MdSourceBlock has
+ * a case above it: adding a block kind without a case becomes a COMPILE error
+ * instead of a block that silently serialises to nothing. That drift is exactly
+ * what happened before the union was real. The empty string it returns is the
+ * same value the old plain `default:` arm returned for a runtime value that is
+ * not a block the editor knows.
  */
+function unhandledBlock(_block) { return ''; }
 function blockToMd(b) {
     switch (b.type) {
         case 'heading': return '#'.repeat(b.level) + ' ' + b.text;
@@ -225,15 +149,13 @@ function blockToMd(b) {
             const headers = b.headers || [];
             const aligns = b.aligns || [];
             const rows = b.rows || [];
-            /** @param {string} s @returns {string} */
             const esc = (s) => String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\r?\n+/g, ' ');
-            /** @param {string} html - one cell's inline HTML @returns {string} */
+            /** @param html one cell's inline HTML */
             const cellMd = (html) => esc(htmlToMd(String(html == null ? '' : html)));
-            /** @param {string} a - a column's align attribute @returns {string} */
+            /** @param a a column's align attribute */
             const sepFor = (a) => a === 'center' ? ':---:' : a === 'right' ? '---:' : a === 'left' ? ':---' : '---';
             // Driven by `headers`, not by the row, so a ragged row is padded rather than
             // producing a table whose rows disagree about their column count.
-            /** @param {string[]} cells @returns {string} */
             const rowLine = (cells) => '| ' + headers.map((_, i) => cellMd(cells[i])).join(' | ') + ' |';
             const lines = [rowLine(headers), '| ' + headers.map((_, i) => sepFor(aligns[i] || '')).join(' | ') + ' |'];
             rows.forEach(r => lines.push(rowLine(r)));
@@ -264,24 +186,10 @@ function blockToMd(b) {
             return '<!--access start ' + JSON.stringify(spec) + '-->';
         }
         case 'access-end': return '<!--access end-->';
-        default: return '';
+        default: return unhandledBlock(b);
     }
 }
-/**
- * The object that BECOMES the header JSON: the four known fields, optionally
- * `access`, and then whatever unknown keys _extra carried in. Open-ended by
- * nature - a header key this editor has never heard of still has to be written
- * back out verbatim (see KNOWN_META_KEYS), so the shape genuinely is
- * "known fields plus arbitrary JSON", not a closed record.
- * @typedef {Omit<DocMeta, '_extra'> & Object<string, *>} HeaderJson
- */
-/**
- * @param {Partial<DocMeta>} meta
- * @param {MdSourceBlock[]} blocks
- * @returns {string}
- */
 export function serializeDoc(meta, blocks) {
-    /** @type {HeaderJson} */
     const m = {
         title: meta.title || 'Untitled',
         description: meta.description || '',
@@ -302,43 +210,18 @@ export function serializeDoc(meta, blocks) {
     const body = blocks.map(blockToMd).filter(s => s !== '').join('\n\n');
     return header + '\n\n' + body + '\n';
 }
-/* ---- Existing document -> { meta, blocks } ---- */
 /**
- * The JSON inside an `<!--access start {...}-->` marker, as authors actually
- * write it: `read` tolerates a bare string as well as a list, and the spec is
- * sometimes nested one level under `access` (the same shape the header uses).
- * @typedef {Object} AccessSpec
- * @property {string|string[]} [read]
- * @property {string} [label]
- * @property {AccessSpec} [access] - the nested form
- */
-/**
- * The JSON inside a `<!--meta start {...}-->` block wrapper. One comment form
- * covers two block kinds - a test case and a requirement group - which is why
- * everything is optional, and every field has a legacy spelling beside it.
- * @typedef {{
- *   test?: string, 'test-case'?: string, name?: string, verifies?: string[],
- *   steps?: {action?: string, expected?: string, 'expected-response'?: string, response?: string}[],
- *   'requirement-group'?: string, group?: string
- * }} BlockMetaJson
- */
-/**
- * @param {string} rawBody
- * @param {Partial<DocMeta> & Object<string, *>} [docMeta] - existing front-matter to
- *   preserve (a brand-new document passes {}). Deliberately open-ended: this is the
- *   RAW parsed header, and its unknown keys sit at the top level - collecting them
- *   into _extra is exactly what the loop at the end does.
- * @returns {{meta: DocMeta, blocks: Block[], lostMarkers: number}} `lostMarkers` is
- *   non-zero when an access marker could not be represented as a block; the caller
- *   must refuse to edit rather than save a document missing that boundary.
+ * @param docMeta existing front-matter to preserve (a brand-new document passes
+ *   {}). Deliberately open-ended: this is the RAW parsed header, and its unknown
+ *   keys sit at the top level - collecting them into _extra is exactly what the
+ *   loop at the end does.
  */
 export function parseDoc(rawBody, docMeta) {
     // Pull requirement groups out first (they are meta-wrapped tables) and leave
     // placeholders, so their positions survive; everything else renders to HTML.
-    /** @type {(ReqBlock|TestCaseBlock)[]} */
     const groups = [];
     const RE = /<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->([\s\S]*?)<!--\s*meta\s+end[\s\S]*?-->/gi;
-    /** @param {string} line - one row of a pipe table @returns {string[]} */
+    /** @param line one row of a pipe table */
     const cellsOf = (line) => {
         const cells = line.split('|').map(c => c.trim());
         return cells.filter((x, i) => !(i === 0 && x === '') && !(i === cells.length - 1 && x === ''));
@@ -352,7 +235,6 @@ export function parseDoc(rawBody, docMeta) {
     // not a real boundary. Replacing one would hoist it out of its fence on save -
     // turning an example into a live restriction, and (because the paired end
     // marker moves too) truncating whatever section it landed inside.
-    /** @type {(AccessStartBlock|AccessEndBlock)[]} */
     const markers = [];
     // Fenced blocks AND inline code spans: a marker mentioned in either is prose
     // about the syntax, not a boundary. The server applies exactly the same rule,
@@ -365,7 +247,6 @@ export function parseDoc(rawBody, docMeta) {
             markers.push({ type: 'access-end' });
         }
         else {
-            /** @type {AccessSpec} */
             let spec = {};
             try {
                 spec = JSON.parse(json || '{}') || {};
@@ -383,15 +264,13 @@ export function parseDoc(rawBody, docMeta) {
         }
         return '\n\n@@ACCESSMARK' + (markers.length - 1) + '@@\n\n';
     });
-    let body = source.replace(RE, (_m, /** @type {string} */ json, /** @type {string} */ inner) => {
-        /** @type {BlockMetaJson} */
+    let body = source.replace(RE, (_m, json, inner) => {
         let meta = {};
         try {
             meta = JSON.parse(json);
         }
         catch (e) { }
         if (meta.test || meta['test-case']) { // test-case block
-            /** @type {TestStep[]} */
             let steps;
             if (Array.isArray(meta.steps)) { // structured steps (current format)
                 steps = meta.steps.map(s => ({ action: (s && s.action) || '', expected: (s && (s.expected || s['expected-response'] || s.response)) || '' }));
@@ -414,7 +293,6 @@ export function parseDoc(rawBody, docMeta) {
             return '\n\n@@REQGROUP' + (groups.length - 1) + '@@\n\n';
         }
         const group = (meta && (meta['requirement-group'] || meta.group)) || '';
-        /** @type {RequirementRow[]} */
         const rows = [];
         inner.split('\n').forEach(line => {
             if (line.indexOf('|') === -1)
@@ -430,12 +308,9 @@ export function parseDoc(rawBody, docMeta) {
     const frag = sanitizeToFragment(html);
     const holder = document.createElement('div');
     holder.appendChild(frag);
-    /** @type {Block[]} */
     const blocks = [];
     /**
      * Resolve a placeholder's text back to the block it stands for.
-     * @param {string} text
-     * @returns {ReqBlock|TestCaseBlock|AccessStartBlock|AccessEndBlock|null}
      */
     const placeholder = (text) => {
         let mm = /^@@REQGROUP(\d+)@@$/.exec(text);
@@ -455,7 +330,7 @@ export function parseDoc(rawBody, docMeta) {
         }
         if (n.nodeType !== 1)
             return;
-        const el = /** @type {Element} */ (n);
+        const el = n;
         const tag = el.tagName.toLowerCase();
         const hit = placeholder(el.textContent.trim());
         if (hit) {
@@ -477,7 +352,7 @@ export function parseDoc(rawBody, docMeta) {
         else if (tag === 'hr')
             blocks.push({ type: 'hr' });
         else if (tag === 'table')
-            blocks.push(tableBlock(/** @type {HTMLTableElement} */ (el)));
+            blocks.push(tableBlock(el));
         else if (tag === 'figure' || tag === 'img') {
             const img = tag === 'img' ? el : el.querySelector('img');
             if (img)
@@ -494,7 +369,6 @@ export function parseDoc(rawBody, docMeta) {
     // saving a document with a permission boundary silently deleted.
     const recovered = blocks.filter(b => b && (b.type === 'access-start' || b.type === 'access-end')).length;
     const lostMarkers = markers.length - recovered;
-    /** @type {DocMeta} */
     const meta = {
         title: (docMeta && docMeta.title) || '',
         description: (docMeta && docMeta.description) || '',
@@ -509,29 +383,17 @@ export function parseDoc(rawBody, docMeta) {
     }
     return { meta, blocks, lostMarkers };
 }
-/**
- * @param {Element} el
- * @returns {string}
- */
 function stripNums(el) {
-    const c = /** @type {Element} */ (el.cloneNode(true));
+    const c = el.cloneNode(true);
     c.querySelectorAll('.secnum').forEach(s => s.remove());
     return c.innerHTML.trim();
 }
-/**
- * @param {Element|null} code
- * @returns {string}
- */
 function langOf(code) {
     if (!code)
         return '';
     const m = /language-([\w+.#-]+)/.exec(code.className || '');
     return m ? m[1] : '';
 }
-/**
- * @param {HTMLTableElement} table
- * @returns {TableBlock}
- */
 function tableBlock(table) {
     // innerHTML (not textContent): cells carry inline markup - <strong>, <a>, <code>,
     // <img> - which round-trips back to inline Markdown on save.
@@ -542,8 +404,7 @@ function tableBlock(table) {
 }
 /* ---- Block-model factory (new blocks from the "+ Add block" menu) ---- */
 /**
- * @param {string} type - a BLOCK_MENU entry's `type` (editor/ui.js), or 'list-ordered'
- * @returns {Block}
+ * @param type a BLOCK_MENU entry's `type` (editor/ui.ts), or 'list-ordered'
  */
 export function newBlock(type) {
     if (type === 'list-ordered')

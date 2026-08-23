@@ -1,4 +1,4 @@
-// md/text.js - low-level text helpers for the Markdown engine: HTML escaping,
+// md/text.ts - low-level text helpers for the Markdown engine: HTML escaping,
 // tab expansion, URI normalization, and HTML-entity / backslash-escape decoding.
 // No dependencies; shared by the block, inline, render and table modules.
 // ---------------------------------------------------------------------------
@@ -8,8 +8,6 @@
 const AMP = /[&<>"]/;
 /**
  * Escape &, <, >, " for safe HTML text/attribute output.
- * @param {string} s
- * @returns {string}
  */
 export function esc(s) {
     if (!AMP.test(s))
@@ -19,8 +17,6 @@ export function esc(s) {
 /**
  * Expand tabs to the next 4-column stop (for the whole line; content-preserving
  * where tabs are inside code is handled by the block logic separately).
- * @param {string} line
- * @returns {string}
  */
 export function expandTabs(line) {
     if (line.indexOf('\t') === -1)
@@ -42,8 +38,6 @@ export function expandTabs(line) {
 }
 /**
  * Percent-encode a URI for output while preserving any escapes it already has.
- * @param {string} uri
- * @returns {string}
  */
 export function normalizeUri(uri) {
     try {
@@ -64,7 +58,7 @@ export function normalizeUri(uri) {
    editing intact (a literal U+00A0/zero-width char is indistinguishable from a
    normal space in source).
    =========================================================================== */
-/** @type {Object<string, string>} entity name (without & and ;) -> the character(s) it stands for */
+/** entity name (without & and ;) -> the character(s) it stands for */
 const NAMED = {
     amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00A0', copy: '©',
     reg: '®', trade: '™', hellip: '…', mdash: '—', ndash: '–',
@@ -105,8 +99,8 @@ const NAMED = {
 export const ENTITY_RE = /^&(#[Xx][0-9A-Fa-f]{1,6}|#\d{1,7}|[A-Za-z][A-Za-z0-9]{0,31});/;
 /**
  * Decode one matched HTML entity reference (named or numeric).
- * @param {string} m - the full matched entity text, e.g. "&amp;" or "&#39;"
- * @returns {string|null} the decoded character(s), or null if the named entity is not recognized
+ * @param m the full matched entity text, e.g. "&amp;" or "&#39;"
+ * @returns the decoded character(s), or null if the named entity is not recognized
  */
 export function decodeEntity(m) {
     const body = m.slice(1, -1);
@@ -130,8 +124,6 @@ export function decodeEntity(m) {
 export const ESCAPABLE = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 /**
  * Decode HTML entities and backslash escapes in a raw text run (used for text runs).
- * @param {string} s
- * @returns {string}
  */
 export function decodeInlineText(s) {
     let out = '';

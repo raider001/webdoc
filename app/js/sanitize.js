@@ -1,4 +1,4 @@
-// sanitize.js - allowlist HTML sanitizer.
+// sanitize.ts - allowlist HTML sanitizer.
 // Embedded HTML is allowed, but ALL styling and scripting is rejected.
 // This is a policy layer that runs AFTER Markdown parsing and BEFORE the
 // content reaches the live DOM. Parsing happens in an inert document (via
@@ -22,7 +22,7 @@ const DROP_SUBTREE = new Set([
     'title', 'noscript', 'audio', 'video', 'source', 'track', 'canvas'
 ]);
 const EMPTY = new Set();
-/** @type {Object<string, Set<string>>} tag name -> the attributes it may keep; anything not listed here keeps none */
+/** tag name -> the attributes it may keep; anything not listed here keeps none */
 const ALLOWED_ATTRS = {
     a: new Set(['href', 'title']),
     img: new Set(['src', 'alt', 'title']),
@@ -37,8 +37,6 @@ const SAFE_URL = /^(https?:|mailto:|tel:|\/|\.\/|\.\.\/|#)/i;
  * hash forms and an explicit http(s)/mailto/tel allowlist, and rejects any
  * other explicit scheme (e.g. "javascript:", "data:") after stripping
  * control characters/whitespace that could otherwise hide a scheme.
- * @param {string} value
- * @returns {boolean}
  */
 function safeUrl(value) {
     // Remove control chars / whitespace that can hide a scheme (e.g. "java\tscript:").
@@ -53,8 +51,6 @@ function safeUrl(value) {
  * Replace `el` with its own children (used for elements that are unknown but
  * harmless, so their content is kept while the wrapping tag itself is
  * discarded).
- * @param {Element} el
- * @returns {void}
  */
 function unwrap(el) {
     const parent = el.parentNode;
@@ -74,8 +70,6 @@ function unwrap(el) {
  * single language-* highlighting hint on code/pre, force any surviving
  * checkbox `input` to `disabled`, and add `rel="noopener nofollow ugc"` to
  * links. Assumes `el`'s children have already been scrubbed (see walk).
- * @param {Element} el
- * @returns {void}
  */
 function scrubElement(el) {
     const tag = el.tagName.toLowerCase();
@@ -123,8 +117,6 @@ function scrubElement(el) {
  * into an element's children and scrubs each one (see scrubElement) only
  * after its own children are already clean, and drops comment nodes
  * outright.
- * @param {Node} node
- * @returns {void}
  */
 function walk(node) {
     // Depth-first: scrub children before the element, so unwrap keeps clean subtrees.
@@ -133,7 +125,7 @@ function walk(node) {
         const next = child.nextSibling;
         if (child.nodeType === 1) { // element
             walk(child);
-            scrubElement(/** @type {Element} */ (child));
+            scrubElement(child);
         }
         else if (child.nodeType === 8) { // comment
             child.remove();
@@ -145,8 +137,6 @@ function walk(node) {
  * Parse an HTML string inertly (via DOMParser, so scripts never run and
  * resources never load), sanitize it against the allowlist policy above,
  * and return a DocumentFragment ready to append to the live document.
- * @param {string} html
- * @returns {DocumentFragment}
  */
 export function sanitizeToFragment(html) {
     const doc = new DOMParser().parseFromString(html, 'text/html');

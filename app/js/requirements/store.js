@@ -1,4 +1,4 @@
-// requirements/store.js - the shared in-memory index the requirements subsystem
+// requirements/store.ts - the shared in-memory index the requirements subsystem
 // hangs off: the requirement + test record maps (populated from the server's
 // coverage index), the per-document parsed block lists, the coverage-status map
 // that colours badges, and the source->component lookup. Kept in one place so
@@ -14,19 +14,15 @@
 // listener list, and the rune store (app/svelte/stores/coverage.svelte.js)
 // subscribes to it from the compiled side. Vanilla pushes; Svelte listens.
 // ---------------------------------------------------------------------------
-/** @typedef {import('../requirements.js').RequirementEntry} RequirementEntry */
-/** @typedef {import('../requirements.js').TestCaseEntry} TestCaseEntry */
-/** @typedef {import('./parse.js').ReqOrTestBlock} ReqOrTestBlock */
-/** @typedef {import('../coverage.js').CoverageStatus} CoverageStatus */
-/** @type {Map<string, RequirementEntry>} requirement id -> record */
+/** requirement id -> record */
 export const index = new Map();
-/** @type {Map<string, TestCaseEntry>} test id -> record */
+/** test id -> record */
 export const testIndex = new Map();
-/** @type {Map<string, ReqOrTestBlock[]>} docId -> blocks (requirement group OR test case, in document order) */
+/** docId -> blocks (requirement group OR test case, in document order) */
 export const groupsByDoc = new Map();
-/** @type {Map<string, CoverageStatus>|Object<string, CoverageStatus>|null} set by the app so badges colour by status */
+/** set by the app so badges colour by status */
 let coverageStatus = null;
-/** @type {Object<string, string>} source name -> component id */
+/** source name -> component id */
 let componentBySource = {};
 /**
  * Everyone who wants to know when the status map is REPLACED.
@@ -35,14 +31,13 @@ let componentBySource = {};
  * coverage-view.js, so there is exactly one moment worth announcing and no need
  * for per-id granularity. A plain array of plain callbacks: see the header for
  * why this file cannot hold a rune.
- * @type {(() => void)[]}
  */
 const statusListeners = [];
 /**
  * Subscribe to coverage-status replacements.
- * @param {() => void} fn - called AFTER the new map is in place, so a callback
- *   that immediately calls statusOf() sees the new values, never the old ones
- * @returns {() => void} unsubscribe; safe to call more than once
+ * @param fn - called AFTER the new map is in place, so a callback that
+ *   immediately calls statusOf() sees the new values, never the old ones
+ * @returns unsubscribe; safe to call more than once
  */
 export function onStatusChange(fn) {
     statusListeners.push(fn);
@@ -52,7 +47,6 @@ export function onStatusChange(fn) {
             statusListeners.splice(i, 1);
     };
 }
-/** @param {Map<string, CoverageStatus>|Object<string, CoverageStatus>|null} m @returns {void} */
 export function setCoverageStatus(m) {
     coverageStatus = m;
     // Notify AFTER the swap, and defend the swap from its subscribers: a listener
@@ -69,9 +63,9 @@ export function setCoverageStatus(m) {
     });
 }
 /**
- * @param {string} id - a requirement or test id
- * @returns {CoverageStatus|null|undefined} null if no coverage status is set at
- *   all; undefined if it is set but has no entry for this id
+ * @param id - a requirement or test id
+ * @returns null if no coverage status is set at all; undefined if it is set but
+ *   has no entry for this id
  */
 export function statusOf(id) {
     if (!coverageStatus)
@@ -81,10 +75,10 @@ export function statusOf(id) {
     // like a CoverageStatus rather than a method, and the Map arm has no index
     // signature at all - so each branch has to say which arm it is standing on.
     return coverageStatus.get
-        ? /** @type {Map<string, CoverageStatus>} */ (coverageStatus).get(id)
-        : /** @type {Object<string, CoverageStatus>} */ (coverageStatus)[id];
+        ? coverageStatus.get(id)
+        : coverageStatus[id];
 }
-/** @param {Object<string, string>} map - source name -> component id @returns {void} */
+/** @param map - source name -> component id */
 export function setComponentBySource(map) { componentBySource = map; }
-/** @param {string} source @returns {string|undefined} component id, or undefined if the source is unknown */
+/** @returns the component id, or undefined if the source is unknown */
 export function componentOf(source) { return componentBySource[source]; }

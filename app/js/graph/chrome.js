@@ -1,4 +1,4 @@
-// graph/chrome.js - the EDIT-MODE STATE MACHINE, and only that.
+// graph/chrome.ts - the EDIT-MODE STATE MACHINE, and only that.
 // ---------------------------------------------------------------------------
 // This file used to build the overlay chrome (zoom controls, search box, legend,
 // edit toggle + hint, minimap, empty state) AND run the edit-mode state machine
@@ -14,7 +14,6 @@
 // All of it is canvas DRAW STATE - render.js reads g.pendingSource, g.selectedEdge
 // and g.vis every frame - so the machine mutates the context, asks for a repaint,
 // and REPORTS via g.emitChange(). It never touches a button.
-/** @typedef {import('../graph.js').GraphContext} GraphContext */
 /**
  * Install the edit-mode state machine onto the shared context: g.setConnector /
  * g.markSource / g.clearPending / g.clearSelectedEdge / g.selectEdge /
@@ -22,15 +21,12 @@
  *
  * Must run AFTER renderScene, because every mutator here ends in a repaint and
  * an emit, and both g.vis and g.requestDraw are renderScene's to create.
- * @param {GraphContext} g
- * @returns {void}
  */
 export function attachEditState(g) {
     /**
      * Arm a connection type. Purely a state change now: which legend entry looks
      * armed is chrome-view.js's problem, derived from the emitted `connector`.
-     * @param {string} type - 'prereq' | 'recnext'
-     * @returns {void}
+     * @param type - 'prereq' | 'recnext'
      */
     g.setConnector = function (type) {
         if (type !== 'prereq' && type !== 'recnext')
@@ -42,8 +38,6 @@ export function attachEditState(g) {
     };
     /**
      * Remember the first node of a two-click connect gesture.
-     * @param {string} id
-     * @returns {void}
      */
     g.markSource = function (id) { g.pendingSource = id; g.requestDraw(); g.emitChange(); };
     g.clearPending = function () {
@@ -64,10 +58,6 @@ export function attachEditState(g) {
      * Select a drawn edge (the thing Delete then removes). Selecting an edge and
      * holding a pending source are mutually exclusive states, so this clears the
      * source itself rather than emitting twice through g.clearPending.
-     * @param {string} from
-     * @param {string} to
-     * @param {string} type
-     * @returns {void}
      */
     g.selectEdge = function (from, to, type) {
         g.pendingSource = null;
@@ -77,8 +67,6 @@ export function attachEditState(g) {
     };
     /**
      * Enter or leave edit-connections mode, discarding any half-finished gesture.
-     * @param {boolean} on
-     * @returns {void}
      */
     g.setEditMode = function (on) {
         g.editMode = !!on;

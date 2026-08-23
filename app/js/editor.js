@@ -1,15 +1,15 @@
-// editor.js - a hand-written, zero-dependency WYSIWYG block editor (entry point).
+// editor.ts - a hand-written, zero-dependency WYSIWYG block editor (entry point).
 // ---------------------------------------------------------------------------
 // The author never touches Markdown. A document is edited as a list of visual
 // BLOCKS (heading, paragraph, list, code, quote, rule, table, requirement);
 // on save each block serialises to Markdown and the whole doc is regenerated
 // (normalize-on-save). This module is the shell/orchestrator - openEditor builds
 // the block canvas + metadata panel + toolbar; the pieces live in ./editor/*:
-//   serialize.js   Markdown <-> block model, parseDoc, block factory
-//   richtext.js    contenteditable fields, inline toolbar, link popover
-//   widgets.js     table / requirement / test-case / reference-picker widgets
-//   panels.js      metadata side panel, new-document modal
-//   ui.js          shared DOM primitives + the block-type menu
+//   serialize.ts   Markdown <-> block model, parseDoc, block factory
+//   richtext.ts    contenteditable fields, inline toolbar, link popover
+//   widgets.ts     table / requirement / test-case / reference-picker widgets
+//   panels.ts      metadata side panel, new-document modal
+//   ui.ts          shared DOM primitives + the block-type menu
 // ---------------------------------------------------------------------------
 import { elem, append } from './dom.js';
 import { arrowUpIcon, arrowDownIcon, plusIcon, closeIcon } from './icons.js';
@@ -19,89 +19,11 @@ import { tableEditor, requirementWidget, testCaseWidget, accessMarker } from './
 import { metadataPanel } from './editor/panels.js';
 import { iconBtn, labeledInput, openBlockMenu } from './editor/ui.js';
 import { resolveResourceUrl } from './doclinks.js';
-// Public API re-exported so existing importers (main.js, runner.js) stay unchanged.
+// Public API re-exported so existing importers (main.js, runner.ts) stay unchanged.
 export { parseDoc } from './editor/serialize.js';
 export { richText } from './editor/richtext.js';
 export { openNewDocModal, confirmDialog } from './editor/panels.js';
 export { setLinkDocs, setLinkSearch };
-/**
- * @typedef {Object} HeadingBlock
- * @property {'heading'} type
- * @property {number} level
- * @property {string} html
- */
-/**
- * @typedef {Object} ParagraphBlock
- * @property {'paragraph'} type
- * @property {string} html
- */
-/**
- * @typedef {Object} QuoteBlock
- * @property {'quote'} type
- * @property {string} html
- */
-/**
- * @typedef {Object} ListBlock
- * @property {'list'} type
- * @property {boolean} ordered
- * @property {string[]} itemsHtml
- */
-/**
- * @typedef {Object} CodeBlock
- * @property {'code'} type
- * @property {string} lang
- * @property {string} code
- */
-/**
- * @typedef {Object} ImageBlock
- * @property {'image'} type
- * @property {string} src
- * @property {string} alt
- */
-/**
- * @typedef {Object} HrBlock
- * @property {'hr'} type
- */
-/**
- * The opening half of a restricted section. It is a marker, not a container -
- * the protected blocks are the ones between it and its AccessEndBlock.
- * @typedef {Object} AccessStartBlock
- * @property {'access-start'} type
- * @property {string[]} read - group names allowed to read the section
- * @property {string} label
- */
-/**
- * @typedef {Object} AccessEndBlock
- * @property {'access-end'} type
- */
-/** @typedef {import('./editor/serialize.js').MdSourceBlock} MdSourceBlock */
-/** @typedef {import('./editor/widgets.js').TableBlock} TableBlock */
-/** @typedef {import('./editor/widgets.js').ReqBlock} ReqBlock */
-/** @typedef {import('./editor/widgets.js').TestCaseBlock} TestCaseBlock */
-/**
- * A single visual block in the editor canvas. Every widget / serialize.js /
- * blockField branch switches on `type`.
- * @typedef {HeadingBlock|ParagraphBlock|QuoteBlock|ListBlock|CodeBlock|TableBlock|ImageBlock|HrBlock|ReqBlock|TestCaseBlock|AccessStartBlock|AccessEndBlock} Block
- */
-/**
- * @typedef {Object} EditorOpts
- * @property {string} docId
- * @property {import('./editor/serialize.js').DocMeta} meta - document front-matter (title, assumes, next, description, ...)
- * @property {Block[]} blocks
- * @property {Object[]} [sources]
- * @property {{id: string, title: string}[]} allDocs
- * @property {boolean} isNew
- * @property {(markdown: string, meta: import('./editor/serialize.js').DocMeta, status: HTMLElement) => void} onSave
- * @property {() => void} onClose
- * @property {import('./editor/widgets.js').ReqRef[]} [requirements] - every saved requirement, for Trace-To/Verifies autocomplete
- * @property {string} [component]
- * @property {string[]} [knownGroups] - groups declared in config.json, offered by the access-marker pickers
- * @property {import('./auth.js').DocAccess|null} [docAccess] - this document's access state, for the metadata panel
- */
-/**
- * @param {EditorOpts} opts
- * @returns {HTMLElement}
- */
 export function openEditor(opts) {
     setLinkDocs(opts.allDocs || []); // static fallback; server-backed suggestions win (setLinkSearch)
     setImageResolver(src => resolveResourceUrl(opts.docId, src)); // inserted relative images show + round-trip
@@ -112,7 +34,6 @@ export function openEditor(opts) {
     // requirements from every other document PLUS the ones being edited right now
     // in this document (composed from the current component + group + number), so
     // intra-session traces autocomplete without needing a save first.
-    /** @returns {import('./editor/widgets.js').ReqRef[]} */
     const liveReqs = () => {
         const reqs = (opts.requirements || []).slice();
         const seen = new Set(reqs.map(q => q.id));
@@ -135,10 +56,6 @@ export function openEditor(opts) {
     };
     // "Restricted section" is a PAIR of markers with the protected content between
     // them; every other menu entry makes exactly one block.
-    /**
-     * @param {string} type
-     * @returns {Block[]}
-     */
     function blocksFor(type) {
         if (type === 'access')
             return [newBlock('access'), newBlock('paragraph'), newBlock('access-end')];
@@ -154,9 +71,8 @@ export function openEditor(opts) {
     }
     // Relative image srcs (image.png, ../x.png) don't resolve in the editor any more
     // than in the reader - resolve them to the doc's server folder for DISPLAY, but
-    // stash the ORIGINAL in data-mdsrc so serialize.js writes the relative path back
+    // stash the ORIGINAL in data-mdsrc so serialize.ts writes the relative path back
     // (never rewrites it to an absolute /docs/... path on save).
-    /** @param {Element} root */
     function resolveDisplayImages(root) {
         root.querySelectorAll('img').forEach(img => {
             const raw = img.getAttribute('data-mdsrc') || img.getAttribute('src');
@@ -168,11 +84,6 @@ export function openEditor(opts) {
         });
     }
     // One block row: the reorder/insert/delete gutter plus the block's editable body.
-    /**
-     * @param {Block} b
-     * @param {number} i
-     * @returns {HTMLElement}
-     */
     function renderBlockEditor(b, i) {
         const gutter = elem('div', 'blk-gutter', iconBtn(arrowUpIcon(), 'Move up', () => { if (i > 0) {
             [blocks[i - 1], blocks[i]] = [blocks[i], blocks[i - 1]];
@@ -180,15 +91,11 @@ export function openEditor(opts) {
         } }), iconBtn(arrowDownIcon(), 'Move down', () => { if (i < blocks.length - 1) {
             [blocks[i + 1], blocks[i]] = [blocks[i], blocks[i + 1]];
             repaint();
-        } }), iconBtn(plusIcon(), 'Insert below', e => openBlockMenu(/** @type {Element} */ (e.target), t => { blocks.splice(i + 1, 0, ...blocksFor(t)); repaint(); })), iconBtn(closeIcon(), 'Delete', () => { blocks.splice(i, 1); if (!blocks.length)
+        } }), iconBtn(plusIcon(), 'Insert below', e => openBlockMenu(e.target, t => { blocks.splice(i + 1, 0, ...blocksFor(t)); repaint(); })), iconBtn(closeIcon(), 'Delete', () => { blocks.splice(i, 1); if (!blocks.length)
             blocks.push(newBlock('paragraph')); repaint(); }));
         return elem('div', 'blk blk-' + b.type, gutter, elem('div', 'blk-body', blockField(b)));
     }
     // Build the editable field(s) for a block, writing edits back into `b`.
-    /**
-     * @param {Block} b
-     * @returns {HTMLElement}
-     */
     function blockField(b) {
         if (b.type === 'heading') {
             const select = elem('select', { onChange: () => { b.level = +select.value; } });
@@ -237,10 +144,10 @@ export function openEditor(opts) {
     /** Serialize every block back to Markdown and hand it to opts.onSave. */
     function onSave() {
         // pull inline HTML -> markdown for text blocks; other block types pass through.
-        // The @returns pins each branch's literal `type` to the MdSourceBlock member
-        // it stands for; without it the object literals widen `type` to string and
-        // serializeDoc can no longer tell the block kinds apart.
-        const out = blocks.map(/** @returns {MdSourceBlock} */ /** @returns {MdSourceBlock} */ b => {
+        // The MdSourceBlock return annotation pins each branch's literal `type` to the
+        // member it stands for; without it the object literals widen `type` to string
+        // and serializeDoc can no longer tell the block kinds apart.
+        const out = blocks.map((b) => {
             if (b.type === 'heading')
                 return { type: 'heading', level: b.level || 2, text: htmlToMd(b.html) };
             if (b.type === 'paragraph')

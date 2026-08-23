@@ -1,4 +1,4 @@
-// panzoom.js - a small, hand-written, zero-dependency pan/zoom viewport (core).
+// panzoom.ts - a small, hand-written, zero-dependency pan/zoom viewport (core).
 // ---------------------------------------------------------------------------
 // Wraps any rendered content (typically a diagram <svg>) in a fixed-height frame
 // the reader can PAN (drag), ZOOM (buttons; or the wheel once the frame is
@@ -13,21 +13,12 @@
 // ---------------------------------------------------------------------------
 import { plusIcon, minusIcon, fitIcon } from './icons.js';
 /**
- * Tuning knobs for the pan/zoom viewport, all optional.
- * @typedef {Object} PanZoomOptions
- * @property {number} [height] - viewport frame height in px (default 440)
- * @property {number} [minScale] - minimum zoom scale (default 0.05)
- * @property {number} [maxScale] - maximum zoom scale (default 8)
- * @property {number} [padding] - fraction of the frame `fit()` scales content to fill (default 0.94)
- */
-/**
  * Wrap `content` (typically a rendered SVG, or a div wrapping one) in a
  * pan/zoom viewport: drag to pan, the +/- buttons (or the wheel once the
  * frame is focused) to zoom, arrow keys to pan and 0 to fit, plus a one-time
  * auto-fit once the frame is first measured after mounting.
- * @param {HTMLElement|SVGElement} content - moved into the viewport's stage, not cloned
- * @param {PanZoomOptions} [opts]
- * @returns {HTMLElement} the viewport element, already containing `content` and its zoom controls
+ * @param content - moved into the viewport's stage, not cloned
+ * @returns the viewport element, already containing `content` and its zoom controls
  */
 export function createPanZoom(content, opts = {}) {
     const height = opts.height || 440;
@@ -45,27 +36,19 @@ export function createPanZoom(content, opts = {}) {
     stage.appendChild(content);
     viewport.appendChild(stage);
     let x = 0, y = 0, k = 1;
-    /** @param {number} v - a candidate scale, clamped into the configured zoom range */
+    /** @param v - a candidate scale, clamped into the configured zoom range */
     const clamp = (v) => Math.max(minK, Math.min(maxK, v));
     const apply = () => { stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')'; };
     const midX = () => viewport.clientWidth / 2;
     const midY = () => viewport.clientHeight / 2;
     /**
-     * The unscaled (k=1) pixel size of the wrapped content, used by `fit()` to
-     * compute the fit-to-view scale.
-     * @typedef {Object} NaturalSize
-     * @property {number} w
-     * @property {number} h
-     */
-    /**
      * An SVG's own viewBox size (exact, independent of the current scale) if it
      * has one, otherwise its live bounding rect divided back out by the current
      * scale `k`.
-     * @returns {NaturalSize}
      */
     function naturalSize() {
         const svg = (content.tagName && content.tagName.toLowerCase() === 'svg')
-            ? /** @type {SVGSVGElement} */ (content) : content.querySelector('svg');
+            ? content : content.querySelector('svg');
         const vb = svg && svg.viewBox && svg.viewBox.baseVal;
         if (vb && vb.width)
             return { w: vb.width, h: vb.height };
@@ -74,10 +57,6 @@ export function createPanZoom(content, opts = {}) {
     }
     /**
      * Zoom by `factor`, keeping the point (ax, ay) in viewport coords anchored.
-     * @param {number} factor
-     * @param {number} ax
-     * @param {number} ay
-     * @returns {void}
      */
     function zoomAt(factor, ax, ay) {
         const nk = clamp(k * factor);
@@ -101,10 +80,9 @@ export function createPanZoom(content, opts = {}) {
     controls.className = 'pz-controls';
     /**
      * A small toolbar button that stops propagation so it never starts a pan.
-     * @param {Element} icon - an icons.js node, e.g. plusIcon()
-     * @param {string} title - tooltip / aria-label text
-     * @param {() => void} fn - invoked on click
-     * @returns {HTMLButtonElement}
+     * @param icon - an icons.js node, e.g. plusIcon()
+     * @param title - tooltip / aria-label text
+     * @param fn - invoked on click
      */
     const button = (icon, title, fn) => {
         const b = document.createElement('button');
@@ -122,7 +100,7 @@ export function createPanZoom(content, opts = {}) {
     // --- panning (pointer drag) ---
     let dragging = false, px = 0, py = 0;
     viewport.addEventListener('pointerdown', (e) => {
-        if ( /** @type {Element} */(e.target).closest('.pz-controls'))
+        if (e.target.closest('.pz-controls'))
             return;
         dragging = true;
         px = e.clientX;
@@ -142,10 +120,6 @@ export function createPanZoom(content, opts = {}) {
         py = e.clientY;
         apply();
     });
-    /**
-     * @param {PointerEvent} e
-     * @returns {void}
-     */
     const endPan = (e) => {
         if (!dragging)
             return;

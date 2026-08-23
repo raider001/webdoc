@@ -1,4 +1,4 @@
-// auth.js - the browser's half of accounts and access groups.
+// auth.ts - the browser's half of accounts and access groups.
 // ---------------------------------------------------------------------------
 // This module holds WHO is signed in, WHAT they may do, and the one fetch
 // wrapper every state-changing request in the app goes through so the CSRF
@@ -8,76 +8,6 @@
 // The server decides every question independently - this only decides what to
 // SHOW. Hiding the edit button is courtesy; refusing the PUT is the control.
 // ---------------------------------------------------------------------------
-/**
- * The site's account policy, as published unauthenticated by /site.json and
- * /api/auth/me. Enough to render a sign-in screen and a group legend; never
- * anything about an individual account.
- * @typedef {Object} AuthPolicy
- * @property {boolean} enabled
- * @property {boolean} allowRegistration
- * @property {boolean} requireApproval
- * @property {boolean} publicRead - unrestricted documents readable signed out
- * @property {number} passwordMinLength
- * @property {GroupSpec[]} groups
- * @property {string[]} adminGroups
- */
-/**
- * One access group as declared in config.json.
- * @typedef {Object} GroupSpec
- * @property {string} name - the canonical (lower-case) name used in ACLs
- * @property {string} label - the human-readable name
- * @property {string} description
- * @property {string|null} color - an operator-chosen hex colour, or null to derive one
- */
-/**
- * The signed-in account, as /api/auth/me reports it.
- * @typedef {Object} CurrentUser
- * @property {string} username
- * @property {string} displayName
- * @property {string[]} groups
- * @property {boolean} admin
- * @property {boolean} authenticated
- */
-/**
- * The normalised reply from any /api/auth/* endpoint. postAuth() guarantees
- * `ok`; every other field is whatever that particular endpoint chose to send,
- * which is why they are all optional here rather than split per-endpoint.
- * @typedef {Object} AuthReply
- * @property {boolean} ok
- * @property {string} [error]
- * @property {number} [retryAfter] - seconds the login throttle wants us to wait
- * @property {boolean} [pendingApproval] - registered, but an administrator must approve
- * @property {string} [message] - the "what happens next" sentence for a 202
- * @property {string} [csrf] - a freshly minted token, on the calls that mint one
- */
-/**
- * One document's access state, from GET /api/index/access?id=... - what the
- * document DECLARES, what it EFFECTIVELY has after inheritance, and what this
- * user may do with it.
- * @typedef {Object} DocAccess
- * @property {string} id
- * @property {number} redactedSections - sections of this page withheld from this reader (>0 makes it read-only)
- * @property {Object|null} declared
- * @property {{read: string[]|null, write: string[]|null, hidden: boolean, explicit: boolean, inheritedFrom: string[]}} effective
- * @property {boolean} canRead
- * @property {boolean} canWrite
- * @property {boolean} canEditAccess
- * @property {string[]} knownGroups
- */
-/**
- * The live session state this module owns. Read it; never assign to it from
- * outside (loadAuth / signIn / signOut keep it in step with the server).
- * @typedef {Object} AuthState
- * @property {boolean} enabled - accounts are switched on for this server
- * @property {boolean} loaded - /api/auth/me has answered at least once
- * @property {CurrentUser|null} user
- * @property {string|null} csrf
- * @property {boolean} canWrite - may edit a document that carries no write ACL
- * @property {boolean} canEditAccess - may add or change an access block
- * @property {boolean} needsBootstrap - no accounts exist yet; the first one is the admin
- * @property {AuthPolicy} policy
- */
-/** @type {AuthState} */
 export const auth = {
     enabled: false,
     loaded: false,
@@ -91,12 +21,8 @@ export const auth = {
         passwordMinLength: 10, groups: [], adminGroups: [],
     },
 };
-/** Listeners notified whenever the signed-in identity changes. @type {Array<() => void>} */
+/** Listeners notified whenever the signed-in identity changes. */
 const listeners = [];
-/**
- * @param {() => void} fn
- * @returns {void}
- */
 export function onAuthChange(fn) { listeners.push(fn); }
 function emit() { listeners.forEach(fn => { try {
     fn();
@@ -106,7 +32,6 @@ catch (e) { } }); }
 /**
  * Ask the server who we are. Also the only call that mints the CSRF cookie, so
  * boot must await it before any write is possible.
- * @returns {Promise<AuthState>}
  */
 export async function loadAuth() {
     try {
@@ -119,7 +44,6 @@ export async function loadAuth() {
     emit();
     return auth;
 }
-/** @param {Object<string, *>} body */
 function applyMe(body) {
     auth.policy = body.auth || auth.policy;
     auth.enabled = !!(body.auth && body.auth.enabled);
@@ -129,23 +53,12 @@ function applyMe(body) {
     auth.canEditAccess = !!body.canEditAccess;
     auth.needsBootstrap = !!body.needsBootstrap;
 }
-/**
- * @param {string} username
- * @param {string} password
- * @returns {Promise<AuthReply>}
- */
 export async function signIn(username, password) {
     const r = await postAuth('/api/auth/login', { username: username, password: password });
     if (r.ok)
         await loadAuth();
     return r;
 }
-/**
- * @param {string} username
- * @param {string} password
- * @param {string} displayName
- * @returns {Promise<AuthReply>}
- */
 export async function register(username, password, displayName) {
     const r = await postAuth('/api/auth/register', { username: username, password: password, displayName: displayName });
     // 202 means the account exists but an administrator must approve it - there is
@@ -154,16 +67,10 @@ export async function register(username, password, displayName) {
         await loadAuth();
     return r;
 }
-/** @returns {Promise<void>} */
 export async function signOut() {
     await postAuth('/api/auth/logout', {});
     await loadAuth();
 }
-/**
- * @param {string} currentPassword
- * @param {string} newPassword
- * @returns {Promise<AuthReply>}
- */
 export async function changePassword(currentPassword, newPassword) {
     const r = await postAuth('/api/auth/password', { currentPassword: currentPassword, newPassword: newPassword });
     if (r.ok)
@@ -174,9 +81,6 @@ export async function changePassword(currentPassword, newPassword) {
  * POST a JSON body to an auth endpoint and normalise the reply into
  * {ok, ...payload}. Never throws - a dead server reads as a failed sign-in with
  * a message, not an unhandled rejection in the middle of the login screen.
- * @param {string} url
- * @param {Object<string, *>} payload
- * @returns {Promise<AuthReply>}
  */
 async function postAuth(url, payload) {
     let res;
@@ -188,7 +92,6 @@ async function postAuth(url, payload) {
     }
     // Partial, not AuthReply: `ok` is what THIS function decides from the status
     // code, and the server never sends it.
-    /** @type {Partial<AuthReply>} */
     let body = {};
     try {
         body = await res.json();
@@ -209,11 +112,8 @@ async function postAuth(url, payload) {
  * the point: a PUT that forgets the header is refused by the server, so a
  * second, hand-rolled fetch somewhere in the app would be a bug that only
  * shows up as an unexplained 403 in the field.
- * @param {string} url
- * @param {Omit<RequestInit, 'headers'> & {headers?: Object<string, string>}} [opts]
- *   headers is narrowed to a plain record on purpose: the copy below is an
- *   Object.assign, which would quietly drop a Headers instance or a pair array.
- * @returns {Promise<Response>}
+ * @param opts - headers is narrowed to a plain record on purpose: the copy below
+ *   is an Object.assign, which would quietly drop a Headers instance or a pair array.
  */
 export function apiFetch(url, opts) {
     const options = Object.assign({ credentials: 'same-origin' }, opts || {});
@@ -227,10 +127,6 @@ export function apiFetch(url, opts) {
     }
     return fetch(url, options);
 }
-/**
- * @param {string} name
- * @returns {string|null}
- */
 function readCookie(name) {
     const parts = String(document.cookie || '').split(';');
     for (const part of parts) {
@@ -243,26 +139,11 @@ function readCookie(name) {
     return null;
 }
 /**
- * The JSON a refused request comes back with. Every field is optional because
- * WHICH of them the server sends is precisely what tells the three refusals
- * apart - describeFailure() below is written as a walk down these flags.
- * @typedef {Object} FailureBody
- * @property {string} [error] - the server's own sentence, preferred when present
- * @property {boolean} [signInRequired] - there is no session at all
- * @property {boolean} [csrf] - the token, not the permission, was the problem
- * @property {boolean} [aclChange] - the write touched an access block
- * @property {number} [redactedSections] - sections of the submitted page were withheld from this reader
- * @property {string[]} [requiresGroups] - any one of these would have allowed it
- */
-/**
  * Turn a failed write into a sentence worth showing. Distinguishes the three
  * refusals the access model can produce, because "Save failed (403)" tells the
  * author nothing about which of them they hit.
- * @param {Response} res
- * @returns {Promise<string>}
  */
 export async function describeFailure(res) {
-    /** @type {FailureBody} */
     let body = {};
     try {
         body = await res.json();
@@ -290,10 +171,6 @@ export async function describeFailure(res) {
     return body.error || ('Request failed (' + res.status + ')');
 }
 // ---- groups ---------------------------------------------------------------
-/**
- * @param {string} name
- * @returns {GroupSpec|null}
- */
 export function groupSpec(name) {
     const key = String(name || '').toLowerCase();
     return (auth.policy.groups || []).find(g => g.name === key) || null;
@@ -301,8 +178,6 @@ export function groupSpec(name) {
 /**
  * The human-readable name of a group. Falls back to the raw name so a group
  * that exists only in a document (not in config.json) still reads sensibly.
- * @param {string} name
- * @returns {string}
  */
 export function groupLabel(name) {
     const spec = groupSpec(name);
@@ -315,8 +190,7 @@ export function groupLabel(name) {
  * everywhere without anyone having to configure one; saturation and lightness
  * come from THEME TOKENS, so both themes stay coherent and nothing here
  * hardcodes a palette. An operator-set hex in config.json always wins.
- * @param {string} name
- * @returns {string} a CSS colour
+ * @returns a CSS colour
  */
 export function groupColor(name) {
     const spec = groupSpec(name);
@@ -337,8 +211,6 @@ export function groupColor(name) {
 /**
  * Whether the signed-in user holds any of these groups (administrators hold
  * everything). Display logic only - the server checks this itself.
- * @param {string[]} groups
- * @returns {boolean}
  */
 export function inAnyGroup(groups) {
     if (!auth.enabled)
@@ -353,7 +225,6 @@ export function inAnyGroup(groups) {
 /**
  * True when the app should show its sign-in wall instead of the library: the
  * server wants accounts, nobody is signed in, and reading is not public.
- * @returns {boolean}
  */
 export function signInRequired() {
     return !!(auth.enabled && !auth.user && !auth.policy.publicRead);
@@ -363,8 +234,6 @@ export function signInRequired() {
  * One document's access state. Used by the editor's access panel and the
  * restricted-page screen; cached per id until invalidateAccess() is called
  * (a save can change a whole chapter's inherited ACL).
- * @param {string} docId
- * @returns {Promise<DocAccess|null>}
  */
 export async function docAccess(docId) {
     if (accessCache.has(docId))
@@ -381,14 +250,8 @@ export async function docAccess(docId) {
     accessCache.set(docId, info);
     return info;
 }
-/** @type {Map<string, DocAccess|null>} */
 const accessCache = new Map();
-/** @returns {void} */
 export function invalidateAccess() { accessCache.clear(); }
-// ---- administration -------------------------------------------------------
-/**
- * @returns {Promise<{users: Object[], groups: GroupSpec[]}|null>}
- */
 export async function listUsers() {
     try {
         const res = await fetch('/api/auth/users', { cache: 'no-store', credentials: 'same-origin' });
@@ -401,9 +264,7 @@ export async function listUsers() {
     }
 }
 /**
- * @param {string} action - 'create' | 'update' | 'delete' | 'reset-password'
- * @param {Object<string, *>} payload
- * @returns {Promise<AuthReply>}
+ * @param action - 'create' | 'update' | 'delete' | 'reset-password'
  */
 export function adminUser(action, payload) {
     return postAuth('/api/auth/users/' + action, payload);

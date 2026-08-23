@@ -1,4 +1,4 @@
-// requirements.js - requirement groups AND test cases, with cross-document
+// requirements.ts - requirement groups AND test cases, with cross-document
 // tracing. Two kinds of metadata-wrapped Markdown table are recognised:
 //
 //   <!--meta start {"requirement-group":"nav"}-->                  (requirements)
@@ -28,73 +28,21 @@ import { extractGroups, resolveReqRef, cssSafe } from './requirements/parse.js';
 export { setCoverageStatus } from './requirements/store.js';
 export { resolveRequirementRef, preprocessRequirements } from './requirements/parse.js';
 export { renderRequirements, blockMarkdown, inlineMarkdown } from './requirements/render.js';
-/** @typedef {import('./catalog.js').Doc} Doc */
-/** @typedef {import('./catalog.js').SourceConfig} SourceConfig */
-/** @typedef {import('./requirements/parse.js').ReqOrTestBlock} ReqOrTestBlock */
-/**
- * One test-case step: an action and its expected response. Same shape as the
- * editor's own step objects (editor/widgets.js's TestStep) - structured data in
- * the meta header now (any markdown allowed), though older docs kept steps in a
- * table (requirements/parse.js's extractTestCase reads both forms).
- * @typedef {import('./editor/widgets.js').TestStep} TestStep
- */
-/**
- * One requirement record (an R_ id). Built per-document by requirements/parse.js's
- * extractReqGroup and, in fuller form (with resolved traceFrom/verifiedBy), from
- * the server's global coverage index by buildRequirementIndex/requirementList.
- * @typedef {Object} RequirementEntry
- * @property {string} id
- * @property {string} docId
- * @property {string} component
- * @property {string} group
- * @property {string} no
- * @property {string} description
- * @property {string[]} traceTo
- * @property {string[]} traceFrom
- * @property {string[]} verifiedBy
- */
-/**
- * One test-case record (a T_ id). Built per-document by requirements/parse.js's
- * extractTestCase and, in fuller form, from the server's global index by
- * buildRequirementIndex/testList.
- * @typedef {Object} TestCaseEntry
- * @property {string} id
- * @property {string} docId
- * @property {string} component
- * @property {string} key
- * @property {string} name
- * @property {TestStep[]} steps
- * @property {string[]} [verifiesRaw] - the ids exactly as authored. Optional
- *   because testList()'s projection deliberately drops it and carries only the
- *   resolved `verifies`.
- * @property {string[]} verifies
- */
-/**
- * A plain doc-to-doc reference pair. The same {from,to} shape is independently
- * produced twice - as requirement-trace edges (requirementTraceEdges, below) and
- * as in-body page-link edges (doclinks.js) - and consumed identically by the graph.
- * @typedef {Object} DocEdgeRef
- * @property {string} from
- * @property {string} to
- */
 // Build the GLOBAL requirement/test index from the server's SQLite index (composed
 // ids + resolved trace-from / verified-by / verifies). This used to scan every doc
 // body at boot - the wall that capped the corpus. Now the server computes it and the
 // browser fetches a compact list; per-document block STRUCTURE (for the in-document
 // tables) is parsed on demand from the displayed doc only (prepareDocGroups).
 /**
- * @param {Doc[]|null} _docs - not read by this function; every current call site
- *   passes null now that the index comes from the server instead of being built
- *   by scanning docs. Underscored, not dropped: the exported signature is the
- *   API third-party renderer plugins import.
- * @param {SourceConfig[]} sources
- * @returns {Promise<void>}
+ * @param _docs - not read by this function; every current call site passes null
+ *   now that the index comes from the server instead of being built by scanning
+ *   docs. Underscored, not dropped: the exported signature is the API
+ *   third-party renderer plugins import.
  */
 export async function buildRequirementIndex(_docs, sources) {
     index.clear();
     testIndex.clear();
     groupsByDoc.clear();
-    /** @type {Object<string, string>} */
     const cbs = {};
     for (const s of sources || [])
         cbs[s.name] = s.component;
@@ -126,10 +74,8 @@ export async function buildRequirementIndex(_docs, sources) {
  * Parse the CURRENT document's requirement/test blocks from its (already-loaded)
  * body and stash them for renderRequirements, enriched with the global trace-from /
  * verified-by / verifies resolved by the server. Only the displayed doc is parsed.
- * @param {string} body - raw markdown
- * @param {string} docId
- * @param {string} source - source name, for component lookup (see componentOf)
- * @returns {ReqOrTestBlock[]}
+ * @param body - raw markdown
+ * @param source - source name, for component lookup (see componentOf)
  */
 export function prepareDocGroups(body, docId, source) {
     const component = componentOf(source);
@@ -155,7 +101,7 @@ export function prepareDocGroups(body, docId, source) {
 }
 /**
  * Every known requirement (for the coverage rollup and the editor picker).
- * @returns {RequirementEntry[]} sorted by id
+ * @returns sorted by id
  */
 export function requirementList() {
     return [...index.values()]
@@ -170,8 +116,8 @@ export function requirementList() {
 }
 /**
  * Every known test case (for the coverage rollup, graph, runner and editor).
- * @returns {TestCaseEntry[]} sorted by id (verifiesRaw is omitted from this
- *   projection - only the resolved verifies list is included)
+ * @returns sorted by id (verifiesRaw is omitted from this projection - only the
+ *   resolved verifies list is included)
  */
 export function testList() {
     return [...testIndex.values()]
@@ -183,7 +129,7 @@ export function testList() {
         .sort((a, b) => a.id.localeCompare(b.id));
 }
 // Deep-link: scroll a requirement or test into view and flash it.
-/** @param {string} prefix - the element-id prefix, 'req-' or 'test-' @param {string} id @returns {void} */
+/** @param prefix - the element-id prefix, 'req-' or 'test-' */
 function reveal(prefix, id) {
     if (!id)
         return;
@@ -194,9 +140,7 @@ function reveal(prefix, id) {
     el.classList.add('req-flash');
     setTimeout(() => el.classList.remove('req-flash'), 1600);
 }
-/** @param {string} reqId @returns {void} */
 export function revealRequirement(reqId) { reveal('req-', reqId); }
-/** @param {string} testId @returns {void} */
 export function revealTest(testId) { reveal('test-', testId); }
 // Pull ?req=<id> / ?test=<id> out of a hash-route query string.
 //
@@ -211,8 +155,7 @@ export function revealTest(testId) { reveal('test-', testId); }
 // about separators, repeated keys and percent-decoding, and unlike two
 // near-identical patterns it cannot drift out of agreement with itself.
 /**
- * @param {string} query - the part of the hash route after '?', without the '?'
- * @returns {{req: string|null, test: string|null}}
+ * @param query - the part of the hash route after '?', without the '?'
  */
 export function routeParams(query) {
     const p = new URLSearchParams(query || '');
@@ -220,7 +163,6 @@ export function routeParams(query) {
 }
 /**
  * Document -> document trace edges, for the map view's requirement-trace layer.
- * @returns {DocEdgeRef[]}
  */
 export function requirementTraceEdges() {
     const seen = new Set();

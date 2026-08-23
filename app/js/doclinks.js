@@ -1,4 +1,4 @@
-// doclinks.js - in-body markdown links for the map's "Page link" layer.
+// doclinks.ts - in-body markdown links for the map's "Page link" layer.
 // ---------------------------------------------------------------------------
 // Scans each document body for inline links [text](target) and classifies each:
 //   * INTERNAL  - target resolves to another document id (incl. relative ./ ../
@@ -13,44 +13,14 @@
 // ignored so they aren't mistaken for real links.
 // ---------------------------------------------------------------------------
 /**
- * @typedef {import("./catalog.js").Doc} Doc
- */
-/**
- * A doc->doc (or doc->external-node) edge reference: just the id pair, matching
- * the {from, to} shape GraphModel.traceEdges/pageLinks use (see map-view.js).
- * @typedef {Object} DocEdgeRef
- * @property {string} from
- * @property {string} to
- */
-/**
- * A pseudo-node representing an external (non-doc) URL discovered in a doc
- * body, positioned off to the side of the doc layout and drawn as its own box.
- * @typedef {Object} ExternalLinkNode
- * @property {string} id - "ext:" + the raw URL
- * @property {string} url
- */
-/**
- * The shape returned by documentLinks(): every in-body page-link edge found
- * across all docs, plus the external-URL nodes those edges point at.
- * @typedef {Object} DocLinksResult
- * @property {DocEdgeRef[]} pageLinks
- * @property {ExternalLinkNode[]} externalNodes
- */
-/**
  * An unordered-pair key ("a b", alphabetically ordered) so a<->b and b<->a
  * hash to the same exclusion/seen entry regardless of direction.
- * @param {string} a
- * @param {string} b
- * @returns {string}
  */
 function pairKey(a, b) { return a < b ? a + ' ' + b : b + ' ' + a; }
 /**
  * Resolve a relative reference (./ , ../ , bare sibling, or /source-root) against
  * the current document's id. Shared with the reader (main.js) so the map's link
  * classification and the in-body link routing never disagree.
- * @param {string} baseId
- * @param {string} rel
- * @returns {string}
  */
 export function joinDocPath(baseId, rel) {
     rel = String(rel || '').replace(/\/+$/, '');
@@ -82,9 +52,6 @@ export function joinDocPath(baseId, rel) {
  * protocol-relative //, data:) and root-absolute (/â€¦) refs are the author's explicit
  * choice -> returns null (leave the src untouched). Shared by the reader (main.js)
  * and the editor so a relative image renders the same in both.
- * @param {string} baseId
- * @param {string} src
- * @returns {string|null}
  */
 export function resolveResourceUrl(baseId, src) {
     const s = String(src || '');
@@ -98,16 +65,14 @@ export function resolveResourceUrl(baseId, src) {
 /**
  * Resolve an authored link target (relative, already-a-doc-id, or missing the
  * source-segment prefix) to a real doc id, case-insensitively.
- * @param {string} path - the raw link target (already stripped of any #anchor / .md)
- * @param {string|null} baseId - the doc doing the linking, for relative resolution
- * @param {Set<string>|Map<string,*>} ids - anything with .has(id) and .keys() (a Set of ids, or a Map keyed by id)
- * @returns {string|null}
+ * @param path the raw link target (already stripped of any #anchor / .md)
+ * @param baseId the doc doing the linking, for relative resolution
+ * @param ids anything with .has(id) and .keys() (a Set of ids, or a Map keyed by id)
  */
 export function resolveDocId(path, baseId, ids) {
     if (!path || !ids)
         return null;
-    /** @param {string} c @returns {string|null} */
-    const match = c => {
+    const match = (c) => {
         if (!c)
             return null;
         if (ids.has(c))
@@ -140,9 +105,7 @@ const HAS_SCHEME = /^(?:[a-z][a-z0-9+.-]*:)/i; // http:, mailto:, tel:, data:, â
  * internal page-link edge, an external-URL node+edge, or a dropped dangling
  * link (see file header). Skips any pair already shown elsewhere on the map
  * (assumes/next/trace edges) and any duplicate edge.
- * @param {Doc[]} docs
- * @param {DocEdgeRef[]} traceEdges - existing requirement-trace edges to exclude as dupes
- * @returns {DocLinksResult}
+ * @param traceEdges existing requirement-trace edges to exclude as dupes
  */
 export function documentLinks(docs, traceEdges) {
     const ids = new Set((docs || []).map(d => d.id));

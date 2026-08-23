@@ -1,4 +1,4 @@
-// md/blocks.js - PHASE 1 block structure: the line-by-line parse loop
+// md/blocks.ts - PHASE 1 block structure: the line-by-line parse loop
 // (parseDocument) building a block tree of { type, children:[], ... } objects +
 // a link-reference-definition map, with open blocks tracked as a "path" array
 // from the document to the tip. Scanning primitives -> ./patterns.js; post-passes
@@ -7,66 +7,24 @@
 import { reThematic, reATX, reFence, reBulletItem, reOrderedItem, reBlockquote, reSetext, reBlank, htmlBlockKind, htmlBlockCloses, leading, removeIndent, stripUpTo, stripCols, expandLeadingTabs } from './patterns.js';
 import { stripLeadingRefs, collectRefs, detectTightness } from './blockpost.js';
 import { extractTables } from './tables.js';
-/* ===========================================================================
-   PHASE 1 - block structure
-   Block object: { type, children:[], text?:string[], ... }
-   =========================================================================== */
 /**
- * The CommonMark/GFM block-tree node built by makeBlock() during PHASE 1
- * parsing; walked by the ref-def and tightness post-passes (./blockpost.js),
- * rewritten in place by the GFM table pass (./tables.js), and read leaf-by-leaf
- * by the PHASE 2 HTML renderer (./render.js, ../commonmark.js). Deliberately
- * distinct from the unrelated app/js/blocks.js fenced-block renderer registry.
- * @typedef {Object} MdBlockNode
- * @property {string} type
- * @property {MdBlockNode[]} children
- * @property {boolean} open
- * @property {string[]} lines
- * @property {boolean} lastLineBlank
- * @property {number} [level] - heading only
- * @property {string} [listType] - 'ordered'|'bullet', list only
- * @property {string|number} [marker] - list: bullet char; item: content-indent column
- * @property {number|null} [start] - list only; always present on list nodes, but only meaningful (non-null) when listType is 'ordered'
- * @property {boolean} [tight] - list only
- * @property {string} [taskPrefix] - paragraph only, GFM task-list checkbox HTML
- * @property {string|number} [kind] - codeblock: 'fenced'|'indented'; htmlblock: 1-7
- * @property {string} [fence] - fenced codeblock only
- * @property {number} [fenceLen] - fenced codeblock only
- * @property {number} [fenceIndent] - fenced codeblock only
- * @property {string} [info] - fenced codeblock only
- * @property {(string|null)[]} [aligns] - table only
- * @property {string[]} [headerCells] - table only
- * @property {string[][]} [bodyRows] - table only
- * @property {number} [openedLine] - item only
- */
-/**
- * @param {string} type
- * @param {Object<string, *>} [extra] - extra fields merged onto the new node (e.g. level, kind, marker)
- * @returns {MdBlockNode}
+ * @param extra extra fields merged onto the new node (e.g. level, kind, marker)
  */
 export function makeBlock(type, extra) {
-    /** @type {MdBlockNode} */
     const b = { type: type, children: [], open: true, lines: [], lastLineBlank: false };
     // `extra` is a bag of the node's optional, type-specific fields, keyed by name
     // at runtime; the loose view exists only for the copy itself, so callers still
     // see a properly-typed MdBlockNode back.
-    if (extra)
-        for (const k in extra) /** @type {Object<string, *>} */
-            (b)[k] = extra[k];
+    if (extra) {
+        const bag = b;
+        const src = extra;
+        for (const k in src)
+            bag[k] = src[k];
+    }
     return b;
 }
 /**
- * The {doc, refs} pair tying the finished MdBlockNode tree to its
- * link-reference-definition table; destructured by commonmark.js's public
- * renderMarkdown() before rendering.
- * @typedef {Object} ParsedDocument
- * @property {MdBlockNode} doc
- * @property {Object<string, import('./blockpost.js').RefDefinition>} refs
- */
-/**
  * PHASE 1 entry point: parse Markdown source into a block tree + ref-def table.
- * @param {string} src
- * @returns {ParsedDocument}
  */
 export function parseDocument(src) {
     const lines = src.replace(/\r\n?/g, '\n').replace(/\0/g, '�').split('\n');
@@ -74,7 +32,7 @@ export function parseDocument(src) {
         lines.pop();
     const doc = makeBlock('document');
     const refs = Object.create(null);
-    let path = [doc]; // open blocks, document -> tip
+    const path = [doc]; // open blocks, document -> tip
     for (let li = 0; li < lines.length; li++) {
         let raw = lines[li];
         let rest = raw; // remaining unconsumed part of the line
@@ -123,8 +81,8 @@ export function parseDocument(src) {
                     matched = d + 1;
                     rest = rest.replace(/^[ \t]*/, '');
                 }
-                else if (m.spaces >= /** @type {number} */ (b.marker)) {
-                    rest = removeIndent(rest, /** @type {number} */ (b.marker));
+                else if (m.spaces >= b.marker) {
+                    rest = removeIndent(rest, b.marker);
                     matched = d + 1;
                 }
                 else
@@ -140,11 +98,13 @@ export function parseDocument(src) {
         let container = path[matched - 1];
         // close deeper unmatched open containers later; for now keep the matched prefix
         // ---- 2. try to open new blocks ----
-        let leaf = path[path.length - 1];
+        const leaf = path[path.length - 1];
         // Setext heading: an underline under an open (non-empty) paragraph converts it.
         if (matched === path.length - 1 && path[path.length - 1].type === 'paragraph' &&
             leading(rest).spaces <= 3 && reSetext.test(rest) && !isRefOnly(path[path.length - 1]) &&
             path[path.length - 1].lines.join('').trim() !== '') {
+            // The `type === 'paragraph'` test above already established the variant;
+            // TypeScript cannot carry that narrowing across a re-indexed lookup.
             const para = path[path.length - 1];
             // Strip any leading link reference definitions first; only what remains
             // becomes the heading text (e.g. `[foo]: /url` then `bar` then `===`).
@@ -178,7 +138,7 @@ export function parseDocument(src) {
                         matched = path.length;
                 }
                 else if (tipB.type === 'htmlblock') {
-                    if (!( /** @type {number} */(tipB.kind) >= 6 && reBlank.test(rest)))
+                    if (!(tipB.kind >= 6 && reBlank.test(rest)))
                         matched = path.length;
                 }
             }
@@ -239,7 +199,7 @@ export function parseDocument(src) {
                     break;
                 }
                 // ATX heading
-                let am = /^ {0,3}(#{1,6})(?=[ \t]|$)([^\n]*)$/.exec(rest);
+                const am = /^ {0,3}(#{1,6})(?=[ \t]|$)([^\n]*)$/.exec(rest);
                 if (am) {
                     let content = am[2].replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
                     content = content.replace(/(?:^|[ \t])#+[ \t]*$/, '').replace(/[ \t]+$/, '');
@@ -254,7 +214,7 @@ export function parseDocument(src) {
                 }
                 // fenced code (a backtick fence's info string may not contain a
                 // backtick - `` ``` ``` `` is a code span, not a fence)
-                let m = reFence.exec(rest);
+                const m = reFence.exec(rest);
                 if (m && canContain(container, 'codeblock') && !(m[2][0] === '`' && m[3].indexOf('`') !== -1)) {
                     maybeCloseParagraph(container, path);
                     container = path[path.length - 1];
@@ -300,6 +260,8 @@ export function parseDocument(src) {
                 }
                 // setext heading (underline for an open paragraph)
                 if (reSetext.test(rest) && container.type !== 'document' && last(container) && last(container).type === 'paragraph' && last(container).open && !isRefOnly(last(container))) {
+                    // Same story as the setext branch above: the tests established the
+                    // variant, but last() is re-called so the narrowing does not survive.
                     const para = last(container);
                     if (stripLeadingRefs(para, refs)) {
                         para.type = 'heading';
@@ -311,7 +273,7 @@ export function parseDocument(src) {
                     break;
                 }
                 // list item
-                let bm = reBulletItem.exec(rest) || reOrderedItem.exec(rest);
+                const bm = reBulletItem.exec(rest) || reOrderedItem.exec(rest);
                 if (bm) {
                     const isOrdered = bm.length === 6;
                     const markerCh = isOrdered ? bm[3] : bm[2];
@@ -388,7 +350,7 @@ export function parseDocument(src) {
         }
         else if (cur.type === 'htmlblock') {
             cur.lines.push(rest);
-            if (htmlBlockCloses(/** @type {number} */ (cur.kind), rest))
+            if (htmlBlockCloses(cur.kind, rest))
                 closeBlock(path.pop());
         }
         else if (cur.type === 'paragraph') {
@@ -414,13 +376,7 @@ export function parseDocument(src) {
     return { doc, refs };
 }
 /* ---- parser-state helpers (tightly bound to parseDocument) ---- */
-/** @param {MdBlockNode} b @returns {MdBlockNode|undefined} */
 function last(b) { return b.children[b.children.length - 1]; }
-/**
- * @param {MdBlockNode} b
- * @param {string} childType
- * @returns {boolean}
- */
 function canContain(b, childType) {
     if (b.type === 'document' || b.type === 'blockquote' || b.type === 'item')
         return childType !== 'item';
@@ -429,9 +385,7 @@ function canContain(b, childType) {
     return false;
 }
 /**
- * @param {MdBlockNode} container
- * @param {MdBlockNode[]} path - open blocks, document -> tip
- * @returns {void}
+ * @param path open blocks, document -> tip
  */
 function maybeCloseParagraph(container, path) {
     if (last(container) && last(container).type === 'paragraph' && last(container).open) {
@@ -446,10 +400,7 @@ function maybeCloseParagraph(container, path) {
  * "can't interrupt a paragraph" limits on list markers (empty content, or an
  * ordered start other than 1) apply only then. When a matching list is the
  * container instead, any marker of that list simply opens a sibling item.
- * @param {string} rest
- * @param {MdBlockNode} _leaf - the open paragraph; not consulted, because every construct that can begin a block here is decided from `rest` and `interrupting` alone
- * @param {boolean} interrupting
- * @returns {boolean}
+ * @param _leaf the open paragraph; not consulted, because every construct that can begin a block here is decided from `rest` and `interrupting` alone
  */
 function startsNewBlock(rest, _leaf, interrupting) {
     const sp = leading(rest).spaces;
@@ -484,9 +435,7 @@ function startsNewBlock(rest, _leaf, interrupting) {
  * list already open in `path` - the deciding factor between "sibling item" and
  * "lazy paragraph continuation" for markers that cannot otherwise interrupt a
  * paragraph (e.g. an ordered marker whose number is not 1).
- * @param {string} rest
- * @param {MdBlockNode[]} path - open blocks, document -> tip
- * @returns {boolean}
+ * @param path open blocks, document -> tip
  */
 function continuesOpenList(rest, path) {
     if (leading(rest).spaces >= 4)
@@ -507,9 +456,7 @@ function continuesOpenList(rest, path) {
     return false;
 }
 /**
- * @param {MdBlockNode[]} path - open blocks, document -> tip
- * @param {number} lineNo
- * @returns {void}
+ * @param path open blocks, document -> tip
  */
 function markBlank(path, lineNo) {
     const leaf = path[path.length - 1];
@@ -534,11 +481,9 @@ function markBlank(path, lineNo) {
     for (const b of path)
         b.lastLineBlank = val;
 }
-/** @param {MdBlockNode} b @returns {void} */
 function closeBlock(b) { b.open = false; }
 /**
- * @param {MdBlockNode} para
- * @returns {boolean} true if the paragraph is nothing but link reference definition(s)
+ * @returns true if the paragraph is nothing but link reference definition(s)
  */
 function isRefOnly(para) {
     const text = para.lines.join('\n');

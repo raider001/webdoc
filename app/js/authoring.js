@@ -1,6 +1,6 @@
-// authoring.js - in-app CRUD: create / edit / delete documents, and the small
+// authoring.ts - in-app CRUD: create / edit / delete documents, and the small
 // helpers that edit a document's own metadata (assumes / next relationships and a
-// test's verifies list). Extracted from main.js. It imports the map's graph-model
+// test's verifies list). Extracted from main.ts. It imports the map's graph-model
 // helpers directly (buildDocGraph / ensureGraphModel / invalidateGraphModel) and
 // reaches the shell through the `app` registry (app.navigate / app.showError /
 // app.closeDrawer, wired by main at boot); it registers its own map- and coverage-
@@ -12,12 +12,10 @@ import { state, el, app, titleFromId, defaultId, getDoc } from './app-shell.js';
 // editorModule() first, so the editor is fetched on the first authoring action and
 // cached by the module loader from then on.
 //
-// setLinkSearch is still configured by main.js at boot, but against
-// editor/richtext.js directly - that module imports only dom.js, so wiring link
+// setLinkSearch is still configured by main.ts at boot, but against
+// editor/richtext.js directly - that module imports only dom.ts, so wiring link
 // autocomplete early costs nothing and does not drag the editor in.
-/** @type {Promise<typeof import('./editor.js')>|null} */
 let editorMod = null;
-/** @returns {Promise<typeof import('./editor.js')>} */
 function editorModule() {
     if (!editorMod)
         editorMod = import('./editor.js');
@@ -29,26 +27,11 @@ import { mapOpen, requestMapRebuild } from './overlays.js';
 import { loadDoc } from './catalog.js';
 import { buildRequirementIndex, requirementList, testList, resolveRequirementRef } from './requirements.js';
 import { apiFetch, describeFailure, auth, docAccess, invalidateAccess } from './auth.js';
-/** @typedef {import('./catalog.js').Doc} Doc */
-/** @typedef {import('./catalog.js').SourceConfig} SourceConfig */
-/** @typedef {import('./editor.js').Block} Block */
-/** @typedef {import('./editor/serialize.js').DocMeta} DocMeta */
-/** @typedef {import('./graph-model.js').GraphDocNode} GraphDocNode */
-/** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
-/**
- * The options object handed to editor/panels.js's openNewDocModal: the source
- * list, an id-existence-check callback, and a creation callback invoked on submit.
- * @typedef {Object} NewDocModalOpts
- * @property {SourceConfig[]} sources
- * @property {(id: string) => boolean} exists
- * @property {(id: string) => void} onCreate
- */
-/** The open editor's root element, so exitEdit can take it back out. @type {HTMLElement|null} */
+/** The open editor's root element, so exitEdit can take it back out. */
 let editorEl = null;
 /**
  * Re-render the tree after a create/delete (structure changed), wiring each entry to
  * navigate + close the drawer.
- * @returns {Promise<HTMLElement>}
  */
 /**
  * Refresh the drawer tree after a structural change (create / delete / move).
@@ -57,7 +40,6 @@ let editorEl = null;
  * reader had expanded. It is now a data refresh: the components refetch the
  * levels that are open and keep the expansion, because that state lives in a
  * store rather than on the DOM nodes.
- * @returns {void}
  */
 function rerenderTree() {
     if (app.invalidateTree)
@@ -78,8 +60,6 @@ export function setupEditButtons() {
  * Presentation only: the server re-checks every write regardless, so this is
  * about not offering an action that will be refused - not about enforcing
  * anything. Called by the reader through the `app` registry on each render.
- * @param {string} docId
- * @returns {Promise<void>}
  */
 async function updateDocActions(docId) {
     const edit = el('editBtn'), del = el('deleteBtn');
@@ -110,7 +90,6 @@ app.updateDocActions = updateDocActions;
  * current view (the map stays put) so nothing shifts while you name the doc; the
  * map is only dismissed once you confirm and enterEdit opens the editor (which
  * would otherwise sit behind the map overlay).
- * @returns {Promise<void>}
  */
 async function openNewDocFlow() {
     // The "already exists" guard must see EVERY doc, not just visited ones - boot is
@@ -127,7 +106,6 @@ async function openNewDocFlow() {
         onCreate: (id) => fromMap ? createDocInPlace(id) : startNewDoc(id)
     });
 }
-/** @param {string} id */
 async function startNewDoc(id) {
     const title = titleFromId(id);
     await enterEdit(id, { title, description: '', assumes: [], next: [] }, [{ type: 'heading', level: 1, html: title }, { type: 'paragraph', html: '' }], true);
@@ -135,7 +113,6 @@ async function startNewDoc(id) {
 // Create a minimal document on disk WITHOUT opening the editor (used from the map:
 // the file is written + indexed and its node appears; the user stays on the map).
 // The body is just the meta header + an H1 - the same shape serializeDoc emits.
-/** @param {string} id */
 async function createDocInPlace(id) {
     const title = titleFromId(id);
     const md = '<!--meta\n' + JSON.stringify({ title: title, description: '', assumes: [], next: [] }, null, 2) +
@@ -159,10 +136,6 @@ async function createDocInPlace(id) {
     announce('Created “' + title + '”.');
     await requestMapRebuild(); // no-op unless the map is open; loads map-view.js only if it is
 }
-/**
- * @param {Doc} doc
- * @returns {Promise<void>}
- */
 async function editExisting(doc) {
     await loadDoc(doc);
     // A reader who was served a REDACTED copy must not edit it: saving would write
@@ -197,13 +170,6 @@ async function editExisting(doc) {
     parsed.meta.next = (doc.next || []).slice();
     await enterEdit(doc.id, parsed.meta, parsed.blocks, false);
 }
-/**
- * @param {string} id
- * @param {DocMeta} meta
- * @param {Block[]} blocks
- * @param {boolean} isNew
- * @returns {Promise<void>}
- */
 async function enterEdit(id, meta, blocks, isNew) {
     exitEdit();
     if (app.closeMapView)
@@ -212,7 +178,6 @@ async function enterEdit(id, meta, blocks, isNew) {
     // The metadata pickers (Assumed knowledge / Recommended next) need the full doc
     // list. Boot no longer holds one (lazy/server-backed), so pull it from the same
     // server graph model the map uses (cached; invalidated after a create/delete/edit).
-    /** @type {GraphDocNode[]} */
     const allDocs = (await ensureGraphModel()).docs;
     const access = await docAccess(id);
     const { openEditor } = await editorModule();
@@ -241,22 +206,17 @@ function exitEdit() {
 }
 /**
  * The requirement-id prefix declared for whichever source `id` lives in.
- * @param {string} id
- * @returns {string}
  */
 function componentFor(id) {
     const src = id.split('/')[0];
-    // state.site is raw parsed JSON, so `sources` has to be named as what site.json
-    // declares it to be before it can be searched.
-    const s = /** @type {SourceConfig[]} */ ((state.site && state.site.sources) || []).find(x => x.name === src);
+    // state.site is the parsed site.json, so `sources` is already the declared
+    // SourceConfig list (catalog.ts) and can be searched directly.
+    const s = ((state.site && state.site.sources) || []).find(x => x.name === src);
     return s ? s.component : '';
 }
 /**
- * @param {string} id
- * @param {string} md - the fully serialized document to write
- * @param {boolean} wasNew
- * @param {HTMLElement} status - element to report save progress/errors into
- * @returns {Promise<void>}
+ * Write a document back to disk. `md` is the fully serialized document; `status`
+ * is the element to report save progress/errors into.
  */
 async function saveDoc(id, md, wasNew, status) {
     const slash = id.indexOf('/');
@@ -292,8 +252,6 @@ async function saveDoc(id, md, wasNew, status) {
  * state.current (e.g. either end of a relationship edited from the map's
  * connect/disconnect mode) - without this they'd stay cached with stale
  * assumes/next until something else happens to invalidate them.
- * @param {string[]} [extraIds]
- * @returns {Promise<void>}
  */
 async function refreshCatalog(extraIds) {
     invalidateGraphModel();
@@ -311,9 +269,7 @@ async function refreshCatalog(extraIds) {
 }
 // ---- Delete a document (CRUD) ---------------------------------------------
 /**
- * @param {string} id
- * @returns {Promise<{ok: boolean, error?: string}>} `error` carries a
- *   describeFailure() sentence whenever ok is false
+ * `error` carries a describeFailure() sentence whenever ok is false.
  */
 async function deleteDocRequest(id) {
     const slash = id.indexOf('/');
@@ -332,9 +288,6 @@ async function deleteDocRequest(id) {
 /**
  * Confirm, delete, refresh the catalog, then move off the deleted document.
  * `rebuildMap` re-renders an open map so the deleted node disappears in place.
- * @param {string} id
- * @param {{rebuildMap: boolean}} opts
- * @returns {Promise<void>}
  */
 async function deleteDocFlow(id, opts) {
     if (!id)
@@ -374,10 +327,10 @@ async function deleteDocFlow(id, opts) {
 // Link / unlink a test case and a requirement by editing the requirement id in
 // that test's `verifies` (in the test's own document), then rebuilding the index.
 /**
- * @param {string} body - raw markdown of the test's own document
- * @param {string} testKey - the test's meta `test`/`test-case` key (not its full T_ id)
- * @param {string} reqId - fully resolved requirement id to add
- * @returns {string} the rewritten body, unchanged if the test's meta block wasn't found or it was already linked
+ * Add `reqId` to a test's `verifies`. `body` is the raw markdown of the test's own
+ * document and `testKey` is the test's meta `test`/`test-case` key (not its full
+ * T_ id). Returns the rewritten body, unchanged if the test's meta block wasn't
+ * found or it was already linked.
  */
 function addVerifyToBody(body, testKey, reqId) {
     return String(body).replace(/<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->/gi, (m, json) => {
@@ -399,11 +352,10 @@ function addVerifyToBody(body, testKey, reqId) {
     });
 }
 /**
- * @param {string} body - raw markdown of the test's own document
- * @param {string} testKey - the test's meta `test`/`test-case` key (not its full T_ id)
- * @param {string} reqId - fully resolved requirement id to remove
- * @param {string} component - the test's component, used to resolve short-form `verifies` entries before comparing
- * @returns {string} the rewritten body, unchanged if the test's meta block wasn't found or it wasn't linked
+ * Remove `reqId` from a test's `verifies`. Same `body` / `testKey` as above;
+ * `component` is the test's component, used to resolve short-form `verifies`
+ * entries before comparing. Returns the rewritten body, unchanged if the test's
+ * meta block wasn't found or it wasn't linked.
  */
 function removeVerifyFromBody(body, testKey, reqId, component) {
     return String(body).replace(/<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->/gi, (m, json) => {
@@ -416,7 +368,6 @@ function removeVerifyFromBody(body, testKey, reqId, component) {
         }
         if ((meta.test || meta['test-case']) !== testKey)
             return m;
-        /** @type {string[]} */
         const v = Array.isArray(meta.verifies) ? meta.verifies.map(String) : [];
         // drop any ref that IS or RESOLVES to reqId (verifies may hold short forms).
         const kept = v.filter(ref => ref !== reqId && resolveRequirementRef(ref, component) !== reqId);
@@ -427,10 +378,7 @@ function removeVerifyFromBody(body, testKey, reqId, component) {
     });
 }
 /**
- * @param {TestCaseEntry} t
- * @param {string} newBody
- * @param {string} oldBody
- * @returns {Promise<boolean>} true if nothing needed to change, or the write succeeded
+ * Returns true if nothing needed to change, or the write succeeded.
  */
 async function writeTestDocBody(t, newBody, oldBody) {
     if (newBody === oldBody)
@@ -455,8 +403,6 @@ async function writeTestDocBody(t, newBody, oldBody) {
  * `doc.body` is NOT this: catalog.loadDoc splits the <!--meta--> header off, so
  * writing doc.body back erases the header - the title, the assumes/next links,
  * and the access rule along with them.
- * @param {string} docId
- * @returns {Promise<string|null>}
  */
 async function rawDoc(docId) {
     const slash = docId.indexOf('/');
@@ -470,11 +416,7 @@ async function rawDoc(docId) {
         return null;
     }
 }
-/**
- * @param {string} testId
- * @param {string} reqId
- * @returns {Promise<boolean>} true on success
- */
+/** Returns true on success. */
 async function linkTestToRequirement(testId, reqId) {
     const t = testList().find(x => x.id === testId);
     if (!t)
@@ -484,11 +426,7 @@ async function linkTestToRequirement(testId, reqId) {
         return false;
     return writeTestDocBody(t, addVerifyToBody(raw, t.key, reqId), raw);
 }
-/**
- * @param {string} testId
- * @param {string} reqId
- * @returns {Promise<boolean>} true on success
- */
+/** Returns true on success. */
 async function unlinkTestFromRequirement(testId, reqId) {
     const t = testList().find(x => x.id === testId);
     if (!t)
@@ -501,11 +439,8 @@ async function unlinkTestFromRequirement(testId, reqId) {
 /**
  * Add/remove an id in a document's own `<!--meta-->` header list (assumes|next).
  * Used by the map's "Edit connections" mode to author relationships directly.
- * @param {string} body - raw on-disk markdown, including the doc-level meta header
- * @param {'assumes'|'next'} field
- * @param {string|null} addId
- * @param {string|null} removeId
- * @returns {string} the rewritten raw markdown, unchanged if there is no meta header to edit
+ * `body` is the raw on-disk markdown, including the doc-level meta header;
+ * returns the rewritten raw markdown, unchanged if there is no meta header to edit.
  */
 function editDocMetaBody(body, field, addId, removeId) {
     const s = String(body);
@@ -519,7 +454,8 @@ function editDocMetaBody(body, field, addId, removeId) {
     catch (e) {
         return s;
     }
-    let arr = Array.isArray(meta[field]) ? meta[field].map(String) : [];
+    const declared = meta[field];
+    let arr = Array.isArray(declared) ? declared.map(String) : [];
     if (addId && arr.indexOf(addId) === -1)
         arr.push(addId);
     if (removeId)
@@ -528,11 +464,7 @@ function editDocMetaBody(body, field, addId, removeId) {
     return (m[1] || '') + '<!--meta\n' + JSON.stringify(meta, null, 2) + '\n-->' + s.slice(m[0].length);
 }
 /**
- * @param {string} fromId
- * @param {string} toId
- * @param {'assumes'|'next'} field
- * @param {'add'|'remove'} action
- * @returns {Promise<boolean>} true on success (including an already-in-the-desired-state no-op)
+ * Returns true on success (including an already-in-the-desired-state no-op).
  */
 async function editDocRelation(fromId, toId, field, action) {
     if (!fromId || !toId || fromId === toId)

@@ -1,13 +1,10 @@
-// highlight/lexer.js - the shared lexing core for the syntax highlighter:
+// highlight/lexer.ts - the shared lexing core for the syntax highlighter:
 // tiny scanning helpers, a couple of shared token regexes, and the `Lexer`
 // state object every per-language grammar drives. Extracted from highlighter.js.
 // ---------------------------------------------------------------------------
 // ---- tiny scanning helpers ------------------------------------------------
 /**
  * Length of the rest of the current line, starting at i (newline excluded).
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 export function lineLen(src, i) {
     let j = i;
@@ -18,9 +15,6 @@ export function lineLen(src, i) {
 /**
  * Length of a C-style block comment starting at i (opened with a slash-star);
  * scans to its closing marker or to end-of-input.
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 export function blockLen(src, i) {
     let j = i + 2;
@@ -35,11 +29,6 @@ export function blockLen(src, i) {
  * Length of a quoted run starting at the opening quote i. `esc` toggles
  * backslash escapes; single-line quotes stop before a newline; anything
  * unterminated stops at end-of-input.
- * @param {string} src
- * @param {number} i
- * @param {string} quote
- * @param {boolean} esc
- * @returns {number}
  */
 export function quoteLen(src, i, quote, esc) {
     let j = i + 1;
@@ -59,9 +48,6 @@ export function quoteLen(src, i, quote, esc) {
 }
 /**
  * True when only blank space precedes i on its line (a "logical line start").
- * @param {string} src
- * @param {number} i
- * @returns {boolean}
  */
 export function atLineStart(src, i) {
     let k = i - 1;
@@ -71,9 +57,6 @@ export function atLineStart(src, i) {
 }
 /**
  * True when i sits on a token boundary (start, or after white space).
- * @param {string} src
- * @param {number} i
- * @returns {boolean}
  */
 export function prevIsBoundary(src, i) {
     if (i === 0)
@@ -83,9 +66,6 @@ export function prevIsBoundary(src, i) {
 }
 /**
  * Does the next non-space character after i open a call parenthesis?
- * @param {string} src
- * @param {number} i
- * @returns {boolean}
  */
 export function nextIsParen(src, i) {
     let j = i;
@@ -95,9 +75,6 @@ export function nextIsParen(src, i) {
 }
 /**
  * Index of the first character of i's line.
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 export function lineStartIdx(src, i) {
     let k = i;
@@ -110,17 +87,6 @@ export const RE_ID = /[A-Za-z_]\w*/y;
 export const RE_NUM_GEN = /(?:0[xX][0-9a-fA-F_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)/y;
 export const RE_NUM_PY = /(?:0[xXbBoO][0-9a-fA-F_]+|(?:\d[\d_]*)?\.?\d[\d_]*(?:[eE][+-]?\d+)?)[jJ]?/y;
 export const RE_NUM_JAVA = /(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|(?:\d[\d_]*)?\.?\d[\d_]*(?:[eE][+-]?\d+)?)[fFdDlL]?/y;
-// ---- the lexer ------------------------------------------------------------
-/**
- * One classified span of source-code text emitted by Lexer#push. `type` is
- * a token-class name (e.g. 'keyword', 'string', 'comment') or null for plain,
- * unhighlighted text. Every per-language tokenizer in ./grammars.js builds
- * arrays of these; highlighter.js merges adjacent same-type runs (see merge()
- * below) and rebuilds the <code> element's children from them.
- * @typedef {Object} HighlightToken
- * @property {string|null} type
- * @property {string} text
- */
 /**
  * The shared scanning-position + token-accumulator every per-language
  * tokenizer in ./grammars.js drives to build a HighlightToken[]. `prev` is
@@ -128,28 +94,24 @@ export const RE_NUM_JAVA = /(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|(?:\d[\d_]*)?\.?\d
  * context-sensitive rules (e.g. "is this identifier right after `def`?").
  */
 export class Lexer {
-    /** @param {string} src */
+    src;
+    pos;
+    toks;
+    prev;
     constructor(src) {
-        /** @type {string} */
         this.src = src;
-        /** @type {number} */
         this.pos = 0;
-        /** @type {HighlightToken[]} */
         this.toks = [];
-        /** @type {HighlightToken|null} */
         this.prev = null; // last non-blank token {type, text}, for context rules
     }
-    /** @returns {boolean} */
     eof() { return this.pos >= this.src.length; }
     /**
-     * @param {number} [o] - offset from the current position (default 0)
-     * @returns {string|undefined}
+     * @param o offset from the current position (default 0)
      */
     peek(o) { return this.src[this.pos + (o || 0)]; }
     /**
      * Try a sticky regex anchored exactly at the current position.
-     * @param {RegExp} re - a sticky (`y`-flagged) regex
-     * @returns {RegExpExecArray|null}
+     * @param re a sticky (`y`-flagged) regex
      */
     match(re) {
         re.lastIndex = this.pos;
@@ -159,9 +121,6 @@ export class Lexer {
     /**
      * Emit `len` chars as one token of `type` (null => plain text). len is
      * clamped to >= 1 so the driver loop can never stall.
-     * @param {string|null} type
-     * @param {number} len
-     * @returns {void}
      */
     push(type, len) {
         if (!(len >= 1))
@@ -175,8 +134,6 @@ export class Lexer {
 }
 /**
  * Collapse neighbouring same-class tokens so the DOM stays lean.
- * @param {HighlightToken[]} toks
- * @returns {HighlightToken[]}
  */
 export function merge(toks) {
     const out = [];

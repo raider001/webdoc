@@ -1,7 +1,7 @@
-// reader.js - the reading-view render pipeline: turn a loaded document into the
+// reader.ts - the reading-view render pipeline: turn a loaded document into the
 // rendered article (markdown -> sanitized DOM -> numbered headings + TOC ->
 // requirement/test tables -> resolved links/images -> diagrams -> highlighting),
-// plus the footer, scroll-spy and in-document find. Extracted from main.js; the
+// plus the footer, scroll-spy and in-document find. Extracted from main.ts; the
 // shell (routing, test-run) calls renderDoc / setupDocSearch, nothing here reaches
 // back into the map or authoring areas.
 import { elem } from './dom.js';
@@ -15,7 +15,6 @@ import { highlightWithin } from './highlighter.js';
 import { resolveResourceUrl } from './doclinks.js';
 import { restrictedSection } from './auth-ui.js';
 import { announce } from './announce.js';
-/** @typedef {import('./catalog.js').Doc} Doc */
 // ---- Mounted components inside the article --------------------------------
 // Requirement tables and test blocks are Svelte components mounted into
 // placeholder nodes inside the article. The article is destroyed and rebuilt on
@@ -26,23 +25,17 @@ import { announce } from './announce.js';
 // The registry is filled from two places, both through the `app` registry rather
 // than by importing this file (either import would close a cycle):
 // requirements/render.js, for every requirement group and test case in the
-// document, and auth-ui.js, for a restricted-section notice. It is the ONLY such
+// document, and auth-ui.ts, for a restricted-section notice. It is the ONLY such
 // registry - a second one would mean a teardown path that some mounts are not on.
-/** @type {Map<Element, () => void>} */
 const mountedInArticle = new Map();
 /**
  * Record a component mounted inside the article so it can be destroyed when the
- * article is replaced.
- * @param {Element} host - the .wd-mounted element the component was mounted into
- * @param {() => void} destroy
- * @returns {void}
+ * article is replaced. `host` is the .wd-mounted element it was mounted into.
  */
 export function registerMounted(host, destroy) { mountedInArticle.set(host, destroy); }
 /**
  * Destroy every component mounted inside `root`, then forget them. Safe to call
  * when nothing is registered.
- * @param {Element} root
- * @returns {void}
  */
 export function teardownMounted(root) {
     for (const [host, destroy] of mountedInArticle) {
@@ -61,13 +54,10 @@ export function teardownMounted(root) {
  *
  * The flush is not optional. Rune writes are applied in a microtask, but
  * setupScrollSpy() reads tocList.querySelectorAll('a[data-target]') later in
- * this same tick, and main.js sets body[data-app-ready="1"] as soon as route()
+ * this same tick, and main.ts sets body[data-app-ready="1"] as soon as route()
  * returns - six e2e assertions gate on that attribute meaning the page is
  * actually rendered. Without the flush the scroll-spy map is empty, no TOC entry
  * is ever marked .active, and nothing throws.
- * @param {Doc} doc
- * @param {import('./numbering.js').TocEntry[]} toc
- * @returns {void}
  */
 function setDocChrome(doc, toc) {
     if (!app.setDocChrome)
@@ -81,8 +71,6 @@ function setDocChrome(doc, toc) {
  * run any pluggable block renderers and the syntax highlighter, wire up scroll-spy,
  * and refresh the header/footer chrome. The single entry point the shell's router
  * calls on every document navigation.
- * @param {Doc} doc
- * @returns {void}
  */
 export function renderDoc(doc) {
     const content = el('content');
@@ -148,7 +136,7 @@ export function renderDoc(doc) {
         tocPane.hidden = !toc.length;
     if (app.setTreeActive)
         app.setTreeActive(doc.id); // highlight + reveal in the drawer tree
-    // Offer edit/delete only where this account could actually use them (authoring.js
+    // Offer edit/delete only where this account could actually use them (authoring.ts
     // registers this; the server still re-checks every write).
     if (app.updateDocActions)
         app.updateDocActions(doc.id);
@@ -170,10 +158,8 @@ export function renderDoc(doc) {
  * unchanged because the host is a real element from the moment it is returned -
  * and because the article is already in the document by the time this runs, so
  * the host is connected and the pending mount goes ahead. Teardown is registered
- * by auth-ui.js through app.registerMounted, which is this module's own
+ * by auth-ui.ts through app.registerMounted, which is this module's own
  * registerMounted; a direct import back into here would be a cycle.
- * @param {HTMLElement} article
- * @returns {void}
  */
 function renderRestrictedSections(article) {
     article.querySelectorAll('pre > code.language-wd-restricted').forEach(code => {
@@ -190,17 +176,13 @@ function renderRestrictedSections(article) {
     });
 }
 // A CSS.escape shim for building `#id` selectors from arbitrary heading/anchor ids.
-/** @param {string} s @returns {string} */
 function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/([^\w-])/g, '\\$1'); }
 // Batch-resolve in-body link targets to doc ids via the server index. Lazy boot no
 // longer holds every id client-side, so resolution (relative ./ ../, .md, full id,
 // last-segment fallback, case-insensitive) is done server-side, authoritatively,
-// against the whole corpus. Returns { cleanPath: resolvedId | null }.
-/**
- * @param {string} baseId
- * @param {string[]} paths
- * @returns {Promise<Object<string, string|null>>} map of input path -> resolved doc id, or null if unresolved (every requested path is present as a key)
- */
+// against the whole corpus. Returns { cleanPath: resolvedId | null } - a map of
+// input path -> resolved doc id, or null if unresolved (every requested path is
+// present as a key).
 async function resolveDocPaths(baseId, paths) {
     if (!paths.length)
         return {};
@@ -215,33 +197,14 @@ async function resolveDocPaths(baseId, paths) {
         return {};
     }
 }
-// Rewrite in-body links after render: external URLs open in a new tab, in-page
-// anchors scroll smoothly, and internal doc refs become #/ routes. Async because the
-// internal refs are resolved in ONE batched request to the server index.
-/**
- * One in-body link waiting on the batched resolve: the anchor itself, plus its
- * authored href already split into the path to resolve and the #fragment to
- * scroll to once the route lands.
- * @typedef {Object} PendingDocLink
- * @property {HTMLAnchorElement} a
- * @property {string} path
- * @property {string} frag
- */
-/**
- * @param {HTMLElement} article
- * @param {string} baseId
- * @returns {Promise<void>}
- */
 async function resolveLinks(article, baseId) {
-    /** @type {PendingDocLink[]} */
     const internal = [];
     // The selector only matches anchors; the checker stops at Element.
     // Skip anything inside a mounted component. Rewriting an href there would be
     // undone by the component's next update, and the listeners attached here would
     // outlive the node they were bound to. A component that renders links is
     // responsible for its own routing.
-    /** @type {HTMLAnchorElement[]} */
-    const anchors = /** @type {HTMLAnchorElement[]} */ ([...article.querySelectorAll('a[href]')].filter(a => !a.closest('.wd-mounted')));
+    const anchors = [...article.querySelectorAll('a[href]')].filter(a => !a.closest('.wd-mounted'));
     anchors.forEach(a => {
         const raw = a.getAttribute('href') || '';
         if (!raw)
@@ -301,11 +264,6 @@ async function resolveLinks(article, baseId) {
 // resources live NEXT TO the .md under /docs/<source>/<dir>/, so a relative src
 // resolves there (../ and ./ handled by the URL parser). External and root-absolute
 // srcs are the author's explicit choice and left untouched. Pure client-side math.
-/**
- * @param {HTMLElement} article
- * @param {string} baseId
- * @returns {void}
- */
 function resolveImages(article, baseId) {
     article.querySelectorAll('img[src]').forEach(img => {
         if (img.closest('.wd-mounted'))
@@ -317,18 +275,11 @@ function resolveImages(article, baseId) {
 }
 // Highlight the TOC entry whose heading is in view (an IntersectionObserver over the
 // content pane). One observer at a time; rebuilt for each rendered document.
-/** @type {IntersectionObserver|null} */
 let spyObserver = null;
-/**
- * @param {HTMLElement} article
- * @param {HTMLElement} tocList
- * @returns {void}
- */
 function setupScrollSpy(article, tocList) {
     if (spyObserver)
         spyObserver.disconnect();
     const links = new Map();
-    /** @type {NodeListOf<HTMLAnchorElement>} */
     const tocLinks = tocList.querySelectorAll('a[data-target]');
     tocLinks.forEach(a => links.set(a.dataset.target, a));
     spyObserver = new IntersectionObserver(entries => {
@@ -348,12 +299,10 @@ function setupScrollSpy(article, tocList) {
  * Wire the in-document search box: on every input, clear the previous highlights
  * and, once the query reaches 2 characters, highlight all matches in the currently
  * rendered article and smooth-scroll to the first one.
- * @returns {void}
  */
 export function setupDocSearch() {
-    const input = /** @type {HTMLInputElement} */ (el('docSearch'));
+    const input = el('docSearch');
     input.addEventListener('input', () => {
-        /** @type {HTMLElement|null} */
         const article = el('content').querySelector('.doc');
         if (!article)
             return;
@@ -366,10 +315,6 @@ export function setupDocSearch() {
             first.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
 }
-/**
- * @param {HTMLElement} root
- * @returns {void}
- */
 function clearHighlights(root) {
     // Normalize ONLY the parents whose children were actually un-wrapped, never the
     // whole article. root.normalize() merges every adjacent text node in the
@@ -378,7 +323,6 @@ function clearHighlights(root) {
     // out from under it makes later updates land on detached nodes, and the symptom
     // is a requirement table that silently stops refreshing after someone uses
     // find-in-page.
-    /** @type {Set<Node>} */
     const touched = new Set();
     root.querySelectorAll('mark.find').forEach(m => {
         if (m.parentNode)
@@ -390,10 +334,8 @@ function clearHighlights(root) {
 /**
  * Wrap every case-insensitive occurrence of `q` in `root`'s text nodes (skipping
  * pre/code/mark, so previous highlights and code blocks are left alone) in a
- * <mark class="find">.
- * @param {HTMLElement} root
- * @param {string} q
- * @returns {HTMLElement|null} the first inserted mark, for scroll-into-view, or null if no match
+ * <mark class="find">. Returns the first inserted mark, for scroll-into-view, or
+ * null if no match.
  */
 function highlight(root, q) {
     const needle = q.toLowerCase();
@@ -406,7 +348,7 @@ function highlight(root, q) {
     const targets = [];
     let node;
     // SHOW_TEXT means every node the walker hands back is a Text node.
-    while ((node = /** @type {Text} */ (walker.nextNode())))
+    while ((node = walker.nextNode()))
         if (node.nodeValue.toLowerCase().includes(needle))
             targets.push(node);
     let firstMark = null;

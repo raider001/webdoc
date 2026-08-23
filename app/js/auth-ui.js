@@ -1,17 +1,17 @@
-// auth-ui.js - the vanilla side of every screen accounts need: the sign-in wall,
+// auth-ui.ts - the vanilla side of every screen accounts need: the sign-in wall,
 // the header's user menu, the account panel, the administrator's user list, and
 // the two "you may not see this" notices.
 // ---------------------------------------------------------------------------
 // The pixels moved to app/svelte/ in Phase 5. What is left here is the ADAPTER:
 // the shell calls these functions synchronously, they hand back a host element
 // or a promise straight away, and the compiled island mounts into that host once
-// the bundle has landed. auth.js still owns the session and the fetch wrapper and
+// the bundle has landed. auth.ts still owns the session and the fetch wrapper and
 // is untouched by this phase.
 //
 // THREE THINGS DELIBERATELY DID NOT MOVE, and all three are in this file:
 //
 //  1. location.reload(), three times. state.byId holds document BODY TEXT that
-//     the server redacted for the PREVIOUS principal, and auth.js's access cache
+//     the server redacted for the PREVIOUS principal, and auth.ts's access cache
 //     has no TTL and is not cleared on sign-in or sign-out. Swapping a reload for
 //     a reactive re-render would leave both in place and show the new identity
 //     the old identity's content - a data leak, not a rendering glitch. A reload
@@ -42,24 +42,19 @@ import { loadIslands } from './islands.js';
  * `wd-mounted` is display:contents, so the host is not a box: the component's
  * own root lays out exactly where the hand-built element used to, whether that
  * is a fixed-position scrim, a flex item in a `.group-chips` row, or a block in
- * the article. It is also the marker reader.js's post-render passes skip.
- * @template {keyof HTMLElementTagNameMap} K
- * @param {K} tag
- * @returns {HTMLElementTagNameMap[K]}
+ * the article. It is also the marker reader.ts's post-render passes skip.
  */
 function mountHost(tag) { return elem(tag, 'wd-mounted'); }
 // ---- group chips ----------------------------------------------------------
 /**
  * Instances keyed by the host the caller is holding. A WeakMap, so a host that
  * is dropped without a destroyGroupChip() call takes its entry with it.
- * @type {WeakMap<Element, {destroy: () => void}>}
  */
 const chipInstances = new WeakMap();
 /**
  * Hosts destroyed BEFORE the bundle finished loading. The mount has to be
  * cancelled rather than merely undone: mounting into a detached host would start
  * effects nothing would ever stop.
- * @type {WeakSet<Element>}
  */
 const chipCancelled = new WeakSet();
 /**
@@ -75,9 +70,6 @@ const chipCancelled = new WeakSet();
  * The mount is asynchronous because the bundle is loaded lazily and there is no
  * synchronous way to import it. In practice it has already been loaded by boot,
  * so the chip appears in the next microtask.
- * @param {string} name
- * @param {{small?: boolean, title?: string}} [opts]
- * @returns {HTMLElement}
  */
 export function groupChip(name, opts) {
     const host = mountHost('span');
@@ -89,11 +81,10 @@ export function groupChip(name, opts) {
     return host;
 }
 /**
- * Destroy the chip mounted in `host`. Call it before dropping the host - the
- * editor redraws its chip rows on every checkbox change, and a cleared container
- * detaches nodes without stopping the components inside them.
- * @param {Element} host - the element groupChip() returned
- * @returns {void}
+ * Destroy the chip mounted in `host` - the element groupChip() returned. Call it
+ * before dropping the host: the editor redraws its chip rows on every checkbox
+ * change, and a cleared container detaches nodes without stopping the components
+ * inside them.
  */
 export function destroyGroupChip(host) {
     if (!host)
@@ -116,7 +107,8 @@ export function destroyGroupChip(host) {
  */
 let wallUp = false;
 /**
- * Put up the full-screen sign-in / registration screen.
+ * Put up the full-screen sign-in / registration screen. `target` is normally
+ * document.body.
  *
  * `onSignedIn` fires once, after the wall has already been removed. On a server
  * that allows neither sign-in nor registration (registration closed, no account)
@@ -126,9 +118,6 @@ let wallUp = false;
  * dialogs below - boot() is suspended behind this screen, and dismissing it would
  * drop the visitor onto an empty shell that then fires library fetches the server
  * refuses one at a time.
- * @param {Element} target - normally document.body
- * @param {{onSignedIn: () => void}} opts
- * @returns {void}
  */
 export function mountSignInWall(target, opts) {
     if (wallUp)
@@ -150,7 +139,6 @@ export function mountSignInWall(target, opts) {
  *
  * A wall that is ALREADY up resolves immediately rather than queueing a second
  * waiter - the behaviour of the screen this replaces.
- * @returns {Promise<void>}
  */
 export function showSignInWall() {
     if (wallUp)
@@ -169,7 +157,6 @@ export function showSignInWall() {
  * click handler stay here, because a component cannot set attributes on the
  * element it was mounted into - and because the signed-out branch of the click
  * ends in a reload that must not move into the bundle.
- * @returns {void}
  */
 export function setupAccountButton() {
     const btn = el('accountBtn');
@@ -192,7 +179,7 @@ export function setupAccountButton() {
         ? openAccountPanel()
         // RELOAD 1 of 3. Signing in from the header happens with a document already
         // rendered from state.byId - a body the server redacted for the anonymous
-        // reader - and with auth.js's access cache full of anonymous answers. Both
+        // reader - and with auth.ts's access cache full of anonymous answers. Both
         // have to go before the new identity sees anything.
         : showSignInWall().then(() => location.reload())));
     onAuthChange(render);
@@ -202,7 +189,6 @@ export function setupAccountButton() {
     loadIslands().then(mod => mod.mountAccountButton(btn));
 }
 // ---- the account panel ----------------------------------------------------
-/** @returns {void} */
 export function openAccountPanel() {
     if (!auth.user)
         return;
@@ -214,21 +200,18 @@ export function openAccountPanel() {
     }));
 }
 // ---- the administrator's user list ---------------------------------------
-/** @returns {void} */
 export function openAdminPanel() {
     loadIslands().then(mod => mod.openAdminPanel());
 }
 // ---- the restricted-page screen ------------------------------------------
 /**
- * What a reader sees INSTEAD of a document they may not open.
+ * What a reader sees INSTEAD of a document they may not open. `detail` is the
+ * server's own explanation, exactly as catalog.ts's RestrictedError carried it.
  *
  * Returns the host straight away so the caller can put it where the article was;
  * the component mounts into it a microtask later. The mount is registered with
- * reader.js through the app registry (not by importing reader.js, which imports
+ * reader.ts through the app registry (not by importing reader.ts, which imports
  * this file) so the next navigation tears it down.
- * @param {string} docId
- * @param {{requiresGroups?: string[], signInRequired?: boolean, error?: string}} detail
- * @returns {HTMLElement}
  */
 export function restrictedPanel(docId, detail) {
     const host = mountHost('div');
@@ -252,8 +235,6 @@ export function restrictedPanel(docId, detail) {
 /**
  * The notice that replaces a section this reader may not see. The SERVER has
  * already removed the content; this only renders the hole it left.
- * @param {{read?: string[], label?: string, malformed?: boolean}} spec
- * @returns {HTMLElement}
  */
 export function restrictedSection(spec) {
     const host = mountHost('div');
@@ -267,8 +248,7 @@ export function restrictedSection(spec) {
     return host;
 }
 /**
- * Re-run whatever depends on the signed-in identity. Exported so main.js can
+ * Re-run whatever depends on the signed-in identity. Exported so main.ts can
  * hook the header up without importing the internals.
- * @returns {boolean}
  */
 export function wallNeeded() { return signInRequired(); }

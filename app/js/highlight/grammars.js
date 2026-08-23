@@ -1,10 +1,9 @@
-// highlight/grammars.js - the per-language tokenizers. Each is a small state
+// highlight/grammars.ts - the per-language tokenizers. Each is a small state
 // machine that drives a Lexer over the code and emits typed tokens; all grammars
 // are written from scratch (token names/structure original to this project).
 // Extracted from highlighter.js. Exports one tokenizer per supported language.
 // ---------------------------------------------------------------------------
 import { lineLen, blockLen, quoteLen, atLineStart, prevIsBoundary, nextIsParen, lineStartIdx, RE_ID, RE_NUM_GEN, RE_NUM_PY, RE_NUM_JAVA, Lexer } from './lexer.js';
-/** @typedef {import('./lexer.js').HighlightToken} HighlightToken */
 // ---- Python ---------------------------------------------------------------
 const PY_KW = new Set([
     'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break',
@@ -27,9 +26,6 @@ const PY_BUILTIN = new Set([
 /**
  * Length of a Python string literal at i (optional r/b/u/f prefix, single or
  * triple quotes), safely to close or end-of-input; 0 if none starts here.
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 function pyStringAt(src, i) {
     const head = /^([rRbBuUfF]{0,2})('''|"""|'|")/.exec(src.slice(i, i + 6));
@@ -53,10 +49,6 @@ function pyStringAt(src, i) {
     }
     return src.length - i;
 }
-/**
- * @param {string} src
- * @returns {HighlightToken[]}
- */
 export function pythonTokens(src) {
     const lx = new Lexer(src);
     while (!lx.eof()) {
@@ -133,9 +125,6 @@ const JAVA_TYPE = new Set([
 const JAVA_DECL = new Set(['class', 'interface', 'enum', 'record', 'new']);
 /**
  * Length of a Java string ("..." or a """ text block) or 0.
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 function javaStringAt(src, i) {
     if (src.startsWith('"""', i)) {
@@ -155,10 +144,6 @@ function javaStringAt(src, i) {
         return quoteLen(src, i, '"', true);
     return 0;
 }
-/**
- * @param {string} src
- * @returns {HighlightToken[]}
- */
 export function javaTokens(src) {
     const lx = new Lexer(src);
     while (!lx.eof()) {
@@ -234,9 +219,6 @@ const SH_BUILTIN = new Set([
 ]);
 /**
  * Length of a $(...) command substitution (paren-balanced), to close or EOF.
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 function shParenSub(src, i) {
     let depth = 0;
@@ -253,9 +235,6 @@ function shParenSub(src, i) {
 }
 /**
  * Length of a ${...} expansion, to close or EOF.
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 function shBraceVar(src, i) {
     let j = i + 2;
@@ -265,9 +244,6 @@ function shBraceVar(src, i) {
 }
 /**
  * Length of a `...` command substitution, to close or EOF.
- * @param {string} src
- * @param {number} i
- * @returns {number}
  */
 function shBacktick(src, i) {
     let j = i + 1;
@@ -275,10 +251,6 @@ function shBacktick(src, i) {
         j++;
     return (j < src.length ? j + 1 : j) - i;
 }
-/**
- * @param {string} src
- * @returns {HighlightToken[]}
- */
 export function shellTokens(src) {
     const lx = new Lexer(src);
     while (!lx.eof()) {
@@ -368,15 +340,8 @@ const MK_TARGET = /[.A-Za-z0-9_%][A-Za-z0-9_.%/-]*(?=[ \t]*:(?!=))/y;
 const MK_ASSIGN = /[A-Za-z_][A-Za-z0-9_]*(?=[ \t]*[:+?!]?=)/y;
 /**
  * True on a recipe line (first char of the line is a hard TAB).
- * @param {string} src
- * @param {number} i
- * @returns {boolean}
  */
 function mkInRecipe(src, i) { return src[lineStartIdx(src, i)] === '\t'; }
-/**
- * @param {string} src
- * @returns {HighlightToken[]}
- */
 export function makefileTokens(src) {
     const lx = new Lexer(src);
     while (!lx.eof()) {
@@ -438,10 +403,6 @@ export function makefileTokens(src) {
     return lx.toks;
 }
 // ---- Robot Framework ------------------------------------------------------
-/**
- * @param {string} src
- * @returns {HighlightToken[]}
- */
 export function robotTokens(src) {
     const lx = new Lexer(src);
     while (!lx.eof()) {
@@ -473,10 +434,6 @@ export function robotTokens(src) {
     return lx.toks;
 }
 // ---- generic fallback -----------------------------------------------------
-/**
- * @param {string} src
- * @returns {HighlightToken[]}
- */
 export function genericTokens(src) {
     const lx = new Lexer(src);
     while (!lx.eof()) {

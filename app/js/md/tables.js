@@ -1,16 +1,12 @@
-// md/tables.js - GFM tables. `extractTables` is a block post-pass that rewrites
+// md/tables.ts - GFM tables. `extractTables` is a block post-pass that rewrites
 // qualifying paragraphs (a header row immediately followed by a delimiter row)
 // into `table` blocks; `renderTable` renders one to HTML during phase 2.
 // ---------------------------------------------------------------------------
 import { makeBlock } from './blocks.js';
 import { parseInlines } from './inline.js';
-/** @typedef {import('./blocks.js').MdBlockNode} MdBlockNode */
-/** @typedef {import('./blockpost.js').RefDefinition} RefDefinition */
 /**
  * Split one table row into trimmed cell strings. An escaped pipe (\|) is a
  * literal pipe; a single unescaped leading/trailing pipe is a fence, not a cell.
- * @param {string} line
- * @returns {string[]}
  */
 function splitTableRow(line) {
     const s = line.trim();
@@ -44,8 +40,7 @@ function splitTableRow(line) {
 }
 /**
  * Validate a GFM table delimiter row.
- * @param {string} line
- * @returns {(string|null)[]|null} an array of per-column alignments ('left'|'right'|'center'|null), or null if invalid
+ * @returns an array of per-column alignments ('left'|'right'|'center'|null), or null if invalid
  */
 function parseDelimiterRow(line) {
     if (line.indexOf('|') === -1)
@@ -64,18 +59,8 @@ function parseDelimiterRow(line) {
     return aligns;
 }
 /**
- * Result of tryBuildTable: describes where a header/delimiter row pair was
- * found inside a paragraph's accumulated lines.
- * @typedef {Object} TableBuildInfo
- * @property {number} headerIndex - index into `lines` of the header row
- * @property {number} delimIndex - index into `lines` of the delimiter row (headerIndex + 1)
- * @property {(string|null)[]} aligns - per-column alignment
- */
-/**
  * If `lines` (a paragraph's accumulated lines) contain a header row immediately
  * followed by a delimiter row with matching column count, describe the table.
- * @param {string[]} lines
- * @returns {TableBuildInfo|null}
  */
 function tryBuildTable(lines) {
     for (let d = 1; d < lines.length; d++) {
@@ -91,8 +76,6 @@ function tryBuildTable(lines) {
 }
 /**
  * Walk the block tree, converting qualifying paragraphs into table blocks.
- * @param {MdBlockNode} block
- * @returns {void}
  */
 export function extractTables(block) {
     const kids = block.children;
@@ -125,15 +108,12 @@ export function extractTables(block) {
 }
 /**
  * Render a `table` block to HTML.
- * @param {MdBlockNode} b
- * @param {Object<string, RefDefinition>} refs
- * @returns {string}
  */
 export function renderTable(b, refs) {
     const cols = b.aligns.length;
-    /** @param {string|null} a - this column's alignment, null for the default @returns {string} */
-    const attr = a => a ? ' align="' + a + '"' : '';
-    /** @param {string} tag @param {string} text - raw cell markdown @param {string|null} a @returns {string} */
+    /** @param a this column's alignment, null for the default */
+    const attr = (a) => a ? ' align="' + a + '"' : '';
+    /** @param text raw cell markdown */
     const cell = (tag, text, a) => '<' + tag + attr(a) + '>' + parseInlines(text || '', refs) + '</' + tag + '>\n';
     let out = '<table>\n<thead>\n<tr>\n';
     for (let i = 0; i < cols; i++)

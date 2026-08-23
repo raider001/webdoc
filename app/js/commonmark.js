@@ -1,4 +1,4 @@
-// commonmark.js - a from-scratch Markdown engine targeting CommonMark 0.31.2 + GFM.
+// commonmark.ts - a from-scratch Markdown engine targeting CommonMark 0.31.2 + GFM.
 // Public entry point. The engine is split into cohesive modules under ./md/:
 //   md/text.js    - escaping, HTML entities, URI normalization
 //   md/scan.js    - link destination / title / bracket-label scanners
@@ -27,20 +27,16 @@ export const INTERIM = false;
    =========================================================================== */
 /**
  * Parse and render a full Markdown document to an HTML string.
- * @param {string} src
- * @returns {string}
  */
 export function renderMarkdown(src) {
     const { doc, refs } = parseDocument(String(src));
-    let html = renderTree(doc, refs);
+    const html = renderTree(doc, refs);
     return html;
 }
 /**
  * Render INLINE markdown only (code spans, emphasis, links) — no block
  * constructs. Used for table-cell content such as requirement descriptions and
  * test-case action / expected-response steps, which are inline contexts.
- * @param {string} [src]
- * @returns {string}
  */
 export function renderInline(src) {
     return parseInlines(String(src == null ? '' : src), Object.create(null));

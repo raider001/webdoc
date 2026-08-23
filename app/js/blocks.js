@@ -1,4 +1,4 @@
-// blocks.js - pluggable fenced-block renderers (core, zero third-party).
+// blocks.ts - pluggable fenced-block renderers (core, zero third-party).
 // ---------------------------------------------------------------------------
 // A registry that maps a fenced code block's info-string (its "language") to a
 // renderer that turns the block's text into DOM - the extension point for
@@ -22,61 +22,25 @@
 // its shape elements) - it is defence-in-depth over the plugin's own output.
 // ---------------------------------------------------------------------------
 import { elem } from './dom.js';
-/**
- * The extra context object passed to a renderer's `render(source, ctx)` call:
- * the fenced block's language and source plus the mount points (`host`, the
- * replacement container already in the DOM; `pre`, the original `<pre>` it
- * replaced) merged with whatever bag the renderBlocks() caller supplied (e.g.
- * reader.js passes `{ docId }`). Not to be confused with editor.js's unrelated
- * "Block" (WYSIWYG UI block) - this is a fenced-code-block render context.
- * @typedef {Object} BlockRenderContext
- * @property {string} lang
- * @property {HTMLElement} host
- * @property {HTMLElement} pre
- * @property {string} source
- */
-/**
- * A registered renderer's render function: turns a fenced block's source text
- * into DOM. May return a Node/DocumentFragment, a Promise resolving to one
- * (for libraries that load or parse asynchronously), or nothing at all if it
- * fills `ctx.host` itself.
- * @typedef {function(string, BlockRenderContext): (Node|Promise<Node>|void)} RenderBlockFn
- */
-/**
- * One registry entry: a renderer function plus its human-readable label (used
- * in the fallback notice when the renderer fails or its library is missing).
- * @typedef {Object} RendererEntry
- * @property {RenderBlockFn} render
- * @property {string} label
- */
-/** @type {Map<string, RendererEntry>} */
 const registry = new Map(); // lang -> RendererEntry
 /**
  * Register a renderer for a fenced info-string. `render(source, ctx)` may return
  * a Node/DocumentFragment, a Promise resolving to one (for libraries that load
  * or parse asynchronously), or nothing at all if it fills `ctx.host` itself.
- * @param {string} lang
- * @param {RenderBlockFn} render
- * @param {{label?: string}} [opts]
- * @returns {void}
  */
 export function registerBlockRenderer(lang, render, opts = {}) {
     if (!lang || typeof render !== 'function')
         return;
     registry.set(String(lang).toLowerCase(), { render, label: opts.label || String(lang) });
 }
-/** @param {string} lang @returns {boolean} */
 export function hasBlockRenderer(lang) {
     return registry.has(String(lang || '').toLowerCase());
 }
-/** @returns {string[]} */
 export function registeredBlockLangs() {
     return [...registry.keys()];
 }
 /**
  * The "language-xxx" hint the sanitizer preserved on the <code> element.
- * @param {Element} code
- * @returns {string|null}
  */
 function langOf(code) {
     const cls = code.getAttribute('class') || '';
@@ -86,8 +50,6 @@ function langOf(code) {
 /**
  * Defence-in-depth over renderer output: strip scripts, inline event handlers
  * and script-y URLs, while leaving SVG shapes intact. Never allowed to throw.
- * @param {HTMLElement} container
- * @returns {void}
  */
 function scrubRendered(container) {
     try {
@@ -111,12 +73,6 @@ function scrubRendered(container) {
 /**
  * Fallback: keep the author's source as a normal (highlightable) code block and
  * prepend a small inert notice explaining why the diagram did not render.
- * @param {HTMLElement} host
- * @param {string} lang
- * @param {string} label
- * @param {string} source
- * @param {Error} [err]
- * @returns {void}
  */
 function renderFallback(host, lang, label, source, err) {
     host.textContent = '';
@@ -124,11 +80,6 @@ function renderFallback(host, lang, label, source, err) {
     const reason = (err && err.message) ? ': ' + err.message : '';
     host.append(elem('div', 'block-render-note', (label || lang) + ' could not be rendered' + reason + ' — showing source.'), elem('pre', null, elem('code', { class: 'language-' + lang, text: source })));
 }
-/**
- * @param {HTMLElement} host
- * @param {Node|void} node
- * @returns {void}
- */
 function fill(host, node) {
     if (node && node.nodeType)
         host.appendChild(node); // else: renderer filled host itself
@@ -137,9 +88,7 @@ function fill(host, node) {
  * Pipeline stage: replace every fenced block whose language has a registered
  * renderer with that renderer's output. Runs after resolveLinks and before
  * highlightWithin. Async renderers mount a placeholder host now and settle later.
- * @param {Element} root
- * @param {Object<string, *>} [ctx] - extra fields merged into each renderer call's BlockRenderContext (e.g. `{ docId }`)
- * @returns {void}
+ * @param ctx extra fields merged into each renderer call's BlockRenderContext (e.g. `{ docId }`)
  */
 export function renderBlocks(root, ctx = {}) {
     if (!root || typeof root.querySelectorAll !== 'function')
@@ -176,13 +125,13 @@ export function renderBlocks(root, ctx = {}) {
         // hands back its own library's promise still settles. A typeof test on a
         // property proves nothing to the checker about the union it came from, so
         // each branch restates the half the test just established.
-        if (out && typeof ( /** @type {Promise<Node>} */(out)).then === 'function') {
-            /** @type {Promise<Node>} */ (out)
+        if (out && typeof out.then === 'function') {
+            out
                 .then(node => { fill(host, node); scrubRendered(host); })
                 .catch(e => renderFallback(host, lang, entry.label, source, e));
         }
         else {
-            fill(host, /** @type {Node|void} */ (out));
+            fill(host, out);
             scrubRendered(host);
         }
     });

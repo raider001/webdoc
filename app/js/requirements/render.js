@@ -1,4 +1,4 @@
-// requirements/render.js - swap the fenced `reqgroup` placeholders that survived
+// requirements/render.ts - swap the fenced `reqgroup` placeholders that survived
 // sanitize for the components that draw a requirement group or a test case, and
 // keep the two Markdown-to-fragment helpers those components render prose with.
 //
@@ -24,13 +24,9 @@ import { renderInline, renderMarkdown } from '../commonmark.js';
 import { sanitizeToFragment } from '../sanitize.js';
 import { groupsByDoc } from './store.js';
 import { loadIslands, loadedIslands } from '../islands.js';
-/** @typedef {import('./parse.js').ReqOrTestBlock} ReqOrTestBlock */
-/** @typedef {import('../islands.js').IslandModule} IslandModule */
 /**
  * INLINE markdown (code / emphasis / links, no block constructs) -> sanitized
  * fragment. For single-line contexts like a requirement description.
- * @param {*} text
- * @returns {DocumentFragment}
  */
 export function inlineMarkdown(text) {
     return sanitizeToFragment(renderInline(String(text == null ? '' : text)));
@@ -38,19 +34,10 @@ export function inlineMarkdown(text) {
 /**
  * FULL markdown (paragraphs, lists, code blocks, ...) -> sanitized fragment. Test
  * steps are structured data now, so their action / expected may be any markdown.
- * @param {*} text
- * @returns {DocumentFragment}
  */
 export function blockMarkdown(text) {
     return sanitizeToFragment(renderMarkdown(String(text == null ? '' : text)));
 }
-/**
- * A placeholder that has already been replaced by its host, waiting for the
- * bundle so the component can go in.
- * @typedef {Object} PendingMount
- * @property {HTMLElement} host
- * @property {ReqOrTestBlock} block
- */
 /**
  * Mount every pending block, then APPLY THE RESULT SYNCHRONOUSLY.
  *
@@ -61,9 +48,6 @@ export function blockMarkdown(text) {
  * that frame, and the deep link then fails with no error, no warning and a page
  * that simply did not scroll. tests/test_coverage_ui.py has the deep-link test
  * that catches it.
- * @param {IslandModule} mod
- * @param {PendingMount[]} pending
- * @returns {void}
  */
 function mountBlocks(mod, pending) {
     for (const { host, block } of pending) {
@@ -95,12 +79,8 @@ function mountBlocks(mod, pending) {
  * anything else in renderDoc's pipeline (link resolution, block renderers, the
  * highlighter) looks at it - and so the asynchronous fallback has a stable host
  * to check `isConnected` on.
- * @param {Element} article
- * @param {string} docId
- * @returns {void}
  */
 export function renderRequirements(article, docId) {
-    /** @type {PendingMount[]} */
     const pending = [];
     article.querySelectorAll('pre > code.language-reqgroup').forEach(code => {
         const pre = code.parentElement;

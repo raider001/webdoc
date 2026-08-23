@@ -1,4 +1,4 @@
-// highlighter.js - a small, hand-written, zero-dependency syntax highlighter.
+// highlighter.ts - a small, hand-written, zero-dependency syntax highlighter.
 // ---------------------------------------------------------------------------
 // Runs AFTER the sanitizer, over the already-inert DOM. For every
 // <pre> > <code> it reads the "language-xxx" hint the sanitizer preserved,
@@ -15,10 +15,7 @@
 // ---------------------------------------------------------------------------
 import { merge } from './highlight/lexer.js';
 import { pythonTokens, javaTokens, shellTokens, makefileTokens, robotTokens, genericTokens } from './highlight/grammars.js';
-/** @typedef {import('./highlight/lexer.js').HighlightToken} HighlightToken */
-/** One per-language tokenizer function, as exported by ./highlight/grammars.js. @typedef {(src: string) => HighlightToken[]} HighlightTokenizer */
 // ---- registry + DOM emit --------------------------------------------------
-/** @type {Object<string, HighlightTokenizer>} */
 const LANGS = {
     python: pythonTokens, py: pythonTokens,
     robotframework: robotTokens, robot: robotTokens,
@@ -30,8 +27,6 @@ const LANGS = {
 /**
  * Reads the "language-xxx" hint off a <code> element's class list (as
  * preserved by the sanitizer).
- * @param {HTMLElement} code
- * @returns {string|null}
  */
 function langOf(code) {
     const cls = code.getAttribute('class') || '';
@@ -41,9 +36,6 @@ function langOf(code) {
 /**
  * Replaces a <code> element's children with text nodes + typed
  * <span class="tok-...">, one per token (DOM APIs only, never innerHTML).
- * @param {HTMLElement} code
- * @param {HighlightToken[]} toks
- * @returns {void}
  */
 function rebuild(code, toks) {
     code.textContent = '';
@@ -63,8 +55,6 @@ function rebuild(code, toks) {
  * Public entry point. Highlights every <pre> > <code> under `root`.
  * Unknown languages fall back to a generic pass; code with no language hint
  * is left untouched. Never throws.
- * @param {Element|Document} root
- * @returns {void}
  */
 export function highlightWithin(root) {
     if (!root || typeof root.querySelectorAll !== 'function')
@@ -73,7 +63,7 @@ export function highlightWithin(root) {
     // A `pre > code` match is always an HTML element; the selector is too compound
     // for the checker to work that out for itself.
     try {
-        codes = /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll('pre > code'));
+        codes = root.querySelectorAll('pre > code');
     }
     catch (e) {
         return;

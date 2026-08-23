@@ -1,4 +1,4 @@
-// coverage-view.js - the full-screen Test Coverage overlay's SHELL: open, close,
+// coverage-view.ts - the full-screen Test Coverage overlay's SHELL: open, close,
 // and the exportable HTML report.
 //
 // Everything you can see inside the overlay - the requirement/test status graph,
@@ -24,27 +24,10 @@ import { generateReportHtml } from './report.js';
 import { coverageOverlay } from './overlays.js';
 import { loadIslands } from './islands.js';
 import { announce } from './announce.js';
-/** @typedef {import('./requirements.js').RequirementEntry} RequirementEntry */
-/** @typedef {import('./requirements.js').TestCaseEntry} TestCaseEntry */
-/** @typedef {import('./coverage.js').CoverageResults} CoverageResults */
-/** @typedef {import('./coverage.js').CoverageStatus} CoverageStatus */
-/**
- * The single input object generateReportHtml() (report.js) takes to build the
- * whole standalone, shareable HTML test report; assembled once by exportReport().
- * @typedef {Object} TestReportData
- * @property {string} title
- * @property {string} generatedAt
- * @property {RequirementEntry[]} requirements
- * @property {TestCaseEntry[]} tests
- * @property {Map<string, CoverageStatus>} reqStatus
- * @property {Map<string, CoverageStatus>} testStatus
- * @property {({id:string} & import('./coverage.js').TestEvidence & {run: import('./runner.js').TestRunMeta|null})[]} detail
- */
 /**
  * Set up the full-screen Test Coverage overlay: expose close() through the
  * shared `app` registry, and return the handle main.js drives the header button
  * with.
- * @returns {import('./map-view.js').OverlayHandle}
  */
 export function setupCoverageView() {
     const btn = el('covBtn');
@@ -59,16 +42,14 @@ export function setupCoverageView() {
      * The mounted island, or null while the view is closed. Kept because
      * unmounting is what stops the graph's requestAnimationFrame loop and releases
      * window.__graph - detaching the DOM would not.
-     * @type {{destroy: () => void}|null}
      */
     let island = null;
     /**
      * The last results the island loaded, mirrored here so exportReport() reports
      * on what the reader is actually looking at.
-     * @type {CoverageResults}
      */
     let results = null;
-    /** Close the coverage overlay. @returns {void} */
+    /** Close the coverage overlay. */
     const close = () => {
         if (overlay.hidden)
             return;
@@ -79,7 +60,7 @@ export function setupCoverageView() {
             island = null;
         }
     };
-    /** Open the coverage overlay, loading results before it mounts. @returns {Promise<void>} */
+    /** Open the coverage overlay, loading results before it mounts. */
     const open = async () => {
         if (app.closeMapView)
             app.closeMapView(); // only one overlay view at a time
@@ -105,7 +86,6 @@ export function setupCoverageView() {
     };
     /**
      * Build and download a self-contained, shareable Test Coverage Report.
-     * @returns {Promise<void>}
      */
     async function exportReport() {
         const res = results || await loadResults(state.site && state.site.sources);

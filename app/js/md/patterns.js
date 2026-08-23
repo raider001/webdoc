@@ -1,4 +1,4 @@
-// md/patterns.js - the low-level block scanning primitives: the line-shape
+// md/patterns.ts - the low-level block scanning primitives: the line-shape
 // regexes, HTML-block start/end detection, and the whitespace/tab-column helpers
 // that the block parser (./blocks.js) drives. Pure and self-contained (imports
 // nothing). Extracted from blocks.js.
@@ -15,9 +15,8 @@ export const reBlank = /^[ \t]*$/;
 // ---- HTML blocks ----------------------------------------------------------
 /**
  * Classify a line as an HTML-block start condition (CommonMark types 1-7).
- * @param {string} line
- * @param {boolean} canInterrupt - true when the container is NOT an open paragraph (type 7 is only recognized then)
- * @returns {number} the HTML block kind (1-7), or 0 if no HTML block starts here
+ * @param canInterrupt true when the container is NOT an open paragraph (type 7 is only recognized then)
+ * @returns the HTML block kind (1-7), or 0 if no HTML block starts here
  */
 export function htmlBlockKind(line, canInterrupt) {
     const l = line.replace(/^ {0,3}/, '');
@@ -42,9 +41,8 @@ export function htmlBlockKind(line, canInterrupt) {
     return 0;
 }
 /**
- * @param {number} kind - an HTML block kind as returned by htmlBlockKind
- * @param {string} line
- * @returns {boolean} whether this line's content closes the HTML block (kinds 6/7 close on a blank line instead, handled by the caller)
+ * @param kind an HTML block kind as returned by htmlBlockKind
+ * @returns whether this line's content closes the HTML block (kinds 6/7 close on a blank line instead, handled by the caller)
  */
 export function htmlBlockCloses(kind, line) {
     switch (kind) {
@@ -56,19 +54,6 @@ export function htmlBlockCloses(kind, line) {
         default: return false; // 6,7 close on a blank line (handled by caller)
     }
 }
-// ---- whitespace / tab-column helpers --------------------------------------
-/**
- * Tab-expanded leading-whitespace measurement for a line; used throughout
- * md/blocks.js's line loop to decide indentation-sensitive structure (indented
- * code, list markers, blockquote markers).
- * @typedef {Object} LineIndent
- * @property {number} spaces - the leading whitespace width in columns (tabs expanded)
- * @property {number} offset - the character index in `s` where the leading whitespace ends
- */
-/**
- * @param {string} s
- * @returns {LineIndent}
- */
 export function leading(s) {
     let spaces = 0, i = 0, col = 0;
     while (i < s.length) {
@@ -90,9 +75,6 @@ export function leading(s) {
 }
 /**
  * Remove up to n columns of leading whitespace.
- * @param {string} s
- * @param {number} n
- * @returns {string}
  */
 export function removeIndent(s, n) {
     let col = 0, i = 0;
@@ -110,11 +92,6 @@ export function removeIndent(s, n) {
     }
     return s.slice(i);
 }
-/**
- * @param {string} s
- * @param {number} n
- * @returns {string}
- */
 export function stripUpTo(s, n) {
     let i = 0, col = 0;
     while (i < s.length && col < n && (s[i] === ' ' || s[i] === '\t')) {
@@ -125,9 +102,6 @@ export function stripUpTo(s, n) {
 }
 /**
  * Remove exactly n columns of leading whitespace, splitting a straddling tab.
- * @param {string} s
- * @param {number} n
- * @returns {string}
  */
 export function stripCols(s, n) {
     let i = 0, col = 0;
@@ -154,9 +128,6 @@ export function stripCols(s, n) {
 /**
  * Expand only the LEADING run of whitespace of `s`, measuring tab stops from
  * `startCol` so a tab after a list marker lands on the correct column.
- * @param {string} s
- * @param {number} startCol
- * @returns {string}
  */
 export function expandLeadingTabs(s, startCol) {
     let i = 0, col = startCol, out = '';

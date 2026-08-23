@@ -1,51 +1,32 @@
-// editor/ui.js - small shared DOM helpers and the block-type picker menu.
+// editor/ui.ts - small shared DOM helpers and the block-type picker menu.
 // These primitives are used across the editor's canvas, widgets and panels, so
 // they live in one dependency-free place.
 import { elem } from '../dom.js';
 import { auth } from '../auth.js';
 /**
- * @param {Element} icon - an icons.js node, e.g. closeIcon()
- * @param {string} title
- * @param {(e: MouseEvent) => void} onClick
- * @returns {HTMLElement}
+ * @param icon an icons.js node, e.g. closeIcon()
  */
 export function iconBtn(icon, title, onClick) {
     return elem('button', { class: 'blk-ico', title, onClick }, icon);
 }
 /**
- * @param {string|Node|(string|Node)[]} content - text, an icons.js node, or a mix
- * @param {(e: MouseEvent) => void} onClick
- * @returns {HTMLElement}
+ * @param content text, an icons.js node, or a mix
  */
 export function smallBtn(content, onClick) {
     return elem('button', { class: 'blk-small', onClick }, content);
 }
-/** @param {string} text @returns {HTMLElement} */
 export function labelEl(text) {
     return elem('label', null, text);
 }
-/**
- * @param {string} label
- * @param {string} value
- * @param {(value: string) => void} onChange
- * @returns {HTMLElement}
- */
 export function labeledInput(label, value, onChange) {
     const input = elem('input', { value, onInput: () => onChange(input.value) });
     return elem('div', 'meta-field', labelEl(label), input);
 }
-/**
- * @param {string} label
- * @param {string} value
- * @param {(value: string) => void} onChange
- * @returns {HTMLElement}
- */
 export function labeledTextarea(label, value, onChange) {
     const textarea = elem('textarea', { rows: 3, value, onInput: () => onChange(textarea.value) });
     return elem('div', 'meta-field', labelEl(label), textarea);
 }
-/** One entry in the "+ Add block" / insert menus. `acl` marks an entry only shown to accounts that may change access rules. @typedef {{type: string, label: string, acl?: boolean}} BlockMenuItem */
-/** The list of block types offered by the "+ Add block" / insert menus. @type {BlockMenuItem[]} */
+/** The list of block types offered by the "+ Add block" / insert menus. */
 const BLOCK_MENU = [
     { type: 'paragraph', label: 'Text' },
     { type: 'heading', label: 'Heading' },
@@ -63,11 +44,11 @@ const BLOCK_MENU = [
     // anyone else - so showing it to everyone would just be a trap.
     { type: 'access', label: 'Restricted section', acl: true }
 ];
-/** The one open block menu, or null - opening a second closes the first. @type {HTMLElement|null} */
+/** The one open block menu, or null - opening a second closes the first. */
 let menuEl = null;
 /**
- * @param {Element} anchor - the menu is positioned below this element
- * @param {(type: string) => void} pick - called with the chosen block type
+ * @param anchor the menu is positioned below this element
+ * @param pick called with the chosen block type
  */
 export function openBlockMenu(anchor, pick) {
     if (menuEl)
@@ -84,7 +65,7 @@ export function openBlockMenu(anchor, pick) {
     } }
     // Close on the next mousedown outside the menu.
     setTimeout(() => document.addEventListener('mousedown', function off(e) {
-        if (menuEl && !menuEl.contains(/** @type {Node} */ (e.target))) {
+        if (menuEl && !menuEl.contains(e.target)) {
             close();
             document.removeEventListener('mousedown', off);
         }

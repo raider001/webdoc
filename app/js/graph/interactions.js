@@ -1,4 +1,4 @@
-// graph/interactions.js - pointer / wheel / keyboard wiring for the CANVAS scene.
+// graph/interactions.ts - pointer / wheel / keyboard wiring for the CANVAS scene.
 // Hit-testing goes through the spatial grid (g.nodeAtWorld / g.edgeAtWorld) instead
 // of DOM .closest(), since nodes are no longer DOM elements. Pointer gesture
 // bookkeeping stays local; only the live transform (g.tx/g.ty/g.k), draw-state and
@@ -10,25 +10,9 @@
 // graph/chrome-view.js); the one exception is the click on the minimap SURFACE,
 // because turning a point on it into a pan is transform maths, not chrome.
 import { DRAG_THRESHOLD, MINI_W, MINI_H } from './util.js';
-/** @typedef {import('../graph.js').GraphContext} GraphContext */
-/**
- * One live addEventListener registration, remembered so g.destroy can unwind
- * every one of them. The handler is stored under the erased EventListener
- * shape: on() already proved the event-name/handler pairing at registration,
- * and removal only needs the same function identity back.
- * @typedef {Object} ListenerReg
- * @property {EventTarget} target
- * @property {string} type
- * @property {EventListener} fn
- * @property {boolean|AddEventListenerOptions} [opt]
- */
 /**
  * Convert client (screen) pixel coordinates to world coordinates under the
  * current pan/zoom transform.
- * @param {GraphContext} g
- * @param {number} clientX
- * @param {number} clientY
- * @returns {{wx: number, wy: number}}
  */
 function toWorld(g, clientX, clientY) {
     const r = g.svgEl.getBoundingClientRect();
@@ -37,11 +21,8 @@ function toWorld(g, clientX, clientY) {
 /**
  * Wire up pointer/wheel/keyboard interaction on the canvas, fit/restore the
  * initial view, and set g.destroy.
- * @param {GraphContext} g
- * @returns {void}
  */
 export function wireInteractions(g) {
-    /** @type {ListenerReg[]} */
     const listeners = [];
     /**
      * addEventListener + remember the registration so g.destroy can remove
@@ -49,23 +30,17 @@ export function wireInteractions(g) {
      * Generic over the event name so each handler gets its real event type -
      * 'pointerdown' hands back a PointerEvent with .clientX, 'wheel' a WheelEvent
      * with .deltaY. Typing fn as (e: Event) made every one of those a silent any.
-     * @template {keyof GlobalEventHandlersEventMap} K
-     * @param {EventTarget} target
-     * @param {K} type
-     * @param {(e: GlobalEventHandlersEventMap[K]) => void} fn
-     * @param {boolean|AddEventListenerOptions} [opt]
-     * @returns {void}
      */
     function on(target, type, fn, opt) { target.addEventListener(type, fn, opt); listeners.push({ target: target, type: type, fn: fn, opt: opt }); }
     const svgEl = g.svgEl; // the <canvas> (kept the name so the CSS/pan code is unchanged)
     let dragging = false, moved = false, sx = 0, sy = 0, sTx = 0, sTy = 0;
     // What the pointer went DOWN on, so pointerup can tell a click from a pan and
     // a double click from two singles.
-    /** @type {string|null} */ let lastClickId = null;
+    let lastClickId = null;
     let lastClickTime = 0;
-    /** @type {string|null} */ let downNodeId = null;
-    /** @type {string|null} */ let downExtUrl = null;
-    /** @type {{from: string, to: string, type: string}|null} */ let downEdge = null;
+    let downNodeId = null;
+    let downExtUrl = null;
+    let downEdge = null;
     on(svgEl, 'pointerdown', function (e) {
         if (e.button !== 0)
             return;
@@ -190,7 +165,7 @@ export function wireInteractions(g) {
     on(document, 'keydown', function (e) {
         if (!g.editMode)
             return;
-        const tgt = /** @type {HTMLElement} */ (e.target);
+        const tgt = e.target;
         const tag = (tgt && tgt.tagName) || '';
         if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (tgt && tgt.isContentEditable))
             return;
@@ -219,7 +194,7 @@ export function wireInteractions(g) {
             return;
         if (g.editMode)
             return; // edit-connections mode: Delete only ever removes a selected link, never a document
-        const tgt = /** @type {HTMLElement} */ (e.target);
+        const tgt = e.target;
         const tag = (tgt && tgt.tagName) || '';
         if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (tgt && tgt.isContentEditable))
             return;

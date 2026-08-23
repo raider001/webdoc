@@ -1,28 +1,16 @@
-// editor/panels.js - the editor's document-metadata side panel and the
+// editor/panels.ts - the editor's document-metadata side panel and the
 // standalone "new document" modal (choose source + web path).
 import { elem, append } from '../dom.js';
 import { labelEl, labeledInput, labeledTextarea } from './ui.js';
 import { closeIcon } from '../icons.js';
 import { auth } from '../auth.js';
 import { groupChip, destroyGroupChip } from '../auth-ui.js';
-/** @typedef {import('./serialize.js').DocMeta} DocMeta */
-/** @typedef {import('../authoring.js').NewDocModalOpts} NewDocModalOpts */
-/**
- * One entry of the "Assumed knowledge" / "Recommended next" doc-picker lists;
- * only `id` and `title` are read here, out of the fuller GraphDocNode shape
- * (map-view.js) that callers actually pass in.
- * @typedef {Object} DocPickerEntry
- * @property {string} id
- * @property {string} title
- */
 /* ---- metadata panel (right side of the editor) ---- */
 /**
- * @param {Partial<DocMeta>} meta - edited in place: title/description directly, assumes/next via docPicker
- * @param {DocPickerEntry[]} allDocs
- * @param {string} selfId - the document being edited, excluded from both pickers
- * @param {import('../auth.js').DocAccess|null} [access] - GET /api/index/access for this
- *   document; absent when accounts are switched off, in which case no access field is drawn
- * @returns {HTMLElement}
+ * @param meta edited in place: title/description directly, assumes/next via docPicker
+ * @param selfId the document being edited, excluded from both pickers
+ * @param access GET /api/index/access for this document; absent when accounts are
+ *   switched off, in which case no access field is drawn
  */
 export function metadataPanel(meta, allDocs, selfId, access) {
     return elem('aside', 'editor-meta', elem('h2', 'editor-meta-h', 'Document metadata'), labeledInput('Title', meta.title || '', v => meta.title = v), labeledTextarea('Description', meta.description || '', v => meta.description = v), docPicker('Assumed knowledge', meta.assumes, allDocs, selfId), docPicker('Recommended next', meta.next, allDocs, selfId), auth.enabled ? accessField(meta, access) : null);
@@ -36,16 +24,15 @@ export function metadataPanel(meta, allDocs, selfId, access) {
  * first is editable here - to change an inherited lock you edit the page it came
  * from, which is also the only edit that is meaningful.
  *
- * @param {Object<string, *>} meta - edited in place; `access` is written back into the header
- * @param {Object<string, *>|null} access - GET /api/index/access for this document
- * @returns {HTMLElement}
+ * @param meta edited in place; `access` is written back into the header
+ * @param access GET /api/index/access for this document
  */
 function accessField(meta, access) {
     const known = (access && access.knownGroups) || [];
     const mayEdit = !!(access && access.canEditAccess);
     const eff = (access && access.effective) || {};
     const inherited = (eff.inheritedFrom || []);
-    /** The groups this page's OWN rule names right now. @returns {string[]} */
+    /** The groups this page's OWN rule names right now. */
     const current = () => (meta.access && Array.isArray(meta.access.read)) ? meta.access.read.slice() : [];
     const chips = elem('div', 'group-chips');
     const note = elem('p', 'access-note');
@@ -115,11 +102,7 @@ function accessField(meta, access) {
 /**
  * A field that edits a list of document ids as removable chips, with a
  * dropdown to add another (every doc except this one).
- * @param {string} label
- * @param {string[]} arr - edited in place
- * @param {DocPickerEntry[]} allDocs
- * @param {string} selfId
- * @returns {HTMLElement}
+ * @param arr edited in place
  */
 function docPicker(label, arr, allDocs, selfId) {
     const chips = elem('div', 'meta-chips');
@@ -147,9 +130,6 @@ function docPicker(label, arr, allDocs, selfId) {
     return elem('div', 'meta-field', elem('label', null, label), chips, select);
 }
 /* ---- new-document modal ---- */
-/**
- * @param {NewDocModalOpts} opts
- */
 export function openNewDocModal(opts) {
     const sourceSelect = elem('select');
     for (const s of opts.sources)
@@ -162,7 +142,6 @@ export function openNewDocModal(opts) {
     /**
      * The composed id: <source>/<path>, with any leading/trailing slashes and
      * the .md extension stripped. Empty when no path has been typed yet.
-     * @returns {string}
      */
     function docId() {
         const path = pathInput.value.trim().replace(/^\/+|\/+$/g, '').replace(/\.md$/i, '');
@@ -205,28 +184,14 @@ export function openNewDocModal(opts) {
     document.body.appendChild(scrim);
     setTimeout(() => pathInput.focus(), 30);
 }
-/* ---- confirm dialog (reusable yes/no modal) ---- */
 /**
- * Options for confirmDialog's reusable yes/no modal; built at every
- * delete/confirm callsite (authoring.js), including a cancelLabel:null
- * single-button "alert" variant.
- * @typedef {Object} ConfirmDialogOptions
- * @property {string} [title]
- * @property {string} [message]
- * @property {string} [confirmLabel]
- * @property {string|null} [cancelLabel] - null for a single-button acknowledgement (alert)
- * @property {boolean} [danger]
- */
-/**
- * @param {ConfirmDialogOptions} [opts]
- * @returns {Promise<boolean>} resolves true if confirmed, false if cancelled
+ * @returns resolves true if confirmed, false if cancelled
  */
 export function confirmDialog(opts) {
     opts = opts || {};
     return new Promise(resolve => {
         const alertOnly = opts.cancelLabel === null;
         let done = false;
-        /** @param {boolean} value */
         function finish(value) {
             if (done)
                 return;
@@ -237,7 +202,6 @@ export function confirmDialog(opts) {
         }
         // Capture phase so Enter / Escape here don't also trigger the map / coverage
         // overlay's own key handlers underneath (which would e.g. close the map).
-        /** @param {KeyboardEvent} e */
         function onKey(e) {
             if (e.key === 'Escape') {
                 e.preventDefault();

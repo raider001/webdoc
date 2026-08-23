@@ -1,16 +1,9 @@
-// editor/richtext.js - contenteditable text fields, the floating inline toolbar
+// editor/richtext.ts - contenteditable text fields, the floating inline toolbar
 // (Bold / Italic / Code / Link / Image) shown on selection, and the link & image
 // popovers (the link one with internal-document URL autocomplete). Everything about
 // editing inline rich text.
 import { elem, append } from '../dom.js';
 /* ---- editable inline field (contenteditable + inline toolbar) ---- */
-/**
- * @param {string} html
- * @param {string} cls
- * @param {(html: string) => void} onChange
- * @param {string} [placeholder]
- * @returns {HTMLElement}
- */
 export function editable(html, cls, onChange, placeholder) {
     const ed = elem('div', {
         class: 'blk-edit blk-edit-' + cls, contenteditable: 'true', 'data-ph': placeholder || '',
@@ -19,15 +12,10 @@ export function editable(html, cls, onChange, placeholder) {
     attachInlineToolbar(ed);
     return ed;
 }
-/** @param {string} [html] @returns {HTMLLIElement} */
 export function listItem(html) { return elem('li', { html: html || '' }); }
 /**
  * A standalone rich-text field (contenteditable + the shared inline toolbar),
  * for callers outside the block editor (e.g. the manual-test editor).
- * @param {string} html
- * @param {(html: string) => void} onChange
- * @param {string} [placeholder]
- * @returns {HTMLElement}
  */
 export function richText(html, onChange, placeholder) {
     const ed = elem('div', {
@@ -38,15 +26,16 @@ export function richText(html, onChange, placeholder) {
     return ed;
 }
 // A small floating toolbar (Bold / Italic / Code / Link / Image) shown on selection.
-/** @type {HTMLDivElement|null} */
 let sharedBar = null;
-/** @param {HTMLElement} ed - a contenteditable field */
+/**
+ * @param ed a contenteditable field
+ */
 export function attachInlineToolbar(ed) {
     ed.addEventListener('mouseup', showBar);
     ed.addEventListener('keyup', showBar);
     // Click an existing link to edit its text / URL or unlink it (no prompt()).
     ed.addEventListener('click', e => {
-        const hit = /** @type {Element} */ (e.target);
+        const hit = e.target;
         const anchor = hit.closest && hit.closest('a');
         if (!anchor || !ed.contains(anchor))
             return;
@@ -98,8 +87,7 @@ function ensureBar() {
     if (sharedBar)
         return sharedBar;
     // Buttons preventDefault on mousedown so the field keeps its selection.
-    /** @param {string} label @param {() => void} run @param {string} title */
-    const button = (label, run, title) => elem('button', { title, onMousedown: /** @param {MouseEvent} e */ /** @param {MouseEvent} e */ e => { e.preventDefault(); run(); } }, label);
+    const button = (label, run, title) => elem('button', { title, onMousedown: (e) => { e.preventDefault(); run(); } }, label);
     sharedBar = elem('div', 'inline-bar', button('B', () => document.execCommand('bold'), 'Bold'), button('I', () => document.execCommand('italic'), 'Italic'), button('<>', wrapCode, 'Inline code'), button('🔗', addLink, 'Link'), button('🖼', addImage, 'Insert image'));
     document.body.appendChild(sharedBar);
     return sharedBar;
@@ -126,7 +114,7 @@ function addLink() {
     if (!sel || !sel.rangeCount)
         return;
     const range = sel.getRangeAt(0).cloneRange();
-    const startEl = range.startContainer.nodeType === 1 ? /** @type {Element} */ (range.startContainer) : range.startContainer.parentElement;
+    const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
     const host = startEl && startEl.closest('[contenteditable]');
     if (!host)
         return;
@@ -144,11 +132,8 @@ function addLink() {
     });
 }
 /**
- * @param {Element} host - the contenteditable the link ends up in
- * @param {Range} range
- * @param {HTMLAnchorElement|null} anchor - the link being edited, or null to make a new one
- * @param {string} text
- * @param {string} url
+ * @param host the contenteditable the link ends up in
+ * @param anchor the link being edited, or null to make a new one
  */
 function applyLink(host, range, anchor, text, url) {
     if (anchor) {
@@ -175,13 +160,11 @@ function applyLink(host, range, anchor, text, url) {
     fireInput(host);
 }
 // The <a> the range starts inside (within an editable), if any.
-/** @param {Range} range @returns {HTMLAnchorElement|null} */
 function existingAnchor(range) {
-    const n = range.startContainer.nodeType === 1 ? /** @type {Element} */ (range.startContainer) : range.startContainer.parentElement;
+    const n = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
     const anchor = n && n.closest ? n.closest('a') : null;
     return (anchor && anchor.closest('[contenteditable]')) ? anchor : null;
 }
-/** @param {Element} a */
 function unwrapAnchor(a) {
     const parent = a.parentNode;
     if (!parent)
@@ -190,7 +173,6 @@ function unwrapAnchor(a) {
         parent.insertBefore(a.firstChild, a);
     parent.removeChild(a);
 }
-/** @param {Element|null} host */
 function fireInput(host) { if (host)
     host.dispatchEvent(new Event('input', { bubbles: true })); }
 // Image button on the inline toolbar: insert an <img> at the caret. Works in any
@@ -198,16 +180,17 @@ function fireInput(host) { if (host)
 // resolved for DISPLAY via the editor's image resolver (set by setImageResolver),
 // keeping the original in data-mdsrc, so it shows in the editor AND serializes back
 // to the relative path - the same contract as images loaded from a document.
-/** @type {((url: string) => (string|null|undefined))|null} */
 let imageResolver = null;
-/** @param {(url: string) => (string|null|undefined)} fn - resolves a relative image src for DISPLAY */
+/**
+ * @param fn resolves a relative image src for DISPLAY
+ */
 export function setImageResolver(fn) { imageResolver = (typeof fn === 'function') ? fn : null; }
 function addImage() {
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount)
         return;
     const range = sel.getRangeAt(0).cloneRange();
-    const startEl = range.startContainer.nodeType === 1 ? /** @type {Element} */ (range.startContainer) : range.startContainer.parentElement;
+    const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
     const host = startEl && startEl.closest('[contenteditable]');
     if (!host)
         return;
@@ -235,37 +218,21 @@ function addImage() {
         }
     });
 }
-/* ---- popovers -------------------------------------------------------------- */
-/**
- * Only the bottom-left corner of the anchoring rect is ever read, so a bare
- * literal stands in for a DOMRect when there is nothing on screen to measure.
- * @typedef {{bottom: number, left: number}} PopoverRect
- */
 // Shared bits: a labelled input row, and positioning below the anchoring rect.
-/** @param {string} labelText @param {HTMLElement} input */
 function popRow(labelText, input) {
     return elem('label', 'link-pop-row', elem('span', null, labelText), input);
 }
-/** @param {HTMLElement} pop @param {PopoverRect|null} rect */
 function positionPopover(pop, rect) {
     const r = rect || { bottom: 80, left: 80 };
     const width = 300;
     pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
     pop.style.left = (window.scrollX + Math.max(8, Math.min(r.left, window.innerWidth - width - 12))) + 'px';
 }
-// A minimal image popover (URL + Alt, Insert / Cancel), reusing the link popover's
-// shared state + styling. No doc autocomplete - image paths aren't in the doc index.
-/**
- * @typedef {Object} ImagePopoverOptions
- * @property {PopoverRect} rect
- * @property {(alt: string, url: string) => void} onApply
- */
-/** @param {ImagePopoverOptions} o */
 function openImagePopover(o) {
     closeLinkPop();
     const urlInput = elem('input', { type: 'text', class: 'link-pop-url', placeholder: 'diagram.png or https://…' });
     const altInput = elem('input', { type: 'text', placeholder: 'describe the image' });
-    const pop = elem('div', 'link-pop', popRow('Image URL', urlInput), popRow('Alt text', altInput), elem('div', 'link-pop-bar', elem('span', { style: 'flex:1' }), elem('button', { type: 'button', onMousedown: /** @param {MouseEvent} e */ /** @param {MouseEvent} e */ e => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'), elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Insert')));
+    const pop = elem('div', 'link-pop', popRow('Image URL', urlInput), popRow('Alt text', altInput), elem('div', 'link-pop-bar', elem('span', { style: 'flex:1' }), elem('button', { type: 'button', onMousedown: (e) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'), elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Insert')));
     document.body.appendChild(pop);
     linkPop = pop;
     positionPopover(pop, o.rect);
@@ -289,7 +256,7 @@ function openImagePopover(o) {
             closeLinkPop();
         }
     }));
-    linkOff = e => { if (linkPop && !linkPop.contains(/** @type {Node} */ (e.target)))
+    linkOff = e => { if (linkPop && !linkPop.contains(e.target))
         closeLinkPop(); };
     setTimeout(() => document.addEventListener('mousedown', linkOff), 0);
     setTimeout(() => urlInput.focus(), 20);
@@ -297,7 +264,6 @@ function openImagePopover(o) {
 // Image-src acceptance: relative paths are kept AS-IS (a bare "diagram.png" is a
 // file next to the doc, NOT a bare domain - so, unlike link URLs, never prepend
 // https://). Schemes are limited to http(s)/data; others (javascript:, …) rejected.
-/** @param {string} v @returns {string} */
 function normalizeImgUrl(v) {
     v = (v || '').trim();
     if (!v)
@@ -308,7 +274,6 @@ function normalizeImgUrl(v) {
 }
 // Accept the same URL shapes the sanitizer keeps; bare domains get https://.
 // Returns '' for an unsafe/empty URL (caller flags the field).
-/** @param {string} v @returns {string} */
 function normalizeUrl(v) {
     v = (v || '').trim();
     if (!v)
@@ -322,22 +287,11 @@ function normalizeUrl(v) {
     return v; // relative-ish path
 }
 /* ---- link popover (Text + URL, Apply / Unlink / Cancel) - replaces window.prompt ---- */
-/** @type {HTMLDivElement|null} */
 let linkPop = null;
-/** @type {((e: MouseEvent) => void)|null} */
 let linkOff = null;
-/**
- * One internal-document suggestion in the URL autocomplete: the id is what gets
- * inserted as the link target, the title is what the dropdown shows.
- * @typedef {{id: string, title: string}} LinkDoc
- */
-/** @type {LinkDoc[]} */
 let linkDocs = []; // static fallback list for the URL autocomplete
-/** @param {LinkDoc[]} docs */
 export function setLinkDocs(docs) { linkDocs = Array.isArray(docs) ? docs : []; }
-/** @type {((query: string) => Promise<LinkDoc[]>)|null} */
 let linkSearch = null; // server-backed suggestions (scales past a client list)
-/** @param {(query: string) => Promise<LinkDoc[]>} fn */
 export function setLinkSearch(fn) { linkSearch = (typeof fn === 'function') ? fn : null; }
 function closeLinkPop() {
     if (linkOff) {
@@ -350,16 +304,6 @@ function closeLinkPop() {
     }
     document.querySelectorAll('.link-ac').forEach(n => n.remove());
 }
-/**
- * @typedef {Object} LinkPopoverOptions
- * @property {PopoverRect} rect
- * @property {string} text
- * @property {string} url
- * @property {boolean} canText - false for a formatted link, whose inner markup must survive
- * @property {(text: string, url: string) => void} onApply
- * @property {(() => void)|null} onRemove - null when there is no link to unlink yet
- */
-/** @param {LinkPopoverOptions} o */
 function openLinkPopover(o) {
     closeLinkPop();
     const textInput = elem('input', { type: 'text', value: o.text || '', placeholder: 'Link text', disabled: !o.canText });
@@ -368,7 +312,7 @@ function openLinkPopover(o) {
             o.onRemove(); closeLinkPop(); } }, 'Unlink');
     if (!o.onRemove)
         removeBtn.style.display = 'none';
-    const pop = elem('div', 'link-pop', popRow('Text', textInput), popRow('URL', urlInput), elem('div', 'link-pop-bar', removeBtn, elem('span', { style: 'flex:1' }), elem('button', { type: 'button', onMousedown: /** @param {MouseEvent} e */ /** @param {MouseEvent} e */ e => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'), elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Apply')));
+    const pop = elem('div', 'link-pop', popRow('Text', textInput), popRow('URL', urlInput), elem('div', 'link-pop-bar', removeBtn, elem('span', { style: 'flex:1' }), elem('button', { type: 'button', onMousedown: (e) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'), elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Apply')));
     document.body.appendChild(pop);
     linkPop = pop;
     positionPopover(pop, o.rect);
@@ -385,15 +329,11 @@ function openLinkPopover(o) {
     // URL autocomplete: suggest internal documents by title / id. Selecting one
     // inserts its doc id (the reading view resolves it to a route). Typing a real
     // URL (scheme, /, #) suppresses the list, so external links still work freely.
-    /** @type {LinkDoc[]} */
     let acItems = [];
     let acActive = -1;
-    /** @type {HTMLDivElement|null} */
     let acDrop = null;
     let acSeq = 0;
-    /** @type {number|null} */
     let acTimer = null;
-    /** @param {string} v */
     function looksExternal(v) { return /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(v); }
     function closeUrlAc() { if (acTimer) {
         clearTimeout(acTimer);
@@ -402,7 +342,6 @@ function openLinkPopover(o) {
         acDrop.remove();
         acDrop = null;
     } acItems = []; acActive = -1; }
-    /** @param {LinkDoc} d */
     function pickDoc(d) {
         urlInput.value = d.id;
         if (o.canText && !textInput.disabled && !textInput.value)
@@ -426,7 +365,7 @@ function openLinkPopover(o) {
             document.body.appendChild(acDrop);
         }
         acDrop.textContent = '';
-        acItems.forEach((d, idx) => append(acDrop, elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: /** @param {MouseEvent} e */ /** @param {MouseEvent} e */ e => { e.preventDefault(); pickDoc(d); } }, elem('span', 'ac-id', d.title || d.id), elem('span', 'ac-desc', d.id))));
+        acItems.forEach((d, idx) => append(acDrop, elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e) => { e.preventDefault(); pickDoc(d); } }, elem('span', 'ac-id', d.title || d.id), elem('span', 'ac-desc', d.id))));
         const rc = urlInput.getBoundingClientRect();
         acDrop.style.left = (window.scrollX + rc.left) + 'px';
         acDrop.style.top = (window.scrollY + rc.bottom + 3) + 'px';
@@ -445,7 +384,6 @@ function openLinkPopover(o) {
                 clearTimeout(acTimer);
             acTimer = setTimeout(async () => {
                 const mySeq = ++acSeq;
-                /** @type {LinkDoc[]} */
                 let items = [];
                 try {
                     items = await linkSearch(raw);
@@ -512,7 +450,7 @@ function openLinkPopover(o) {
         }
     });
     linkOff = function (e) {
-        const t = /** @type {Element} */ (e.target);
+        const t = e.target;
         if (linkPop && !linkPop.contains(t) && !(t.closest && t.closest('.link-ac')))
             closeLinkPop();
     };

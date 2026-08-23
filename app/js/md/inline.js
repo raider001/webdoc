@@ -1,36 +1,10 @@
-// md/inline.js - inline parsing. Builds an ARRAY of pieces from a leaf block's
+// md/inline.ts - inline parsing. Builds an ARRAY of pieces from a leaf block's
 // text, resolves emphasis/links/images over an array-indexed delimiter list,
 // then serialises to an HTML string. Also handles code spans, autolinks (incl.
 // GFM bare-URL/www/email), raw HTML, entities and hard/soft breaks.
 // ---------------------------------------------------------------------------
 import { esc, normalizeUri, ENTITY_RE, decodeEntity, ESCAPABLE, decodeInlineText } from './text.js';
 import { scanDest, scanTitle, normLabel, scanBracketLabel } from './scan.js';
-/** @typedef {import('./blockpost.js').RefDefinition} RefDefinition */
-/**
- * One item in the inline-parsing array of "pieces" that parseInlines() builds
- * and progressively mutates: rendering fields (kind/text/html) are set when a
- * piece is first pushed, then emphasis/link/image resolution (resolveEmphasis,
- * handleCloseBracket) attaches delimiter-run fields, bracket fields, or wrap
- * fields to record what the final serialize() pass should emit around it.
- * @typedef {Object} InlinePiece
- * @property {'text'|'raw'|'hardbreak'|'softbreak'} kind
- * @property {string} [text] - literal text (kind 'text'); also holds a delimiter run's characters, or a bracket's '[' / '!['
- * @property {string} [html] - pre-built HTML (kind 'raw')
- * @property {string} [delim] - the delimiter character ('*', '_', '~') if this piece is a delimiter run
- * @property {boolean} [canOpen] - whether this delimiter run can open emphasis (delimiter runs only)
- * @property {boolean} [canClose] - whether this delimiter run can close emphasis (delimiter runs only)
- * @property {number} [numDelims] - remaining unconsumed delimiter count (delimiter runs only; shrinks as pairs resolve)
- * @property {number} [origLen] - the run's original length, used by the "rule of 3" multiples-of-3 check
- * @property {string} [bracket] - '[' or '![' if this piece is a bracket opener
- * @property {number} [pos] - this piece's index in `pieces`, recorded at push time (bracket openers only)
- * @property {number} [srcPos] - the source index of the bracket character (bracket openers only)
- * @property {boolean} [used] - true once this delimiter/bracket has been consumed and should render as a plain literal
- * @property {boolean} [inactive] - true for a bracket disabled by the "no links inside links" rule
- * @property {string[]} [wrapOpen] - opening tags to emit immediately to this piece's right (emphasis resolution)
- * @property {string[]} [wrapClose] - closing tags to emit immediately to this piece's left (emphasis resolution)
- * @property {string} [wrapBefore] - raw HTML to emit immediately before this piece (link open tag)
- * @property {string} [wrapAfterClose] - raw HTML to emit immediately after this piece (link close tag)
- */
 /* ===========================================================================
    Inline parsing - array of pieces + array delimiter list -> HTML string
    =========================================================================== */
@@ -52,14 +26,7 @@ const RE_EMAIL = /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]
 // Pattern for a URL or email candidate inside a plain-text run.
 const RE_BAREURL = /(?:https?:\/\/|www\.)[^\s<]*|[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/g;
 /**
- * @typedef {Object} TrimmedUrl
- * @property {string} url - the URL/email with trailing punctuation removed
- * @property {string} trail - the removed trailing characters, kept as plain text after the link
- */
-/**
  * Peel GFM trailing punctuation off a matched URL/email.
- * @param {string} url
- * @returns {TrimmedUrl}
  */
 function trimUrlPunct(url) {
     let trail = '', changed = true, guard = 0;
@@ -96,22 +63,13 @@ function trimUrlPunct(url) {
 }
 /**
  * The host of a bare URL must contain a dot and not end with one.
- * @param {string} url
- * @returns {boolean}
  */
 function validAutolinkUrl(url) {
     const host = url.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
     return host.indexOf('.') !== -1 && !/\.$/.test(host);
 }
 /**
- * @typedef {Object} AutolinkResult
- * @property {string} html - the rendered `<a>` tag
- * @property {string} trail - trailing punctuation left over from trimUrlPunct, to render back as plain text
- */
-/**
- * @param {string} raw - the matched URL/email/www candidate text
- * @param {boolean} isEmail
- * @returns {AutolinkResult|null}
+ * @param raw the matched URL/email/www candidate text
  */
 function buildAutolink(raw, isEmail) {
     const t = trimUrlPunct(raw);
@@ -131,14 +89,14 @@ function buildAutolink(raw, isEmail) {
 /**
  * Emit a plain-text run, splitting out any GFM autolinks it contains. A link is
  * only recognised at a boundary: start of run, whitespace, or one of * _ ~ (.
- * @param {InlinePiece[]} pieces - appended to in place
- * @param {string} run - the plain-text run being scanned
- * @param {string} prevChar - the character immediately before `run` in the source (for boundary checks)
- * @returns {void}
+ * @param pieces appended to in place
+ * @param run the plain-text run being scanned
+ * @param prevChar the character immediately before `run` in the source (for boundary checks)
  */
 function emitTextRun(pieces, run, prevChar) {
     RE_BAREURL.lastIndex = 0;
-    let last = 0, m, guard = 0;
+    let last = 0, guard = 0;
+    let m;
     while ((m = RE_BAREURL.exec(run)) !== null) {
         if (++guard > 5000)
             break;
@@ -161,25 +119,21 @@ function emitTextRun(pieces, run, prevChar) {
 /**
  * Parse a leaf block's raw text into inline HTML: emphasis, strikethrough,
  * links, images, code spans, autolinks, raw HTML, entities and line breaks.
- * @param {string} src
- * @param {Object<string, RefDefinition>} refs
- * @returns {string}
  */
 export function parseInlines(src, refs) {
     const s = src;
-    /** @type {InlinePiece[]} */
     const pieces = [];
-    /** @type {number[]} indices into `pieces` that are delimiter runs / brackets */
+    /** indices into `pieces` that are delimiter runs / brackets */
     const delims = [];
     let i = 0;
     const n = s.length;
-    /** @param {string} t - already HTML-escaped @returns {void} */
+    /** @param t already HTML-escaped */
     function pushText(t) { pieces.push({ kind: 'text', text: t }); }
     while (i < n) {
         const c = s[i];
         if (c === '\n') {
             // line break: 2+ spaces before -> hard break
-            let j = pieces.length - 1;
+            const j = pieces.length - 1;
             const prev = pieces[j];
             if (prev && prev.kind === 'text' && /  $/.test(prev.text)) {
                 prev.text = prev.text.replace(/ +$/, '');
@@ -282,7 +236,6 @@ export function parseInlines(src, refs) {
         }
         if (c === '*' || c === '_' || c === '~') {
             const run = scanRun(s, i, c);
-            /** @type {InlinePiece} */
             const piece = { kind: 'text', text: c.repeat(run.len), delim: c, canOpen: run.canOpen, canClose: run.canClose, numDelims: run.len, origLen: run.len };
             pieces.push(piece);
             delims.push(pieces.length - 1);
@@ -290,7 +243,6 @@ export function parseInlines(src, refs) {
             continue;
         }
         if (c === '[') {
-            /** @type {InlinePiece} */
             const piece = { kind: 'text', text: '[', bracket: '[', pos: pieces.length, srcPos: i };
             pieces.push(piece);
             delims.push(pieces.length - 1);
@@ -298,7 +250,6 @@ export function parseInlines(src, refs) {
             continue;
         }
         if (c === '!' && s[i + 1] === '[') {
-            /** @type {InlinePiece} */
             const piece = { kind: 'text', text: '![', bracket: '![', pos: pieces.length, srcPos: i };
             pieces.push(piece);
             delims.push(pieces.length - 1);
@@ -316,17 +267,8 @@ export function parseInlines(src, refs) {
     return serialize(pieces);
 }
 /**
- * @typedef {Object} DelimRunScan
- * @property {number} len - run length (count of the repeated delimiter character)
- * @property {boolean} canOpen
- * @property {boolean} canClose
- */
-/**
  * Scan a run of '*', '_' or '~' starting at i and classify its emphasis flanking.
- * @param {string} s
- * @param {number} i
- * @param {string} ch - the delimiter character
- * @returns {DelimRunScan}
+ * @param ch the delimiter character
  */
 function scanRun(s, i, ch) {
     let len = 0;
@@ -355,16 +297,14 @@ function scanRun(s, i, ch) {
 // as "punctuation" for the emphasis flanking rules, so currency/maths symbols
 // (e.g. $, £, €, +, =, ~) count just like ASCII punctuation.
 const RE_PUNCT = /[\p{P}\p{S}]/u;
-/** @param {string|undefined} c - undefined past either end of the source @returns {boolean} */
+/** @param c undefined past either end of the source */
 function isPunct(c) { return c !== undefined && RE_PUNCT.test(c); }
 /**
  * Resolve emphasis/strong/strikethrough over the delimiter runs in `pieces`,
  * pairing closers with openers per the CommonMark algorithm (rule of 3,
  * flanking, `~~` requiring 2 delimiters) and recording the result via wrapRange.
- * @param {InlinePiece[]} pieces
- * @param {number[]} delims - indices into `pieces` for delimiter runs / brackets, in source order
- * @param {number} _bottom - the piece index below which openers must not be looked up (-1 for the top-level pass); not consulted, because resolveEmphasisRange already pre-filters `delims` to the bracket-scoped range
- * @returns {void}
+ * @param delims indices into `pieces` for delimiter runs / brackets, in source order
+ * @param _bottom the piece index below which openers must not be looked up (-1 for the top-level pass); not consulted, because resolveEmphasisRange already pre-filters `delims` to the bracket-scoped range
  */
 function resolveEmphasis(pieces, delims, _bottom) {
     // iterate closers
@@ -432,11 +372,9 @@ function resolveEmphasis(pieces, delims, _bottom) {
  * Record that the range [oIdx, cIdx] in `pieces` should be wrapped in `tag`.
  * A later-resolved wrap on the SAME piece is the OUTER one, so its open tag
  * goes first (unshift) and its close tag last (push): ***x*** -> <em><strong>x</strong></em>.
- * @param {InlinePiece[]} pieces
- * @param {number} oIdx - opener piece index
- * @param {number} cIdx - closer piece index
- * @param {string} tag - 'em' | 'strong' | 'del'
- * @returns {void}
+ * @param oIdx opener piece index
+ * @param cIdx closer piece index
+ * @param tag 'em' | 'strong' | 'del'
  */
 function wrapRange(pieces, oIdx, cIdx, tag) {
     pieces[oIdx].wrapOpen = (pieces[oIdx].wrapOpen || []);
@@ -448,12 +386,9 @@ function wrapRange(pieces, oIdx, cIdx, tag) {
  * Handle a `]` at source index i: try to close the nearest unmatched `[`/`![`
  * bracket as an inline link/image `(dest "title")` or a reference link/image
  * `[label]`/`[]`/bare, resolving emphasis inside the bracketed text first.
- * @param {string} s - full inline source
- * @param {number} i - index of the ']' character
- * @param {InlinePiece[]} pieces
- * @param {number[]} delims
- * @param {Object<string, RefDefinition>} refs
- * @returns {number} the next index to resume scanning from
+ * @param s full inline source
+ * @param i index of the ']' character
+ * @returns the next index to resume scanning from
  */
 function handleCloseBracket(s, i, pieces, delims, refs) {
     // find last unmatched bracket delim
@@ -582,10 +517,6 @@ function handleCloseBracket(s, i, pieces, delims, refs) {
  * Resolve emphasis only within pieces after fromIdx (approximate) - used when a
  * link/image's bracketed text is closed, so its inner emphasis resolves before
  * the outer scan continues.
- * @param {InlinePiece[]} pieces
- * @param {number[]} delims
- * @param {number} fromIdx
- * @returns {void}
  */
 function resolveEmphasisRange(pieces, delims, fromIdx) {
     const sub = delims.filter(idx => idx > fromIdx && pieces[idx] && pieces[idx].delim);
@@ -594,10 +525,6 @@ function resolveEmphasisRange(pieces, delims, fromIdx) {
 /**
  * Collapse pieces[startIdx..] into a single raw-HTML piece (used to fold an
  * image's alt-text range down to one `<img>` piece).
- * @param {InlinePiece[]} pieces
- * @param {number} startIdx
- * @param {string} rawHtml
- * @returns {void}
  */
 function collapseRange(pieces, startIdx, rawHtml) {
     for (let k = startIdx + 1; k < pieces.length; k++)
@@ -608,9 +535,6 @@ function collapseRange(pieces, startIdx, rawHtml) {
  * Concatenate the plain-text content of pieces[from..], used to build an
  * image's alt text: 'text' pieces contribute their text, 'raw' pieces
  * contribute a nested image's alt (if any) or their stripped tag content.
- * @param {InlinePiece[]} pieces
- * @param {number} from
- * @returns {string}
  */
 function piecesPlainText(pieces, from) {
     let t = '';
@@ -628,8 +552,6 @@ function piecesPlainText(pieces, from) {
 }
 /**
  * Serialize the finished pieces array to an HTML string.
- * @param {InlinePiece[]} pieces
- * @returns {string}
  */
 function serialize(pieces) {
     let out = '';
@@ -676,10 +598,9 @@ function serialize(pieces) {
 }
 /**
  * Find the index of a matching closing backtick run for a code span.
- * @param {string} s
- * @param {number} from - index to start searching from
- * @param {string} open - the opening backtick run, e.g. "``"
- * @returns {number} the index of the matching close, or -1 if none is found
+ * @param from index to start searching from
+ * @param open the opening backtick run, e.g. "``"
+ * @returns the index of the matching close, or -1 if none is found
  */
 function findClose(s, from, open) {
     let i = from;

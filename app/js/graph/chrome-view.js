@@ -1,4 +1,4 @@
-// graph/chrome-view.js - the map's overlay chrome, as a CONSUMER of the graph
+// graph/chrome-view.ts - the map's overlay chrome, as a CONSUMER of the graph
 // controller rather than a stage of it.
 // ---------------------------------------------------------------------------
 // Zoom controls, search box, edge legend, "Map by" dropdown, access-group legend,
@@ -21,18 +21,6 @@
 import { elem, append } from '../dom.js';
 import { plusIcon, minusIcon, fitIcon, editIcon, focusIcon, chevronDownIcon } from '../icons.js';
 import { groupLabel, groupColor } from '../auth.js';
-/** @typedef {import('../graph.js').GraphOptions} GraphOptions */
-/** @typedef {import('../graph.js').GraphController} GraphController */
-/** @typedef {import('../graph.js').GraphChangeEvent} GraphChangeEvent */
-/**
- * The handle mountGraphChrome() returns: the minimap surface the controller has
- * to be told about, the connect step that attaches the chrome to a live
- * controller, and the teardown that removes every element this module made.
- * @typedef {Object} GraphChromeHandle
- * @property {HTMLCanvasElement} minimapCanvas - pass to the controller as opts.minimapCanvas
- * @property {(ctl: GraphController) => void} connect
- * @property {() => void} destroy
- */
 /**
  * Build the overlay chrome for a graph inside `container`.
  *
@@ -40,9 +28,6 @@ import { groupLabel, groupColor } from '../auth.js';
  * chrome sits on top by z-index (see app/css/graph.css), not by DOM order, and
  * NOTHING here ever clears the container - that habit is exactly what made the
  * engine and a component renderer fight over the same children.
- * @param {HTMLElement} container
- * @param {GraphOptions} [options]
- * @returns {GraphChromeHandle}
  */
 export function mountGraphChrome(container, options) {
     const opts = options || {};
@@ -52,28 +37,18 @@ export function mountGraphChrome(container, options) {
     // push the whole framing onto whichever ResizeObserver frame arrived next.
     container.classList.add('graph-root');
     const frag = document.createDocumentFragment();
-    /** @type {Element[]} */
     const owned = []; // everything this module put in the container, for destroy()
-    /** @type {(() => void)[]} */
     const cleanups = []; // document-level listeners the dropdown may have left open
     /**
      * The live controller, or null until connect() runs. Every handler below reads
      * it late rather than closing over it, because the DOM is built first.
-     * @type {GraphController|null}
      */
     let ctl = null;
-    /** @type {(() => void)|null} */
     let unsubscribe = null;
-    /**
-     * @template {Element} T
-     * @param {T} node
-     * @returns {T}
-     */
     const own = (node) => { frag.appendChild(node); owned.push(node); return node; };
     /**
-     * @param {Element} icon - an inline SVG built by icons.js
-     * @param {string} aria - doubles as the tooltip, so the label is never mouse-only
-     * @returns {HTMLButtonElement}
+     * @param icon - an inline SVG built by icons.js
+     * @param aria - doubles as the tooltip, so the label is never mouse-only
      */
     const ctrlBtn = (icon, aria) => elem('button', { type: 'button', class: 'graph-ctrl-btn', 'aria-label': aria, title: aria }, icon);
     // ---- Zoom controls ----
@@ -101,7 +76,6 @@ export function mountGraphChrome(container, options) {
     own(elem('div', 'graph-search', searchInput));
     // ---- Legend (each entry toggles a category; in edit mode prereq/recnext act
     //      as connector pickers instead) ----
-    /** @type {Object<string, HTMLButtonElement>} */
     const legendBtns = {};
     /**
      * One legend entry: toggles category `kind`'s visibility, unless edit mode is
@@ -111,9 +85,7 @@ export function mountGraphChrome(container, options) {
      * the change event that comes back is what repaints this button. Going the
      * long way round is what keeps the legend honest when the engine overrules it
      * (edit mode forcing page links off, say).
-     * @param {string} kind - edge category ('prereq'|'recnext'|'trace'|'pagelink'|'missing')
-     * @param {string} label
-     * @returns {HTMLElement}
+     * @param kind - edge category ('prereq'|'recnext'|'trace'|'pagelink'|'missing')
      */
     function legendToggle(kind, label) {
         const b = elem('button', { type: 'button', class: 'graph-legend-item', 'data-kind': kind, 'aria-pressed': 'true', title: 'Toggle ' + label }, elem('span', 'graph-legend-swatch ' + kind), label);
@@ -149,7 +121,6 @@ export function mountGraphChrome(container, options) {
     // which chapters share a group, where a restriction starts, and which pages
     // they cannot open. Each entry dims every node readable only by that group, so
     // "show me just what Ops can see" is one click.
-    /** @type {Object<string, HTMLButtonElement>} */
     const groupBtns = {};
     const accessGroups = Array.isArray(opts.accessGroups) ? opts.accessGroups : [];
     if (accessGroups.length && !opts.hideLegend) {
@@ -180,9 +151,7 @@ export function mountGraphChrome(container, options) {
         own(panel);
     }
     // ---- Edit-connections toggle + hint (only when the caller can act on edits) ----
-    /** @type {HTMLButtonElement|null} */
     let editBtn = null;
-    /** @type {HTMLElement|null} */
     let hintEl = null;
     if ((opts.onConnect || opts.onDisconnect) && !opts.hideLegend) {
         editBtn = elem('button', { type: 'button', class: 'graph-edit-toggle', 'aria-pressed': 'false', title: 'Draw or delete connections between documents' }, editIcon(), ' Edit connections');
@@ -209,8 +178,6 @@ export function mountGraphChrome(container, options) {
      * Repaint every control from one change event. This is the ONLY place chrome
      * state is written, which is what makes "the engine never touches a button"
      * enforceable rather than aspirational.
-     * @param {GraphChangeEvent} s
-     * @returns {void}
      */
     function render(s) {
         container.classList.toggle('is-editing', s.editMode);
@@ -243,8 +210,6 @@ export function mountGraphChrome(container, options) {
          * Attach the chrome to a live controller: append it, subscribe, and paint the
          * current state once, so the first frame is right without waiting for a
          * change nobody has made yet.
-         * @param {GraphController} controller
-         * @returns {void}
          */
         connect: function (controller) {
             ctl = controller;
@@ -283,8 +248,6 @@ export function mountGraphChrome(container, options) {
  * two-click gesture on a canvas, so it is DERIVED from the emitted state rather
  * than written at each transition - there is no path through the state machine
  * that can leave it stale.
- * @param {GraphChangeEvent} s
- * @returns {string}
  */
 function hintFor(s) {
     if (!s.editMode)
@@ -304,14 +267,8 @@ function hintFor(s) {
 // a popup list where each option carries its own coloured swatch (a native <select>
 // can't). Picking a different type asks the app to relayout, which replaces this
 // whole chrome - so nothing here has to re-render itself.
-/**
- * @param {{value: string, label: string, swatch: string}[]} modes
- * @param {string} current
- * @param {(mode: string) => void} onPick
- * @returns {{el: HTMLElement, close: () => void}}
- */
 function buildMapModeDropdown(modes, current, onPick) {
-    /** @param {string} cls - edge category of the map mode; blank/absent means the 'all' modes swatch */
+    /** @param cls - edge category of the map mode; blank/absent means the 'all' modes swatch */
     const swatch = (cls) => elem('span', 'graph-legend-swatch ' + (cls || 'all'));
     const cur = modes.find(m => m.value === current) || modes[0];
     // Stack every label in one cell (only the current shown) so the button is always
@@ -323,12 +280,11 @@ function buildMapModeDropdown(modes, current, onPick) {
         onClick: () => { close(); if (m.value !== current)
             onPick(m.value); }
     }, swatch(m.swatch), elem('span', null, m.label))));
-    /** @type {((e: MouseEvent) => void)|null} */
     let offClick = null;
     function open() {
         menu.hidden = false;
         btn.setAttribute('aria-expanded', 'true');
-        offClick = (e) => { if (!wrap.contains(/** @type {Node} */ (e.target)))
+        offClick = (e) => { if (!wrap.contains(e.target))
             close(); };
         setTimeout(() => document.addEventListener('mousedown', offClick), 0);
     }

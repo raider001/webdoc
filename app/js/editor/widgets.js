@@ -1,4 +1,4 @@
-// editor/widgets.js - the structured block widgets: table editor, requirement
+// editor/widgets.ts - the structured block widgets: table editor, requirement
 // group, test case, and the shared reference-picker (chips + autocomplete) that
 // backs both a requirement's Trace-To and a test case's Verifies.
 import { elem, append } from '../dom.js';
@@ -7,22 +7,7 @@ import { editable } from './richtext.js';
 import { plusIcon, minusIcon, closeIcon, lockIcon } from '../icons.js';
 import { auth } from '../auth.js';
 import { groupChip, destroyGroupChip } from '../auth-ui.js';
-/** @param {string} text @returns {HTMLElement} */
 function span(text) { return elem('span', null, text); }
-/* ---- table editor ---- */
-/**
- * A table block. Cell values are inline HTML (rich text), not plain strings -
- * serialize.js converts each cell to Markdown via htmlToMd on save.
- * @typedef {Object} TableBlock
- * @property {'table'} type
- * @property {string[]} headers
- * @property {string[]} aligns
- * @property {string[][]} rows
- */
-/**
- * @param {TableBlock} b
- * @returns {HTMLElement}
- */
 export function tableEditor(b) {
     const box = elem('div', 'blk-tablebox');
     function draw() {
@@ -33,13 +18,10 @@ export function tableEditor(b) {
     }
     // Cells are rich text (contenteditable), so they hold inline Markdown - bold,
     // links, `code`, and images - not just plain strings. The stored cell value is
-    // inline HTML; serialize.js converts each cell via htmlToMd (GFM cells accept
+    // inline HTML; serialize.ts converts each cell via htmlToMd (GFM cells accept
     // inline markdown as long as it stays on one line and pipes are escaped).
     /**
-     * @param {string} value - inline HTML
-     * @param {(value: string) => void} onChange
-     * @param {boolean} isHeader
-     * @returns {HTMLElement}
+     * @param value inline HTML
      */
     function cell(value, onChange, isHeader) {
         return elem(isHeader ? 'th' : 'td', null, editable(value || '', 'tablecell', onChange, ''));
@@ -47,36 +29,6 @@ export function tableEditor(b) {
     draw();
     return box;
 }
-/* ---- requirement widget ---- */
-/**
- * One row of a requirement group: number + description (plain text) plus its
- * trace-to references (comma-joined ids, e.g. "sys_2, fn_3").
- * @typedef {Object} RequirementRow
- * @property {string} no
- * @property {string} description
- * @property {string} traceTo
- */
-/**
- * @typedef {Object} ReqBlock
- * @property {'requirement'} type
- * @property {string} group
- * @property {RequirementRow[]} rows
- */
-/**
- * A requirement (or in-progress row) offered by the Trace-To / Verifies
- * reference picker's autocomplete.
- * @typedef {Object} ReqRef
- * @property {string} id
- * @property {string} description
- * @property {string} [docId]
- * @property {string} [group]
- */
-/** Every requirement known right now (saved ones plus this doc's in-progress rows). @typedef {() => ReqRef[]} GetReqs */
-/**
- * @param {ReqBlock} b
- * @param {GetReqs} getReqs
- * @returns {HTMLElement}
- */
 export function requirementWidget(b, getReqs) {
     const groupInput = elem('input', { value: b.group || '', placeholder: 'e.g. sys', onInput: () => b.group = groupInput.value.trim() });
     const table = elem('div');
@@ -86,12 +38,6 @@ export function requirementWidget(b, getReqs) {
         append(table, elem('div', 'req-row req-head', span('No.'), span('Description'), span('Trace to'), span('')), b.rows.map((r, i) => elem('div', 'req-row', field(r.no, v => r.no = v, 'no'), field(r.description, v => r.description = v, 'wide'), traceToField(r, getReqs), smallBtn(closeIcon(), () => { b.rows.splice(i, 1); if (!b.rows.length)
             b.rows.push({ no: '1', description: '', traceTo: '' }); draw(); }))), elem('button', { class: 'blk-req-add', onClick: () => { b.rows.push({ no: String(b.rows.length + 1), description: '', traceTo: '' }); draw(); } }, plusIcon(), ' Requirement'));
     }
-    /**
-     * @param {string} value
-     * @param {(value: string) => void} onChange
-     * @param {string} cls
-     * @returns {HTMLInputElement}
-     */
     function field(value, onChange, cls) {
         const input = elem('input', { class: 'req-f req-f-' + cls, value: value || '', onInput: () => onChange(input.value) });
         return input;
@@ -99,32 +45,17 @@ export function requirementWidget(b, getReqs) {
     draw();
     return box;
 }
-/* ---- test-case widget: key + name + Verifies picker + action/expected steps ---- */
 /**
- * @typedef {Object} TestStep
- * @property {string} action - markdown source
- * @property {string} expected - markdown source
- */
-/**
- * @typedef {Object} TestCaseBlock
- * @property {'testcase'} type
- * @property {string} key
- * @property {string} name
- * @property {string[]} [verifies] - requirement/test ids this case verifies
- * @property {TestStep[]} steps
- */
-/**
- * @param {TestCaseBlock} b
- * @param {GetReqs} getReqs
- * @param {string} [comp] - component id, for the "id: T_{comp}_{key}" preview
- * @returns {HTMLElement}
+ * @param comp component id, for the "id: T_{comp}_{key}" preview
  */
 export function testCaseWidget(b, getReqs, comp) {
     const box = elem('div', 'blk-reqbox blk-tcbox');
     const preview = elem('div', 'blk-tc-preview');
     const table = elem('div');
     function updatePreview() { preview.textContent = 'id: T_' + (comp || '{component}') + '_' + (b.key || 'key'); }
-    /** @param {string} text @param {HTMLElement} node - the field the label wraps */
+    /**
+     * @param node the field the label wraps
+     */
     function labeled(text, node) { append(box, elem('label', 'blk-reqgroup', text + ' ', node)); }
     labeled('Test key', input(b.key, v => { b.key = v.trim(); updatePreview(); }, 'e.g. login-valid'));
     labeled('Name', input(b.name, v => b.name = v, 'e.g. Valid login'));
@@ -139,10 +70,6 @@ export function testCaseWidget(b, getReqs, comp) {
     }
     /**
      * A single-line text input bound to onChange.
-     * @param {string} value
-     * @param {(value: string) => void} onChange
-     * @param {string} [placeholder]
-     * @returns {HTMLInputElement}
      */
     function input(value, onChange, placeholder) {
         const node = elem('input', { value: value || '', placeholder: placeholder || '', onInput: () => onChange(node.value) });
@@ -150,10 +77,6 @@ export function testCaseWidget(b, getReqs, comp) {
     }
     /**
      * A multi-line markdown source field (auto-grows to fit its content).
-     * @param {string} value
-     * @param {(value: string) => void} onChange
-     * @param {string} [placeholder]
-     * @returns {HTMLTextAreaElement}
      */
     function mdField(value, onChange, placeholder) {
         const textarea = elem('textarea', { class: 'req-f req-f-md', value: value || '', rows: 1, placeholder: placeholder || '' });
@@ -171,24 +94,12 @@ export function testCaseWidget(b, getReqs, comp) {
 // One dropdown for the whole page (there is only ever one focused field), so it
 // is module state rather than per-field: acItems is the currently offered slice,
 // acActive the keyboard cursor into it (-1 = nothing highlighted).
-let acDrop = /** @type {HTMLElement|null} */ (null), acItems = /** @type {ReqRef[]} */ ([]), acActive = -1;
+let acDrop = null, acItems = [], acActive = -1;
 function closeAc() { if (acDrop)
     acDrop.hidden = true; acItems = []; acActive = -1; }
-/**
- * @param {RequirementRow} r
- * @param {GetReqs} getReqs
- * @returns {HTMLElement}
- */
 function traceToField(r, getReqs) {
     return refsField((r.traceTo || '').split(',').map(s => s.trim()).filter(Boolean), refs => { r.traceTo = refs.join(', '); }, getReqs, 'trace to…');
 }
-/**
- * @param {string[]} initial
- * @param {(refs: string[]) => void} onChange
- * @param {GetReqs} getReqs
- * @param {string} [placeholder]
- * @returns {HTMLElement}
- */
 function refsField(initial, onChange, getReqs, placeholder) {
     let refs = (initial || []).slice();
     const chips = elem('div', 'req-trace-chips');
@@ -208,7 +119,9 @@ function refsField(initial, onChange, getReqs, placeholder) {
             append(chips, elem('span', 'req-chip' + (known.has(ref) ? '' : ' req-chip-unknown'), ref, remove));
         });
     }
-    /** @param {string} v - a typed or picked reference id */
+    /**
+     * @param v a typed or picked reference id
+     */
     function addRef(v) {
         v = (v || '').trim().replace(/,+$/, '');
         if (v && !refs.includes(v)) {
@@ -234,7 +147,7 @@ function refsField(initial, onChange, getReqs, placeholder) {
         if (acActive >= acItems.length)
             acActive = acItems.length - 1;
         acDrop.textContent = '';
-        acItems.forEach((match, idx) => append(acDrop, elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (/** @type {MouseEvent} */ e) => { e.preventDefault(); addRef(match.id); closeAc(); } }, elem('span', 'ac-id', match.id), elem('span', 'ac-desc', match.description || ''))));
+        acItems.forEach((match, idx) => append(acDrop, elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e) => { e.preventDefault(); addRef(match.id); closeAc(); } }, elem('span', 'ac-id', match.id), elem('span', 'ac-desc', match.description || ''))));
         const rect = input.getBoundingClientRect();
         acDrop.style.left = (window.scrollX + rect.left) + 'px';
         acDrop.style.top = (window.scrollY + rect.bottom + 3) + 'px';
@@ -285,9 +198,7 @@ function refsField(initial, onChange, getReqs, placeholder) {
  * That is courtesy, not enforcement: the server compares the access rules in an
  * incoming save against the ones on disk and refuses the write either way.
  *
- * @param {{type: string, read?: string[], label?: string}} b
- * @param {string[]} [knownGroups] - groups declared in config.json, offered as checkboxes
- * @returns {HTMLElement}
+ * @param knownGroups groups declared in config.json, offered as checkboxes
  */
 export function accessMarker(b, knownGroups) {
     if (b.type === 'access-end') {
@@ -319,7 +230,7 @@ export function accessMarker(b, knownGroups) {
     }
     const label = elem('input', {
         class: 'blk-lang', placeholder: 'Section label (optional)', value: b.label || '', disabled: !editableAcl,
-        onInput: (/** @type {Event} */ e) => { b.label = /** @type {HTMLInputElement} */ (e.target).value; }
+        onInput: (e) => { b.label = e.target.value; }
     });
     drawChips();
     return elem('div', 'access-marker is-start' + (editableAcl ? '' : ' access-readonly'), elem('div', 'access-marker-head', lockIcon(), elem('span', 'access-marker-label', 'Restricted section - readable by'), chips), picker, label, !editableAcl && elem('p', 'access-note', 'You can edit the text inside this section, but only an account with access-management rights can change who may read it.'));

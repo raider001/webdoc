@@ -1,27 +1,15 @@
-// md/blockpost.js - the block-tree post-passes run after the line loop in
+// md/blockpost.ts - the block-tree post-passes run after the line loop in
 // ./blocks.js: (1) link-reference-definition collection - peel `[label]: url
 // "title"` definitions off the fronts of paragraphs and register them; and
 // (2) list-tightness detection - decide which lists render loose (blank line
 // inside) vs tight. Extracted from blocks.js. Uses the link scanners in ./scan.js.
 // ---------------------------------------------------------------------------
 import { scanDest, scanTitle, normLabel } from './scan.js';
-/** @typedef {import('./blocks.js').MdBlockNode} MdBlockNode */
-/**
- * One resolved link-reference-definition (`[label]: url "title"`), stored in
- * the refs map keyed by normalized label; looked up in md/inline.js when a
- * reference-style link/image `[text][label]` is closed.
- * @typedef {Object} RefDefinition
- * @property {string} url
- * @property {string|null} title
- */
 /**
  * Peel any leading link reference definitions off a paragraph, registering
  * them, and return whether inline content still remains (so the caller knows
  * if there is a heading/paragraph left to build). Used when a setext underline
  * arrives before the block post-pass has run.
- * @param {MdBlockNode} para
- * @param {Object<string, RefDefinition>} refs
- * @returns {boolean}
  */
 export function stripLeadingRefs(para, refs) {
     let text = para.lines.join('\n');
@@ -44,9 +32,6 @@ export function stripLeadingRefs(para, refs) {
 /**
  * Walk the block tree collecting link reference definitions from paragraphs
  * (same peeling logic as stripLeadingRefs, applied tree-wide after the line loop).
- * @param {MdBlockNode} block
- * @param {Object<string, RefDefinition>} refs
- * @returns {void}
  */
 export function collectRefs(block, refs) {
     for (const child of block.children) {
@@ -72,17 +57,6 @@ export function collectRefs(block, refs) {
         }
     }
 }
-/**
- * @typedef {Object} RefDefParse
- * @property {string} label - raw (unescaped) label text between the brackets
- * @property {string} url
- * @property {string|null} title
- * @property {string} rest - remaining source text after this definition (and its trailing newline)
- */
-/**
- * @param {string} text
- * @returns {RefDefParse|null}
- */
 function parseRefDef(text) {
     const m = /^ {0,3}\[/.exec(text);
     if (!m)
@@ -121,10 +95,11 @@ function parseRefDef(text) {
     const destRes = scanDest(text, i);
     if (!destRes)
         return null;
-    let url = destRes.dest;
+    const url = destRes.dest;
     i = destRes.pos;
     // optional title (may be on next line)
-    let save = i, sawSpace = false;
+    const save = i;
+    let sawSpace = false;
     while (i < text.length && (text[i] === ' ' || text[i] === '\t')) {
         i++;
         sawSpace = true;
@@ -167,8 +142,6 @@ function parseRefDef(text) {
 /**
  * A block "ends with a blank line" if it, or (for lists/items) the tail of its
  * last descendant, was marked by a blank line during parsing.
- * @param {MdBlockNode} block
- * @returns {boolean}
  */
 function tailIsBlank(block) {
     let b = block, guard = 0;
@@ -184,8 +157,6 @@ function tailIsBlank(block) {
 }
 /**
  * Walk the block tree, deciding which lists render tight vs loose.
- * @param {MdBlockNode} block
- * @returns {void}
  */
 export function detectTightness(block) {
     for (const child of block.children) {
