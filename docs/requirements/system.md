@@ -31,7 +31,7 @@ and inverse traceability see
 | 6 | WebDocs shall depend on no third-party code at run time on the server, and shall ship no third-party code to the browser beyond the compiled UI framework runtime. | |
 | 7 | WebDocs shall adapt its presentation to the reader's preferences. | |
 | 8 | WebDocs shall restrict who may read and modify each document. | |
-| 9 | WebDocs shall remain runnable from a clean clone with a Python 3 interpreter alone, its compiled browser bundle being committed to the repository. | |
+| 9 | WebDocs shall be distributed as a release archive that runs with a Python 3 interpreter alone, requiring no Node.js, no package installation and no network. | |
 | 10 | WebDocs shall carry third-party packages only as build-time development dependencies, with the package manifest's runtime dependencies object left empty. | |
 | 11 | WebDocs shall keep its server within the Python standard library and shall run with no Node.js installed. | |
 <!--meta end {"requirement-group":"sys"}-->

@@ -131,10 +131,13 @@ from-scratch code, with its types finally stated.
 
 That runtime is compiled in rather than fetched. `app/build/islands.js` — around
 142 kB raw, 40 kB gzipped, built from the components in `app/svelte/` — is
-**committed to the repository**, so a clean clone runs on a Python interpreter
-and nothing else: no Node.js, no `npm install`, no network. `npm run build` is a
-step for someone changing the UI, not for anyone authoring a document, reading
-one, or running the server. Both halves of that arrangement are held in place by
+**generated, not committed**, and so is `app/js/`. What ships instead is a
+release archive: CI builds on tag, proves the result serves with Node removed
+from `PATH`, and attaches a tarball that needs only a Python interpreter — no
+Node.js, no `npm install`, no network. Download it, unpack it, `python serve.py`.
+
+A `git clone` is the contributor's entry point rather than the user's, and it
+does need a build: `npm ci && npm run build` before the app will serve. Both halves of that arrangement are held in place by
 the test suite, which fails if the committed bundle drifts from its sources or if
 the package manifest's runtime `dependencies` object stops being empty; see
 [the system requirements](Docs/requirements/system) for the rows those tests
@@ -144,14 +147,13 @@ The same arrangement covers the rest of the browser code. The modules live in
 `src/js/` as TypeScript and are compiled into `app/js/` as JavaScript, which is
 what `app/index.html` actually loads — one source file becomes exactly one served
 module at the same path, with its import specifiers untouched, so the browser
-resolves the same module graph it always did. That output is committed too, for
-the same reason the bundle is.
+resolves the same module graph it always did.
 
-So there are two generated trees in the repository, and it is worth being blunt
-about what that costs: `app/js/` is no longer somewhere to edit. Changing browser
-behaviour means editing `src/js/` and running a build. Markdown, CSS and the
-server are unaffected — those are still edit-and-refresh, with no toolchain in
-sight.
+Neither generated tree is in version control, and it is worth being blunt about
+the consequence: a fresh clone will not serve until it has been built, and
+`app/js/` is not somewhere to edit. Changing browser behaviour means editing
+`src/js/` and rebuilding. Markdown, CSS and the server are unaffected — those are
+still edit-and-refresh, with no toolchain in sight.
 
 `serve.py` keeps the original rule outright: the Python standard library, with no
 package to install. Playwright, driven from Python, exists purely to run the

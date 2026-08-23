@@ -154,10 +154,12 @@ The one place the rule about third-party runtime code was relaxed on purpose.
 - The interactive chrome — the drawer, the header controls, the edit controls,
   the map mode selector, the coverage panels — moved from hand-wired DOM updates
   onto Svelte 5 components, mounted as islands into the same static shell.
-- The compiled bundle, `app/build/islands.js`, is **committed to the
-  repository**, so a clean clone still runs on `python serve.py` alone: no
-  Node.js, no `npm install`, no network. A test fails if that bundle ever drifts
-  from the sources it is built from.
+- The compiled output is **generated, not committed**. What ships instead is a
+  release archive built by CI on tag, which runs on `python serve.py` alone: no
+  Node.js, no `npm install`, no network. CI proves that by starting the packaged
+  tree with Node removed from `PATH` before the archive is ever published, and a
+  test asserts the build is reproducible, so the archive matches the commit it
+  claims to be.
 - Every npm package in the repository is build-time development tooling. The
   package manifest's runtime `dependencies` object is empty, and another test
   keeps it that way.

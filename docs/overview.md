@@ -19,9 +19,10 @@ of Markdown files, a tiny Python standard-library server, and a single-page
 browser application that does all of the real work. Point it at a directory of
 `.md` files and it becomes a navigable, cross-linked, traceable documentation
 site — nothing to install beyond a Python interpreter you almost certainly
-already have. The browser application is compiled, but its bundle is committed
-to the repository, so a clean clone needs no toolchain and no network: `python
-serve.py` and you are reading.
+already have. The browser application is compiled, but the release archive ships
+it already built, so it needs no toolchain and no network: unpack, `python
+serve.py`, and you are reading. Building it yourself is the contributor's path,
+not the reader's.
 
 This document set *is* WebDocs documenting itself. Everything you read here was
 authored as Markdown, discovered by the browser from the server's `/site.json`

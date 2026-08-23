@@ -35,6 +35,17 @@ per-section breakdown.
 ## Prerequisites
 
 * **Python 3.9+** on `PATH` (`python --version`).
+* **A built browser app.** The compiled output (`app/js/`, `app/build/`) is
+  generated and gitignored, so a fresh clone has none of it and every end-to-end
+  test would fail on the same `data-app-ready` timeout. Run this once:
+
+  ```powershell
+  npm ci
+  npm run build
+  ```
+
+  `conftest.py` checks for it and exits immediately with that instruction rather
+  than letting a hundred tests time out on one missing build.
 * Nothing else. `conftest.py` starts `serve.py` itself, on port 8017, with
   `tests/fixtures-config.json` — you do not need a server running in another
   terminal.

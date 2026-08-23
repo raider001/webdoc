@@ -9,6 +9,7 @@ SKIPS when Node is unavailable. That is deliberate, not a hedge: the whole point
 of committing the bundle is that a contributor - and the clone gate in CI - can
 run the suite with no Node installed. This test belongs to the networked CI job.
 """
+import hashlib
 import os
 import shutil
 import subprocess
@@ -33,7 +34,7 @@ def test_rebuild_reproduces_the_committed_bundle():
     before = open(os.path.join(ROOT, BUNDLE_REL), "rb").read()
 
     built = _run(shutil.which("npm"), "run", "build")
-    assert built.returncode == 0, f"npm run build failed:\n{built.stdout}\n{built.stderr}"
+    assert built.returncode == 0, "npm run build failed:" + built.stdout + built.stderr
 
     after = open(os.path.join(ROOT, BUNDLE_REL), "rb").read()
     if before != after:
@@ -46,52 +47,38 @@ def test_rebuild_reproduces_the_committed_bundle():
         )
 
 
-def test_the_bundle_is_actually_tracked_by_git():
-    """The freshness gate below is VACUOUS unless the bundle is tracked.
+def test_the_build_is_reproducible():
+    """Two builds of the same commit must produce identical bytes.
 
-    `git diff --exit-code -- <untracked path>` trivially returns 0, so if
-    app/build/ is untracked the freshness test passes no matter how stale the
-    artifact is. That is exactly the state this branch was in when the gate was
-    written, which made the gate look green while checking nothing.
-
-    Committing the bundle is the whole reason a Node-free clone works
-    (SVELTE_UPLIFT_PLAN.md, sys_9), so "not tracked yet" is a real, temporary
-    condition during the migration - but it must be LOUD rather than silent.
+    This replaced a git-freshness gate that became meaningless when the compiled
+    output stopped being committed - `git diff` cannot police a gitignored path.
+    Reproducibility is the property that actually matters now: a release tarball
+    is only trustworthy if the tree it contains is the tree the commit describes,
+    and CI rebuilds twice and compares for exactly this reason.
     """
-    if shutil.which("git") is None:
-        pytest.skip("git not available")
-    ls = _run(shutil.which("git"), "ls-files", "--error-unmatch", BUNDLE_REL)
-    assert ls.returncode == 0, (
-        f"{BUNDLE_REL} is NOT tracked by git, so the freshness gate below cannot "
-        f"do its job - `git diff` returns 0 for an untracked path regardless of "
-        f"content. Commit the bundle: it is what makes a clone without Node work."
-    )
-
-
-def test_git_reports_the_bundle_clean_after_a_rebuild():
-    """The freshness gate as CI runs it.
-
-    Also proves .gitattributes is doing its job: core.autocrlf is true on at
-    least one machine here, and without `-text eol=lf` on the bundle a
-    byte-identical rebuild would still show as modified.
-
-    Guarded on the bundle being tracked - see the test above for why an
-    unguarded version would be vacuous rather than merely wrong.
-    """
-    if shutil.which("git") is None:
-        pytest.skip("git not available")
-    if _run(shutil.which("git"), "ls-files", "--error-unmatch", BUNDLE_REL).returncode != 0:
-        pytest.skip("bundle not tracked yet; see test_the_bundle_is_actually_tracked_by_git")
+    first = _fingerprint()
     built = _run(shutil.which("npm"), "run", "build")
-    assert built.returncode == 0, built.stderr
-
-    diff = _run(shutil.which("git"), "diff", "--exit-code", "--", BUNDLE_REL)
-    assert diff.returncode == 0, (
-        "git reports app/build/islands.js as modified after a clean rebuild.\n"
-        "Either the bundle is stale and needs committing, or line-ending "
-        "normalisation is fighting the build - check .gitattributes.\n"
-        f"{diff.stdout}"
+    assert built.returncode == 0, "npm run build failed:\n" + built.stdout + built.stderr
+    assert _fingerprint() == first, (
+        "Rebuilding produced different output from the same sources. A release "
+        "artifact built from this commit would not be reproducible."
     )
+
+
+def _fingerprint():
+    """sha256 of every emitted file, keyed by path."""
+    out = {}
+    for base, _dirs, files in os.walk(os.path.join(ROOT, "app", "js")):
+        for name in sorted(files):
+            if not name.endswith(".js"):
+                continue
+            path = os.path.join(base, name)
+            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+            with open(path, "rb") as fh:
+                out[rel] = hashlib.sha256(fh.read()).hexdigest()
+    with open(os.path.join(ROOT, BUNDLE_REL), "rb") as fh:
+        out[BUNDLE_REL] = hashlib.sha256(fh.read()).hexdigest()
+    return out
 
 
 def test_runtime_dependencies_stay_empty():

@@ -1,0 +1,94 @@
+# Build a runnable tree and attach it to the GitHub release.
+#
+# This workflow is what keeps sys_9 true. The repository no longer carries any
+# compiled output, so a `git clone` alone does NOT run - the tarball produced
+# here is the artefact that needs only a Python interpreter, and it is the thing
+# the requirement now points at.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (for a manual re-run)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: npm ci
+      - run: npm run build
+
+      # Never ship an artefact that has not passed. A release is the one place
+      # where "the tests were green on main" is not good enough - this is the
+      # exact tree a user will unpack.
+      - name: Test the tree being released
+        run: |
+          python -m pip install -r tests/requirements-dev.txt
+          python -m playwright install --with-deps chromium
+          python -m pytest tests -q
+
+      - name: Assemble the runnable tree
+        run: bash scripts/make-release.sh dist/webdoc
+
+      # Prove the payload runs with no Node ANYWHERE, before it is published
+      # rather than after. The same check runs on every push (ci.yml), but a
+      # release is worth re-proving on the literal bytes being uploaded.
+      - name: Prove it runs on Python alone
+        run: |
+          cd dist/webdoc
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v -E 'node|npm' | paste -sd:)"
+          ! command -v node || { echo "::error::node is still on PATH"; exit 1; }
+          python3 serve.py --port 8123 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8123/api/index/status >/dev/null && break
+            sleep 0.5
+          done
+          for path in / /js/main.js /build/islands.js; do
+            code=$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:8123$path" || true)
+            [ "$code" = "200" ] || { echo "::error::$path returned $code"; exit 1; }
+          done
+
+      - name: Package
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          cd dist
+          tar -czf "webdoc-${TAG}.tar.gz" webdoc
+          zip -qr "webdoc-${TAG}.zip" webdoc
+          sha256sum "webdoc-${TAG}.tar.gz" "webdoc-${TAG}.zip" > "webdoc-${TAG}.sha256"
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/webdoc-*.tar.gz
+            dist/webdoc-*.zip
+            dist/webdoc-*.sha256
+          body: |
+            Download `webdoc-*.tar.gz`, unpack it, and run:
+
+                python serve.py
+
+            A Python 3 interpreter is all you need — no Node.js, no npm, no
+            network, no install step. The browser code in the archive is already
+            compiled.
+
+            To change the browser code you want the repository instead: the
+            TypeScript and Svelte sources live there, and `npm run build`
+            regenerates what this archive contains.
