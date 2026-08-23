@@ -1,0 +1,9 @@
+# The committed browser bundle. Machine-generated: never merge it textually,
+# always rebuild. A textual merge of minified output can silently produce a file
+# that parses but is wrong, so -merge forces the conflict to be loud - and the
+# correct resolution is ALWAYS "take either side, then npm run build".
+#
+# `-text eol=lf` is not decorative. core.autocrlf is true on at least one dev
+# machine here, and without pinning the bundle to LF a byte-identical rebuild
+# would look dirty and fail the freshness gate on line endings alone.
+app/build/islands.js  -diff -merge -text eol=lf linguist-generated=true

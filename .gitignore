@@ -1,10 +1,33 @@
 # Vendored third-party renderer libraries (bring-your-own).
-# These are NOT part of the zero-dependency core; each is fetched locally and
-# adapted by a facade in app/thirdpartyrenderer/. Keeping them out of the repo
-# preserves the "nothing but hand-written vanilla JS ships" guarantee for a
-# clean clone. To render diagrams locally, place the library here (e.g.
-# mermaid.min.js) and enable the plugin in config.json.
+# These are NOT part of the core; each is fetched locally and adapted by a facade
+# in app/thirdpartyrenderer/. To render diagrams locally, place the library here
+# (e.g. mermaid.min.js) and enable the plugin in config.json.
+#
+# This block used to claim excluding them preserved a "nothing but hand-written
+# vanilla JS ships" guarantee. That is no longer true: app/build/islands.js is a
+# COMMITTED, compiled bundle carrying the Svelte runtime. What excluding them
+# still preserves is that no third-party library is vendored into the repository
+# unreviewed - the compiled bundle is built from sources in app/svelte/ that are
+# committed and reviewable. See SVELTE_UPLIFT_PLAN.md.
 app/thirdpartyrenderer/*.min.js
 .webdoc-index/
 __pycache__/
 .claude/
+
+# Accounts: password hashes and group membership. Never commit this - the
+# default location for config.json's auth.usersFile.
+.webdoc-auth/
+
+# Node tooling. The SERVER stays Python-stdlib-only; these are build-time only.
+node_modules/
+*.tsbuildinfo
+
+# The e2e suite indexes its own fixture corpus; keep it out of the product index.
+.webdoc-index-test/
+
+# e2e server log written by tests/conftest.py
+tests/.serve-e2e.log
+
+# Vite build scratch. The BUILD OUTPUT (app/build/islands.js) is deliberately
+# COMMITTED - see .gitattributes and SVELTE_UPLIFT_PLAN.md.
+.vite/
