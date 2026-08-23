@@ -75,7 +75,7 @@ export function attachInlineToolbar(ed: HTMLElement) {
 function ensureBar() {
   if (sharedBar) return sharedBar;
   // Buttons preventDefault on mousedown so the field keeps its selection.
-  const button = (label: string, run: () => void, title: string) => elem('button', { title, onMousedown: (e: MouseEvent) => { e.preventDefault(); run(); } }, label);
+  const button = (label: string, run: () => void, title: string) => elem('button', { title, onMousedown: (e: Event) => { e.preventDefault(); run(); } }, label);
   sharedBar = elem('div', 'inline-bar',
     button('B', () => document.execCommand('bold'), 'Bold'),
     button('I', () => document.execCommand('italic'), 'Italic'),
@@ -226,7 +226,7 @@ function openImagePopover(o: ImagePopoverOptions) {
     popRow('Alt text', altInput),
     elem('div', 'link-pop-bar',
       elem('span', { style: 'flex:1' }),
-      elem('button', { type: 'button', onMousedown: (e: MouseEvent) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
+      elem('button', { type: 'button', onMousedown: (e: Event) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
       elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Insert')));
   document.body.appendChild(pop);
   linkPop = pop;
@@ -242,7 +242,7 @@ function openImagePopover(o: ImagePopoverOptions) {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   }));
-  const off = (e: MouseEvent) => { if (linkPop && !linkPop.contains(e.target as Node)) closeLinkPop(); };
+  const off = (e: Event) => { if (linkPop && !linkPop.contains(e.target as Node)) closeLinkPop(); };
   linkOff = off;   // closeLinkPop() unregisters it again through this same reference
   setTimeout(() => document.addEventListener('mousedown', off), 0);
   setTimeout(() => urlInput.focus(), 20);
@@ -271,7 +271,7 @@ function normalizeUrl(v: string): string {
 
 /* ---- link popover (Text + URL, Apply / Unlink / Cancel) - replaces window.prompt ---- */
 let linkPop: HTMLDivElement | null = null;
-let linkOff: ((e: MouseEvent) => void) | null = null;
+let linkOff: ((e: Event) => void) | null = null;
 /**
  * One internal-document suggestion in the URL autocomplete: the id is what gets
  * inserted as the link target, the title is what the dropdown shows.
@@ -310,7 +310,7 @@ function openLinkPopover(o: LinkPopoverOptions) {
     elem('div', 'link-pop-bar',
       removeBtn,
       elem('span', { style: 'flex:1' }),
-      elem('button', { type: 'button', onMousedown: (e: MouseEvent) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
+      elem('button', { type: 'button', onMousedown: (e: Event) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
       elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Apply')));
   document.body.appendChild(pop);
   linkPop = pop;
@@ -349,7 +349,7 @@ function openLinkPopover(o: LinkPopoverOptions) {
     const drop = acDrop;
     drop.textContent = '';
     acItems.forEach((d, idx) => append(drop,
-      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: MouseEvent) => { e.preventDefault(); pickDoc(d); } },
+      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: Event) => { e.preventDefault(); pickDoc(d); } },
         elem('span', 'ac-id', d.title || d.id),
         elem('span', 'ac-desc', d.id))));
     const rc = urlInput.getBoundingClientRect();
@@ -395,7 +395,7 @@ function openLinkPopover(o: LinkPopoverOptions) {
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   });
 
-  const off = function (e: MouseEvent) {
+  const off = function (e: Event) {
     const t = e.target as Element;
     if (linkPop && !linkPop.contains(t) && !(t.closest && t.closest('.link-ac'))) closeLinkPop();
   };

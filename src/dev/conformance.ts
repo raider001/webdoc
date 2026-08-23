@@ -6,6 +6,7 @@
 // blocked and the harness silently shows "Loading corpus..." for ever.
 // Still type="module": it imports the engine straight from /js/commonmark.js.
 
+import { errorMessage } from '/js/errors.js';
 import { renderMarkdown, INTERIM } from '/js/commonmark.js';
 
 /**
@@ -89,7 +90,7 @@ async function run() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     corpus = await res.json();
   } catch (e) {
-    $('status').textContent = 'Could not load /dev/corpus.json (' + e.message + '). Is serve.py running?';
+    $('status').textContent = 'Could not load /dev/corpus.json (' + errorMessage(e) + '). Is serve.py running?';
     $('summary').textContent = 'ERROR';
     $('summary').className = 'bad';
     return;
@@ -107,7 +108,7 @@ async function run() {
   for (const c of cases) {
     let actual;
     try { actual = renderMarkdown(c.markdown); }
-    catch (e) { actual = 'THREW: ' + e.message + '\n' + (e.stack || ''); }
+    catch (e) { actual = 'THREW: ' + errorMessage(e) + '\n' + (e instanceof Error && e.stack ? e.stack : ''); }
     // A corpus case without `html` asserts only that the parser does not throw;
     // there is nothing to compare, so it counts as a pass and moves on.
     if (typeof c.html !== 'string') { pass++; continue; }

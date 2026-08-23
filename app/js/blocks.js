@@ -118,7 +118,7 @@ export function renderBlocks(root, ctx = {}) {
             out = entry.render(source, Object.assign({ lang, host, pre, source }, ctx));
         }
         catch (e) {
-            renderFallback(host, lang, entry.label, source, e);
+            renderFallback(host, lang, entry.label, source, e instanceof Error ? e : undefined);
             return;
         }
         // Thenable is duck-typed rather than `instanceof Promise` so a renderer that

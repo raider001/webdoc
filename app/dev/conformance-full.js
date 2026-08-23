@@ -6,6 +6,7 @@
 // 'unsafe-inline') an inline module never executes, and tests/test_conformance.py
 // would wait for data-done on a page that had run nothing at all.
 // Still type="module": it imports the engine straight from /js/commonmark.js.
+import { errorMessage } from '/js/errors.js';
 import { renderMarkdown } from '/js/commonmark.js';
 /**
  * Resolve an element this harness's own page declares.
@@ -94,7 +95,7 @@ async function run() {
         spec = await res.json();
     }
     catch (e) {
-        return fail('Could not load /dev/commonmark-spec.json (' + e.message + '). ' +
+        return fail('Could not load /dev/commonmark-spec.json (' + errorMessage(e) + '). ' +
             'Is the static server running and was the spec fetched?');
     }
     const cases = spec.filter(c => c && typeof c.markdown === 'string' && typeof c.html === 'string');
@@ -117,7 +118,7 @@ async function run() {
             actual = renderMarkdown(c.markdown);
         }
         catch (e) {
-            actual = 'THREW: ' + (e && e.message) + '\n' + ((e && e.stack) || '');
+            actual = 'THREW: ' + errorMessage(e) + '\n' + (e instanceof Error && e.stack ? e.stack : '');
         }
         const expN = normalizeHtml(c.html);
         const actN = normalizeHtml(actual);

@@ -8,6 +8,7 @@
 // The server decides every question independently - this only decides what to
 // SHOW. Hiding the edit button is courtesy; refusing the PUT is the control.
 // ---------------------------------------------------------------------------
+import { errorMessage } from './errors.js';
 export const auth = {
     enabled: false,
     loaded: false,
@@ -88,7 +89,7 @@ async function postAuth(url, payload) {
         res = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
     }
     catch (e) {
-        return { ok: false, error: 'Could not reach the server. ' + (e.message || '') };
+        return { ok: false, error: 'Could not reach the server. ' + (errorMessage(e) || '') };
     }
     // Partial, not AuthReply: `ok` is what THIS function decides from the status
     // code, and the server never sends it.

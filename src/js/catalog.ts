@@ -4,6 +4,8 @@
 // browser still makes for itself - /site.json at boot, and one document's text
 // on demand (whose <!--meta--> header is split off client-side).
 
+import { errorMessage } from './errors.js';
+
 /**
  * One entry of site.json's `sources` array, describing a doc source folder;
  * different consumers read different subsets of its fields (component for
@@ -96,7 +98,7 @@ export function splitMeta(text: string): { meta: DocMeta, body: string, metaErro
   try {
     meta = JSON.parse(m[1].trim());
   } catch (e) {
-    metaError = String(e && e.message || e);
+    metaError = String(e && errorMessage(e) || e);
   }
   return { meta, body: text.slice(m[0].length), metaError };
 }

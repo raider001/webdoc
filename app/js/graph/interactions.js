@@ -31,7 +31,16 @@ export function wireInteractions(g) {
      * 'pointerdown' hands back a PointerEvent with .clientX, 'wheel' a WheelEvent
      * with .deltaY. Typing fn as (e: Event) made every one of those a silent any.
      */
-    function on(target, type, fn, opt) { target.addEventListener(type, fn, opt); listeners.push({ target: target, type: type, fn: fn, opt: opt }); }
+    function on(target, type, fn, opt) {
+        // Asserted once, at the boundary. The DOM guarantees a 'pointerdown'
+        // listener receives a PointerEvent, but addEventListener is typed with the
+        // base EventListener, and under strictFunctionTypes a narrower parameter is
+        // not assignable to a wider one. Every caller is type-checked against the
+        // real per-name event; only this one hand-off is unprovable.
+        const handler = fn;
+        target.addEventListener(type, handler, opt);
+        listeners.push({ target: target, type: type, fn: handler, opt: opt });
+    }
     const svgEl = g.svgEl; // the <canvas> (kept the name so the CSS/pan code is unchanged)
     let dragging = false, moved = false, sx = 0, sy = 0, sTx = 0, sTy = 0;
     // What the pointer went DOWN on, so pointerup can tell a click from a pan and

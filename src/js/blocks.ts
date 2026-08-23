@@ -150,7 +150,7 @@ export function renderBlocks(root: Element, ctx: Record<string, unknown> = {}): 
     try {
       out = entry.render(source, Object.assign({ lang, host, pre, source }, ctx));
     } catch (e) {
-      renderFallback(host, lang, entry.label, source, e);
+      renderFallback(host, lang, entry.label, source, e instanceof Error ? e : undefined);
       return;
     }
 

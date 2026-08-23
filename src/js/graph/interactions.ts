@@ -48,7 +48,16 @@ export function wireInteractions(g: GraphContext): void {
    * 'pointerdown' hands back a PointerEvent with .clientX, 'wheel' a WheelEvent
    * with .deltaY. Typing fn as (e: Event) made every one of those a silent any.
    */
-  function on<K extends keyof GlobalEventHandlersEventMap>(target: EventTarget, type: K, fn: (e: GlobalEventHandlersEventMap[K]) => void, opt?: boolean | AddEventListenerOptions): void { target.addEventListener(type, fn, opt); listeners.push({ target: target, type: type, fn: fn, opt: opt }); }
+  function on<K extends keyof GlobalEventHandlersEventMap>(target: EventTarget, type: K, fn: (e: GlobalEventHandlersEventMap[K]) => void, opt?: boolean | AddEventListenerOptions): void {
+    // Asserted once, at the boundary. The DOM guarantees a 'pointerdown'
+    // listener receives a PointerEvent, but addEventListener is typed with the
+    // base EventListener, and under strictFunctionTypes a narrower parameter is
+    // not assignable to a wider one. Every caller is type-checked against the
+    // real per-name event; only this one hand-off is unprovable.
+    const handler = fn as EventListener;
+    target.addEventListener(type, handler, opt);
+    listeners.push({ target: target, type: type, fn: handler, opt: opt });
+  }
 
   const svgEl = g.svgEl;   // the <canvas> (kept the name so the CSS/pan code is unchanged)
 

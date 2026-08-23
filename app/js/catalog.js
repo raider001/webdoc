@@ -3,6 +3,7 @@
 // by its /api/index/* endpoints. All that is left here is the two fetches the
 // browser still makes for itself - /site.json at boot, and one document's text
 // on demand (whose <!--meta--> header is split off client-side).
+import { errorMessage } from './errors.js';
 export async function loadSite() {
     const res = await fetch('/site.json', { cache: 'no-cache' });
     if (!res.ok)
@@ -24,7 +25,7 @@ export function splitMeta(text) {
         meta = JSON.parse(m[1].trim());
     }
     catch (e) {
-        metaError = String(e && e.message || e);
+        metaError = String(e && errorMessage(e) || e);
     }
     return { meta, body: text.slice(m[0].length), metaError };
 }

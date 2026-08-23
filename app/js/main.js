@@ -1,6 +1,7 @@
 // main.ts - application entry point. Wires the shell together:
 // theme, discovery, hash routing, the render pipeline, the drawer and search.
-import { loadSite, loadDoc } from './catalog.js';
+import { errorMessage } from './errors.js';
+import { loadSite, loadDoc, isRestrictedError } from './catalog.js';
 import { searchDocs } from './search.js';
 import { invalidateGraphModel } from './graph-model.js';
 import { ensureOverlayHosts, requestMapRebuild } from './overlays.js';
@@ -121,7 +122,7 @@ function lazyOverlayButton(btnId, load) {
         }
         catch (e) {
             ready = null; // a failed fetch can be retried by pressing again
-            return showError('Could not load that view: ' + e.message);
+            return showError('Could not load that view: ' + errorMessage(e));
         }
         await (first ? handle.open() : handle.toggle());
     });
@@ -243,9 +244,9 @@ async function route() {
         // A restricted page is not an error - it is a page with a different body.
         // loadDoc attaches the server's refusal so the reader is told which groups
         // would open it rather than being shown "could not load".
-        if (e && e.restricted)
+        if (isRestrictedError(e))
             return showRestricted(doc.id, e.detail || {});
-        showError('Could not load "' + id + '": ' + e.message);
+        showError('Could not load "' + id + '": ' + errorMessage(e));
     }
 }
 /**
@@ -523,7 +524,7 @@ async function boot() {
         state.site = await loadSite();
     }
     catch (e) {
-        return showError('Could not reach the server config. Is serve.py running? (' + e.message + ')');
+        return showError('Could not reach the server config. Is serve.py running? (' + errorMessage(e) + ')');
     }
     mustEl('brand').textContent = state.site.siteTitle || 'Documentation';
     // Accounts. loadAuth() is also what mints this browser's CSRF token, so it has
@@ -579,7 +580,7 @@ async function boot() {
 // Report the cause through both channels: showError() puts it on screen for a human,
 // #live puts it somewhere a test can read without a console listener.
 boot().catch(e => {
-    const why = (e && e.name && e.name !== 'Error' ? e.name + ': ' : '') + ((e && e.message) || String(e));
+    const why = (e && e.name && e.name !== 'Error' ? e.name + ': ' : '') + (errorMessage(e) || String(e));
     const msg = 'WebDocs failed to start. ' + why;
     console.error(msg, e);
     // showError() renders into #content - which may itself be the id that is missing,

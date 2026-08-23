@@ -11,6 +11,8 @@
 // behaves exactly as it did before this module existed.
 // ---------------------------------------------------------------------------
 
+import { errorMessage } from './errors.js';
+
 /**
  * Dynamically import each named renderer plugin from
  * ../thirdpartyrenderer/<name>.js, tolerating any that are missing or throw.
@@ -30,7 +32,7 @@ export async function loadPlugins(names: string[]): Promise<string[]> {
       loaded.push(name);
     } catch (e) {
       console.warn(`[plugins] renderer plugin "${name}" could not be loaded — skipping.`,
-                   (e && e.message) || e);
+                   errorMessage(e) || e);
     }
   }
   return loaded;

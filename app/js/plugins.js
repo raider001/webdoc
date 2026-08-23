@@ -10,6 +10,7 @@
 // stop the application from booting - a default install ships no plugins and
 // behaves exactly as it did before this module existed.
 // ---------------------------------------------------------------------------
+import { errorMessage } from './errors.js';
 /**
  * Dynamically import each named renderer plugin from
  * ../thirdpartyrenderer/<name>.js, tolerating any that are missing or throw.
@@ -31,7 +32,7 @@ export async function loadPlugins(names) {
             loaded.push(name);
         }
         catch (e) {
-            console.warn(`[plugins] renderer plugin "${name}" could not be loaded — skipping.`, (e && e.message) || e);
+            console.warn(`[plugins] renderer plugin "${name}" could not be loaded — skipping.`, errorMessage(e) || e);
         }
     }
     return loaded;

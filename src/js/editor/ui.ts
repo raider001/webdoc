@@ -9,14 +9,14 @@ import { auth } from '../auth.js';
  * @param icon an icons.js node, e.g. closeIcon() - nullable because every icon
  *   builder returns `firstElementChild`, and elem() skips an absent child
  */
-export function iconBtn(icon: Element | null, title: string, onClick: (e: MouseEvent) => void): HTMLElement {
+export function iconBtn(icon: Element | null, title: string, onClick: (e: Event) => void): HTMLElement {
   return elem('button', { class: 'blk-ico', title, onClick }, icon);
 }
 /**
  * @param content text, an icons.js node, or a mix - a ChildSlot, i.e. exactly
  *   what the elem() call below forwards it into
  */
-export function smallBtn(content: ChildSlot, onClick: (e: MouseEvent) => void): HTMLElement {
+export function smallBtn(content: ChildSlot, onClick: (e: Event) => void): HTMLElement {
   return elem('button', { class: 'blk-small', onClick }, content);
 }
 export function labelEl(text: string): HTMLElement {

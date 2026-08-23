@@ -237,7 +237,7 @@ function refsField(initial: string[], onChange: (refs: string[]) => void, getReq
     if (acActive >= acItems.length) acActive = acItems.length - 1;
     drop.textContent = '';
     acItems.forEach((match, idx) => append(drop,
-      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: MouseEvent) => { e.preventDefault(); addRef(match.id); closeAc(); } },
+      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: Event) => { e.preventDefault(); addRef(match.id); closeAc(); } },
         elem('span', 'ac-id', match.id),
         elem('span', 'ac-desc', match.description || ''))));
     const rect = input.getBoundingClientRect();

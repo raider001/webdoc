@@ -9,6 +9,8 @@
 // SHOW. Hiding the edit button is courtesy; refusing the PUT is the control.
 // ---------------------------------------------------------------------------
 
+import { errorMessage } from './errors.js';
+
 /**
  * The site's account policy, as published unauthenticated by /site.json and
  * /api/auth/me. Enough to render a sign-in screen and a group legend; never
@@ -230,7 +232,7 @@ async function postAuth(url: string, payload: Record<string, unknown>): Promise<
   try {
     res = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
   } catch (e) {
-    return { ok: false, error: 'Could not reach the server. ' + (e.message || '') };
+    return { ok: false, error: 'Could not reach the server. ' + (errorMessage(e) || '') };
   }
   // Partial, not AuthReply: `ok` is what THIS function decides from the status
   // code, and the server never sends it.

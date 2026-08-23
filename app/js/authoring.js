@@ -5,6 +5,7 @@
 // reaches the shell through the `app` registry (app.navigate / app.showError /
 // app.closeDrawer, wired by main at boot); it registers its own map- and coverage-
 // facing handles (editDocRelation, deleteDocFlow, link/unlinkTestToRequirement).
+import { errorMessage } from './errors.js';
 import { state, mustEl, app, titleFromId, defaultId, getDoc } from './app-shell.js';
 // editor.js is NOT imported statically. It is the largest module graph in the app
 // (editor.js plus editor/{serialize,richtext,widgets,panels,ui}.js, ~1,800 lines),
@@ -125,7 +126,7 @@ async function createDocInPlace(id) {
         res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'), { method: 'PUT', body: md });
     }
     catch (e) {
-        announce('Create failed: ' + e.message);
+        announce('Create failed: ' + errorMessage(e));
         return;
     }
     if (!res.ok) {
@@ -241,7 +242,7 @@ async function saveDoc(id, md, wasNew, status) {
         res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'), { method: 'PUT', body: md });
     }
     catch (e) {
-        status.textContent = 'Save failed: ' + e.message;
+        status.textContent = 'Save failed: ' + errorMessage(e);
         return;
     }
     if (!res.ok) {
@@ -298,7 +299,7 @@ async function deleteDocRequest(id) {
         return { ok: false, error: await describeFailure(res) };
     }
     catch (e) {
-        return { ok: false, error: e.message };
+        return { ok: false, error: errorMessage(e) };
     }
 }
 /**

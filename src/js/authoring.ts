@@ -5,6 +5,7 @@
 // reaches the shell through the `app` registry (app.navigate / app.showError /
 // app.closeDrawer, wired by main at boot); it registers its own map- and coverage-
 // facing handles (editDocRelation, deleteDocFlow, link/unlinkTestToRequirement).
+import { errorMessage } from './errors.js';
 import { state, mustEl, app, titleFromId, defaultId, getDoc } from './app-shell.js';
 // editor.js is NOT imported statically. It is the largest module graph in the app
 // (editor.js plus editor/{serialize,richtext,widgets,panels,ui}.js, ~1,800 lines),
@@ -146,7 +147,7 @@ async function createDocInPlace(id: string) {
   try {
     res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
       { method: 'PUT', body: md });
-  } catch (e) { announce('Create failed: ' + e.message); return; }
+  } catch (e) { announce('Create failed: ' + errorMessage(e)); return; }
   if (!res.ok) { announce('Create failed: ' + await describeFailure(res)); return; }
   await refreshCatalog();                    // server re-indexed on PUT; invalidate the client graph model
   await rerenderTree();                      // new file -> tree changed
@@ -253,7 +254,7 @@ async function saveDoc(id: string, md: string, wasNew: boolean, status: HTMLElem
   try {
     res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
       { method: 'PUT', body: md });
-  } catch (e) { status.textContent = 'Save failed: ' + e.message; return; }
+  } catch (e) { status.textContent = 'Save failed: ' + errorMessage(e); return; }
   if (!res.ok) { status.textContent = 'Save failed: ' + await describeFailure(res); return; }
   status.textContent = 'Saved.';
   const cached = state.byId.get(id); if (cached) cached._loaded = false;   // force a fresh reload of the new body
@@ -296,14 +297,14 @@ async function deleteDocRequest(id: string): Promise<{ ok: boolean, error?: stri
     const res = await apiFetch(url, { method: 'DELETE' });
     if (res.ok) return { ok: true };
     return { ok: false, error: await describeFailure(res) };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) { return { ok: false, error: errorMessage(e) }; }
 }
 
 /**
  * Confirm, delete, refresh the catalog, then move off the deleted document.
  * `rebuildMap` re-renders an open map so the deleted node disappears in place.
  */
-async function deleteDocFlow(id: string, opts: { rebuildMap: boolean }): Promise<void> {
+async function deleteDocFlow(id: string, opts?: { rebuildMap?: boolean }): Promise<void> {
   if (!id) return;
   const doc = getDoc(id);
   const title = (doc && doc.title) || titleFromId(id);

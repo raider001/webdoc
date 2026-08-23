@@ -1,3 +1,4 @@
+"use strict";
 // theme-boot.js - resolve the colour theme before the harness's first paint.
 // ---------------------------------------------------------------------------
 // The same code app/index.html runs in its own inline boot script (outdented,
