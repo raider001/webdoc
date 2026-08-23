@@ -183,9 +183,17 @@ export function parseInlines(src: string, refs: Record<string, RefDefinition>): 
       // line break: 2+ spaces before -> hard break
       const j = pieces.length - 1;
       const prev = pieces[j];
-      if (prev && prev.kind === 'text' && /  $/.test(prev.text)) { prev.text = prev.text.replace(/ +$/, ''); pieces.push({ kind: 'hardbreak' }); }
-      else if (prev && prev.kind === 'text' && /\\$/.test(prev.text)) { prev.text = prev.text.slice(0, -1); pieces.push({ kind: 'hardbreak' }); }
-      else { if (prev && prev.kind === 'text') prev.text = prev.text.replace(/ +$/, ''); pieces.push({ kind: 'softbreak' }); }
+      // All three arms asked the same two questions of the same piece. Asked
+      // once, the literal lands in `t`, and that is also what lets the checker
+      // see it is there: `text` is optional on InlinePiece because the same
+      // interface describes raw HTML and breaks too, but every push with kind
+      // 'text' sets it.
+      if (prev && prev.kind === 'text') {
+        const t = prev.text || '';
+        if (/  $/.test(t)) { prev.text = t.replace(/ +$/, ''); pieces.push({ kind: 'hardbreak' }); }
+        else if (/\\$/.test(t)) { prev.text = t.slice(0, -1); pieces.push({ kind: 'hardbreak' }); }
+        else { prev.text = t.replace(/ +$/, ''); pieces.push({ kind: 'softbreak' }); }
+      } else pieces.push({ kind: 'softbreak' });
       i++;
       // skip leading spaces of next line
       while (i < n && (s[i] === ' ' || s[i] === '\t')) i++;
@@ -301,24 +309,35 @@ function resolveEmphasis(pieces: InlinePiece[], delims: number[], _bottom: numbe
     const closer = pieces[cIdx];
     if (!closer || !closer.delim || closer.used || !closer.canClose || closer.numDelims === 0) { closerPos++; continue; }
     const ch = closer.delim;
+    // numDelims / origLen / text are written together with `delim` at the one
+    // site that pushes a run (parseInlines' '*' / '_' / '~' branch), so a piece
+    // that got past the guard above carries all four. They are optional on
+    // InlinePiece only because the same interface also describes plain text,
+    // brackets and raw HTML, and reading them into locals states that once
+    // rather than at each of the eight uses below. The reads also have to
+    // happen BEFORE the counts are decremented, which is exactly the order the
+    // original arithmetic already depended on.
+    const closerN = closer.numDelims ?? 0, closerLen = closer.origLen ?? 0;
     let found = false, openerPos = -1;
     for (let k = closerPos - 1; k >= 0; k--) {
       const oIdx = stack[k];
       const opener = pieces[oIdx];
       if (!opener || !opener.delim || opener.used || opener.delim !== ch || !opener.canOpen || opener.numDelims === 0) continue;
-      const triadBlocked = (closer.canOpen || opener.canClose) && (closer.origLen % 3 !== 0) && ((opener.origLen + closer.origLen) % 3 === 0);
+      const triadBlocked = (closer.canOpen || opener.canClose) && (closerLen % 3 !== 0) && (((opener.origLen ?? 0) + closerLen) % 3 === 0);
       if (!triadBlocked) { found = true; openerPos = k; break; }
     }
     if (!found) { closerPos++; continue; }
     const opener = pieces[stack[openerPos]];
+    const openerN = opener.numDelims ?? 0;
     if (ch === '~') {
-      if (closer.numDelims < 2 || opener.numDelims < 2) { closerPos++; continue; }
+      if (closerN < 2 || openerN < 2) { closerPos++; continue; }
     }
-    const use = ch === '~' ? 2 : (closer.numDelims >= 2 && opener.numDelims >= 2 ? 2 : 1);
+    const use = ch === '~' ? 2 : (closerN >= 2 && openerN >= 2 ? 2 : 1);
     const tag = ch === '~' ? 'del' : (use === 2 ? 'strong' : 'em');
-    opener.text = opener.text.slice(0, opener.text.length - use);
-    closer.text = closer.text.slice(0, closer.text.length - use);
-    opener.numDelims -= use; closer.numDelims -= use;
+    const openerText = opener.text ?? '', closerText = closer.text ?? '';
+    opener.text = openerText.slice(0, openerText.length - use);
+    closer.text = closerText.slice(0, closerText.length - use);
+    opener.numDelims = openerN - use; closer.numDelims = closerN - use;
     // wrap pieces between opener and closer
     const oIdx = stack[openerPos], cIdx2 = cIdx;
     // Simplest: record wrap boundaries via side arrays
@@ -368,7 +387,10 @@ function handleCloseBracket(s: string, i: number, pieces: InlinePiece[], delims:
   if (opener.inactive) { opener.used = true; pieces.push({ kind: 'text', text: ']' }); return i + 1; }
   const isImage = opener.bracket === '![';
   let j = i + 1;
-  let dest: string | null = null, title: string | null = null, matched = false;
+  // `dest` starts as '' rather than null: every branch that sets `matched` sets
+  // it too, and it is read only once `matched` is true. `title` stays nullable
+  // because null is what "no title attribute" means where it is used below.
+  let dest = '', title: string | null = null, matched = false;
 
   if (s[j] === '(') {
     let k = j + 1;
@@ -386,7 +408,9 @@ function handleCloseBracket(s: string, i: number, pieces: InlinePiece[], delims:
     // reference link: [label][ref], [label][], [label]. The label used for
     // lookup is the RAW bracket source (backslash escapes preserved, not the
     // escape-processed inline text) so labels match the same way definitions do.
-    const rawLabel = s.slice(opener.srcPos + (isImage ? 2 : 1), i);
+    // srcPos is recorded when a bracket opener is pushed, alongside the
+    // `bracket` field the search at the top of this function matched on.
+    const rawLabel = s.slice((opener.srcPos ?? 0) + (isImage ? 2 : 1), i);
     let refLabel: string | null = null, endPos = i + 1;
     if (s[i + 1] === '[') {
       const lr = scanBracketLabel(s, i + 1);
@@ -415,7 +439,7 @@ function handleCloseBracket(s: string, i: number, pieces: InlinePiece[], delims:
   const titleAttr = title !== null ? ' title="' + esc(decodeInlineText(title)) + '"' : '';
   if (isImage) {
     const alt = piecesPlainText(pieces, openerPieceIdx + 1);
-    opener.wrapOpen = null;
+    opener.wrapOpen = undefined;   // cleared; serialize() only tests it for truthiness
     // collapse the range into a single image raw piece
     const rawImg = '<img src="' + esc(url) + '" alt="' + esc(alt) + '"' + titleAttr + ' />';
     collapseRange(pieces, openerPieceIdx, rawImg);
@@ -459,8 +483,11 @@ function piecesPlainText(pieces: InlinePiece[], from: number): string {
     if (p.kind === 'text') t += p.text;
     else if (p.kind === 'raw') {
       // A nested image contributes its alt text to the outer alt string; other
-      // tags contribute only their text content.
-      t += p.html.replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/g, '$1').replace(/<[^>]*>/g, '');
+      // tags contribute only their text content. `html` is set wherever a 'raw'
+      // piece is pushed - it is optional on InlinePiece because a 'text' piece
+      // carries `text` in its place.
+      const html = p.html || '';
+      t += html.replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/g, '$1').replace(/<[^>]*>/g, '');
     }
   }
   return t;

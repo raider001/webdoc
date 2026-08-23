@@ -99,7 +99,9 @@ export function attachView(g: GraphContext): void {
     let starts: string | null = null, includes: string | null = null;
     for (const id of g.sortedIds) {
       const meta = g.model.nodes.get(id);
-      const title = (meta.title || '').toLowerCase();
+      // A sorted id with no model entry would only be a bug upstream, but the id
+      // is still matchable on its own - so miss the title, not the whole search.
+      const title = ((meta && meta.title) || '').toLowerCase();
       const lid = id.toLowerCase();
       if (title === q || lid === q) { g.focus(id); return id; }
       if (starts === null && (title.indexOf(q) === 0 || lid.indexOf(q) === 0)) starts = id;
@@ -122,7 +124,11 @@ export function attachView(g: GraphContext): void {
       const dpr = window.devicePixelRatio || 1;
       const cache = g.miniCache || (g.miniCache = document.createElement('canvas'));
       cache.width = Math.round(MINI_W * dpr); cache.height = Math.round(MINI_H * dpr);
-      const cx = cache.getContext('2d'); cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // No 2D context (headless, or the browser's per-page context budget spent)
+      // means no minimap this time round - decorative, so nothing else changes.
+      const cx = cache.getContext('2d');
+      if (!cx) return;
+      cx.setTransform(dpr, 0, 0, dpr, 0, 0);
       cx.clearRect(0, 0, MINI_W, MINI_H);
       const muted = (g.colors && g.colors.muted) || '#888';
       const accent = (g.colors && g.colors.accent) || '#2563eb';
@@ -143,7 +149,11 @@ export function attachView(g: GraphContext): void {
     try {
       const dpr = window.devicePixelRatio || 1;
       if (g.miniCanvas.width !== Math.round(MINI_W * dpr)) { g.miniCanvas.width = Math.round(MINI_W * dpr); g.miniCanvas.height = Math.round(MINI_H * dpr); }
-      const ctx = g.miniCtx; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // g.miniCtx is null when the minimap canvas refused a 2D context; the cache
+      // above would be equally undrawable, so there is nothing to update.
+      const ctx = g.miniCtx;
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, MINI_W, MINI_H);
       ctx.drawImage(g.miniCache, 0, 0, MINI_W, MINI_H);
       const rect = g.svgEl.getBoundingClientRect();

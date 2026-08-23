@@ -5,7 +5,7 @@
 // shell (routing, test-run) calls renderDoc / setupDocSearch, nothing here reaches
 // back into the map or authoring areas.
 import { elem } from './dom.js';
-import { state, el, app } from './app-shell.js';
+import { state, el, mustEl, app } from './app-shell.js';
 import { renderMarkdown } from './commonmark.js';
 import { sanitizeToFragment } from './sanitize.js';
 import { numberHeadings } from './numbering.js';
@@ -73,7 +73,7 @@ function setDocChrome(doc, toc) {
  * calls on every document navigation.
  */
 export function renderDoc(doc) {
-    const content = el('content');
+    const content = mustEl('content');
     // Tear down anything mounted INSIDE the previous article before the DOM it
     // lives in is destroyed. `content.textContent = ''` detaches nodes; it does
     // not stop a component's effects, which would go on running against detached
@@ -99,7 +99,7 @@ export function renderDoc(doc) {
     // component renders. The mutation stays vanilla because it edits document
     // CONTENT; only its return value crosses into the store.
     const toc = numberHeadings(article);
-    const tocList = el('tocList');
+    const tocList = mustEl('tocList');
     setDocChrome(doc, toc);
     // Build THIS document's requirement/test blocks from its (loaded) body - enriched
     // with the server-resolved trace-from / verified-by - then replace the placeholders.
@@ -127,9 +127,9 @@ export function renderDoc(doc) {
     // driven by setDocChrome() above; what is left here is the parts no component
     // owns - the document title, and the two footer containers' hidden flags
     // (they are the components' MOUNT TARGETS, so a component cannot set them).
-    document.title = doc.title + ' — ' + (state.site.siteTitle || 'Documentation');
-    el('footPrev').hidden = !(doc.assumes && doc.assumes.length);
-    el('footNext').hidden = !(doc.next && doc.next.length);
+    document.title = doc.title + ' — ' + ((state.site && state.site.siteTitle) || 'Documentation');
+    mustEl('footPrev').hidden = !(doc.assumes && doc.assumes.length);
+    mustEl('footNext').hidden = !(doc.next && doc.next.length);
     // "On this page" is meaningless for a document with no headings.
     const tocPane = el('toc');
     if (tocPane)
@@ -245,7 +245,7 @@ async function resolveLinks(article, baseId) {
             a.setAttribute('href', '#/' + id);
             if (frag)
                 a.addEventListener('click', () => setTimeout(() => {
-                    const t = el('content').querySelector('#' + cssEsc(decodeURIComponent(frag)));
+                    const t = mustEl('content').querySelector('#' + cssEsc(decodeURIComponent(frag)));
                     if (t)
                         t.scrollIntoView({ block: 'start' });
                 }, 140));
@@ -268,7 +268,10 @@ function resolveImages(article, baseId) {
     article.querySelectorAll('img[src]').forEach(img => {
         if (img.closest('.wd-mounted'))
             return; // Svelte's DOM; see resolveLinks
-        const url = resolveResourceUrl(baseId, img.getAttribute('src'));
+        const src = img.getAttribute('src');
+        if (!src)
+            return; // the img[src] selector above is what guarantees this
+        const url = resolveResourceUrl(baseId, src);
         if (url)
             img.setAttribute('src', url);
     });
@@ -281,8 +284,13 @@ function setupScrollSpy(article, tocList) {
         spyObserver.disconnect();
     const links = new Map();
     const tocLinks = tocList.querySelectorAll('a[data-target]');
-    tocLinks.forEach(a => links.set(a.dataset.target, a));
-    spyObserver = new IntersectionObserver(entries => {
+    // The `a[data-target]` selector is what guarantees the dataset entry is there.
+    tocLinks.forEach(a => { const target = a.dataset.target; if (target !== undefined)
+        links.set(target, a); });
+    // Held in a const as well as the module-level handle: the observe() loop below
+    // runs inside a callback, where the compiler can no longer see that the
+    // module-level `spyObserver` is the one just assigned.
+    const observer = new IntersectionObserver(entries => {
         for (const e of entries) {
             if (e.isIntersecting) {
                 tocList.querySelectorAll('a.active').forEach(a => a.classList.remove('active'));
@@ -291,8 +299,9 @@ function setupScrollSpy(article, tocList) {
                     a.classList.add('active');
             }
         }
-    }, { root: el('content'), rootMargin: '-8% 0px -80% 0px', threshold: 0 });
-    article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => spyObserver.observe(h));
+    }, { root: mustEl('content'), rootMargin: '-8% 0px -80% 0px', threshold: 0 });
+    spyObserver = observer;
+    article.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => observer.observe(h));
 }
 // ---- In-document search (highlight + jump) --------------------------------
 /**
@@ -301,9 +310,9 @@ function setupScrollSpy(article, tocList) {
  * rendered article and smooth-scroll to the first one.
  */
 export function setupDocSearch() {
-    const input = el('docSearch');
+    const input = mustEl('docSearch');
     input.addEventListener('input', () => {
-        const article = el('content').querySelector('.doc');
+        const article = mustEl('content').querySelector('.doc');
         if (!article)
             return;
         clearHighlights(article);
@@ -347,14 +356,18 @@ function highlight(root, q) {
     });
     const targets = [];
     let node;
-    // SHOW_TEXT means every node the walker hands back is a Text node.
+    // SHOW_TEXT means every node the walker hands back is a Text node, and a Text
+    // node's nodeValue is always a string - the fallback is only for the compiler.
     while ((node = walker.nextNode()))
-        if (node.nodeValue.toLowerCase().includes(needle))
+        if ((node.nodeValue || '').toLowerCase().includes(needle))
             targets.push(node);
     let firstMark = null;
     for (const text of targets) {
         const frag = document.createDocumentFragment();
-        let s = text.nodeValue, lower = s.toLowerCase(), i = 0, idx;
+        // Non-null in practice: `targets` only holds Text nodes whose nodeValue just
+        // matched the needle in the walk above.
+        const s = text.nodeValue || '';
+        let lower = s.toLowerCase(), i = 0, idx;
         while ((idx = lower.indexOf(needle, i)) !== -1) {
             if (idx > i)
                 frag.appendChild(document.createTextNode(s.slice(i, idx)));

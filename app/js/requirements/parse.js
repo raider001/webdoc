@@ -177,7 +177,9 @@ function extractReqGroup(meta, table, doc, component) {
             continue;
         const id = ((component && group) ? 'R_' + component + '_' + group + '_' + no : 'R_?_' + no).toUpperCase();
         const rec = {
-            id: id, docId: doc.id, component: component, group: group, no: no,
+            // `group` is empty when the meta header was absent or unnamed - `error`
+            // above already records that; the record's own field stays a string.
+            id: id, docId: doc.id, component: component, group: group || '', no: no,
             description: pick(row, ['description', 'desc']),
             traceTo: splitRefs(pick(row, ['trace-to', 'traceto', 'trace'])),
             traceFrom: [], verifiedBy: [] // verifiedBy is CALCULATED from tests' `verifies`
@@ -202,11 +204,14 @@ function extractTestCase(meta, table, doc, component) {
     // Steps are structured data in the meta header (a custom block, NOT a markdown
     // table), so each action / expected can hold arbitrary markdown - pipes,
     // backslashes, multiple lines. Older docs kept them in a table; still read those.
+    // Read once so the array arm can be narrowed, exactly as `verifies` is below:
+    // testing `meta && meta.steps` proves nothing about a property re-read after.
+    const authoredSteps = meta && meta.steps;
     let steps = [];
-    if (Array.isArray(meta && meta.steps)) {
+    if (Array.isArray(authoredSteps)) {
         // Straight out of the meta JSON, so a step is whatever the author wrote -
         // hence AuthoredStep's all-optional fields and the alias hunt below.
-        steps = meta.steps.map(s => ({
+        steps = authoredSteps.map(s => ({
             action: (s && s.action) || '',
             expected: (s && (s.expected || s['expected-response'] || s.response)) || ''
         })).filter(s => s.action || s.expected);

@@ -13,7 +13,13 @@ import { groupChip, destroyGroupChip } from '../auth-ui.js';
  *   switched off, in which case no access field is drawn
  */
 export function metadataPanel(meta, allDocs, selfId, access) {
-    return elem('aside', 'editor-meta', elem('h2', 'editor-meta-h', 'Document metadata'), labeledInput('Title', meta.title || '', v => meta.title = v), labeledTextarea('Description', meta.description || '', v => meta.description = v), docPicker('Assumed knowledge', meta.assumes, allDocs, selfId), docPicker('Recommended next', meta.next, allDocs, selfId), auth.enabled ? accessField(meta, access) : null);
+    // docPicker edits its list IN PLACE, so it has to be handed a real array to
+    // write into; a header that omits assumes/next gets an empty one here. That
+    // adds nothing to what gets saved - serializeDoc already writes `[]` for a
+    // missing list.
+    meta.assumes = meta.assumes || [];
+    meta.next = meta.next || [];
+    return elem('aside', 'editor-meta', elem('h2', 'editor-meta-h', 'Document metadata'), labeledInput('Title', meta.title || '', v => meta.title = v), labeledTextarea('Description', meta.description || '', v => meta.description = v), docPicker('Assumed knowledge', meta.assumes, allDocs, selfId), docPicker('Recommended next', meta.next, allDocs, selfId), auth.enabled ? accessField(meta, access || null) : null);
 }
 /**
  * The document-level access rule, edited as a set of group checkboxes.
@@ -97,7 +103,7 @@ function accessField(meta, access) {
         redraw();
     });
     redraw();
-    return elem('div', 'meta-field access-panel' + (mayEdit ? '' : ' access-readonly'), elem('label', null, 'Who can read this'), chips, picker, elem('label', 'access-pick', hidden, 'Hide completely (not shown on the map or in search)'), note, !mayEdit && known.length ? elem('p', 'auth-muted', 'Only an account with access-management rights can change this.') : null);
+    return elem('div', 'meta-field access-panel' + (mayEdit ? '' : ' access-readonly'), elem('label', undefined, 'Who can read this'), chips, picker, elem('label', 'access-pick', hidden, 'Hide completely (not shown on the map or in search)'), note, !mayEdit && known.length ? elem('p', 'auth-muted', 'Only an account with access-management rights can change this.') : null);
 }
 /**
  * A field that edits a list of document ids as removable chips, with a
@@ -127,7 +133,7 @@ function docPicker(label, arr, allDocs, selfId) {
         });
     }
     redraw();
-    return elem('div', 'meta-field', elem('label', null, label), chips, select);
+    return elem('div', 'meta-field', elem('label', undefined, label), chips, select);
 }
 /* ---- new-document modal ---- */
 export function openNewDocModal(opts) {
@@ -137,7 +143,7 @@ export function openNewDocModal(opts) {
     const pathInput = elem('input', { placeholder: 'guides/setup/installation' });
     const preview = elem('div', 'modal-preview');
     const error = elem('div', 'modal-err');
-    const modal = elem('div', 'modal', elem('h2', null, 'New document'), elem('div', 'modal-field', labelEl('Component / source'), sourceSelect), elem('div', 'modal-field', labelEl('Path (folders you choose)'), pathInput), preview, error, elem('div', 'modal-bar', elem('button', { class: 'btn', onClick: close }, 'Cancel'), elem('button', { class: 'btn btn-primary', onClick: submit }, 'Create')));
+    const modal = elem('div', 'modal', elem('h2', undefined, 'New document'), elem('div', 'modal-field', labelEl('Component / source'), sourceSelect), elem('div', 'modal-field', labelEl('Path (folders you choose)'), pathInput), preview, error, elem('div', 'modal-bar', elem('button', { class: 'btn', onClick: close }, 'Cancel'), elem('button', { class: 'btn btn-primary', onClick: submit }, 'Create')));
     const scrim = elem('div', 'modal-scrim', modal);
     /**
      * The composed id: <source>/<path>, with any leading/trailing slashes and
@@ -217,7 +223,7 @@ export function confirmDialog(opts) {
         const cancel = alertOnly ? null
             : elem('button', { class: 'btn', onClick: () => finish(false) }, opts.cancelLabel || 'Cancel');
         const ok = elem('button', { class: 'btn ' + (opts.danger ? 'btn-danger' : 'btn-primary'), onClick: () => finish(true) }, opts.confirmLabel || 'OK');
-        const modal = elem('div', 'modal modal-confirm', elem('h2', null, opts.title || 'Are you sure?'), opts.message && elem('p', 'modal-msg', opts.message), elem('div', 'modal-bar', cancel, ok));
+        const modal = elem('div', 'modal modal-confirm', elem('h2', undefined, opts.title || 'Are you sure?'), opts.message && elem('p', 'modal-msg', opts.message), elem('div', 'modal-bar', cancel, ok));
         const scrim = elem('div', 'modal-scrim', modal);
         scrim.addEventListener('click', e => { if (e.target === scrim)
             finish(false); });

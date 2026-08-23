@@ -3914,7 +3914,6 @@ function nc(e, t) {
 			options: {
 				nodeStatus: V(s).status,
 				nodeKind: r,
-				hideLegend: !0,
 				autoSize: !0,
 				maxNodeW: 360,
 				maxNodeH: 240,

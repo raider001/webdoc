@@ -14,8 +14,8 @@
 
      - the :root tokens, which auth.js reads back through getComputedStyle;
      - .doc-lock / .is-locked, which style the Phase 3 drawer tree and search;
-     - .graph-groups* and .access-*, which style DOM that graph/chrome.js and the
-       editor still build by hand, and both are out of scope for the migration.
+     - .graph-groups*, now rendered by GroupLegend.svelte, and .access-*, which
+       styles DOM the editor still builds by hand.
    --------------------------------------------------------------------------- */
 
 /* GLOBAL, NOT THE ACCOUNT SCREENS'. auth.js's groupColor() reads --group-sat and
@@ -183,9 +183,9 @@
 .tree a.doc-link { display: flex; align-items: center; gap: 6px; }
 
 /* ---- the map's group legend -------------------------------------------- */
-/* GLOBAL, NOT THE ACCOUNT SCREENS'. app/js/graph/chrome.js builds this legend by
-   hand and is not part of the Svelte migration; it borrows .group-dot above but
-   owns everything else here. */
+/* GLOBAL, NOT THE ACCOUNT SCREENS'. GroupLegend.svelte renders this legend (the
+   hand-built version in graph/chrome-view.js is gone); it borrows .group-dot
+   above but owns everything else here. */
 /* The map's bottom-LEFT corner is already a stack (edge legend, edit-connections
    toggle, its hint), so the group legend takes the right side: above the zoom
    controls, below the minimap, clear of all of it. */

@@ -7,12 +7,12 @@ import { editable } from './richtext.js';
 import { plusIcon, minusIcon, closeIcon, lockIcon } from '../icons.js';
 import { auth } from '../auth.js';
 import { groupChip, destroyGroupChip } from '../auth-ui.js';
-function span(text) { return elem('span', null, text); }
+function span(text) { return elem('span', undefined, text); }
 export function tableEditor(b) {
     const box = elem('div', 'blk-tablebox');
     function draw() {
         box.textContent = '';
-        const table = elem('table', 'blk-table', elem('tr', null, b.headers.map((h, ci) => cell(h, v => b.headers[ci] = v, true))), b.rows.map((row, ri) => elem('tr', null, row.map((c, ci) => cell(c, v => b.rows[ri][ci] = v, false)))));
+        const table = elem('table', 'blk-table', elem('tr', undefined, b.headers.map((h, ci) => cell(h, v => b.headers[ci] = v, true))), b.rows.map((row, ri) => elem('tr', undefined, row.map((c, ci) => cell(c, v => b.rows[ri][ci] = v, false)))));
         const controls = elem('div', 'blk-table-ctr', smallBtn([plusIcon(), ' Row'], () => { b.rows.push(b.headers.map(() => '')); draw(); }), smallBtn([plusIcon(), ' Column'], () => { b.headers.push('Column ' + (b.headers.length + 1)); b.aligns.push(''); b.rows.forEach(r => r.push('')); draw(); }), b.rows.length > 0 && smallBtn([minusIcon(), ' Row'], () => { b.rows.pop(); draw(); }), b.headers.length > 1 && smallBtn([minusIcon(), ' Column'], () => { b.headers.pop(); b.aligns.pop(); b.rows.forEach(r => r.pop()); draw(); }));
         append(box, table, controls);
     }
@@ -24,7 +24,7 @@ export function tableEditor(b) {
      * @param value inline HTML
      */
     function cell(value, onChange, isHeader) {
-        return elem(isHeader ? 'th' : 'td', null, editable(value || '', 'tablecell', onChange, ''));
+        return elem(isHeader ? 'th' : 'td', undefined, editable(value || '', 'tablecell', onChange, ''));
     }
     draw();
     return box;
@@ -140,19 +140,22 @@ function refsField(initial, onChange, getReqs, placeholder) {
             acDrop = elem('div', 'ac-drop');
             document.body.appendChild(acDrop);
         }
+        // The line above makes it; a const also carries that through the forEach
+        // closure below, which a reassignable module-level `let` would not.
+        const drop = acDrop;
         if (!acItems.length) {
-            acDrop.hidden = true;
+            drop.hidden = true;
             return;
         }
         if (acActive >= acItems.length)
             acActive = acItems.length - 1;
-        acDrop.textContent = '';
-        acItems.forEach((match, idx) => append(acDrop, elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e) => { e.preventDefault(); addRef(match.id); closeAc(); } }, elem('span', 'ac-id', match.id), elem('span', 'ac-desc', match.description || ''))));
+        drop.textContent = '';
+        acItems.forEach((match, idx) => append(drop, elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e) => { e.preventDefault(); addRef(match.id); closeAc(); } }, elem('span', 'ac-id', match.id), elem('span', 'ac-desc', match.description || ''))));
         const rect = input.getBoundingClientRect();
-        acDrop.style.left = (window.scrollX + rect.left) + 'px';
-        acDrop.style.top = (window.scrollY + rect.bottom + 3) + 'px';
-        acDrop.style.minWidth = Math.max(240, rect.width) + 'px';
-        acDrop.hidden = false;
+        drop.style.left = (window.scrollX + rect.left) + 'px';
+        drop.style.top = (window.scrollY + rect.bottom + 3) + 'px';
+        drop.style.minWidth = Math.max(240, rect.width) + 'px';
+        drop.hidden = false;
     }
     input.addEventListener('focus', () => { acActive = -1; openAc(); });
     input.addEventListener('input', () => { acActive = -1; openAc(); });

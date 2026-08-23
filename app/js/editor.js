@@ -76,6 +76,8 @@ export function openEditor(opts) {
     function resolveDisplayImages(root) {
         root.querySelectorAll('img').forEach(img => {
             const raw = img.getAttribute('data-mdsrc') || img.getAttribute('src');
+            if (!raw)
+                return; // no src to resolve at all - resolveResourceUrl would have returned null anyway
             const url = resolveResourceUrl(opts.docId, raw);
             if (url) {
                 img.setAttribute('data-mdsrc', raw);
@@ -133,7 +135,7 @@ export function openEditor(opts) {
             return testCaseWidget(b, liveReqs, opts.component);
         if (b.type === 'access-start' || b.type === 'access-end')
             return accessMarker(b, opts.knownGroups);
-        return elem('div', null, '(unsupported block)');
+        return elem('div', undefined, '(unsupported block)');
     }
     repaint();
     // --- metadata panel (right) ---

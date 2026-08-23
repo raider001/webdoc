@@ -18,6 +18,7 @@
 // is installed on create and cleared on destroy), and a harness that stomps on it
 // is a harness that hides the bug that ownership exists to prevent. The
 // controller is on window.__graphDemo instead, for console poking.
+import type { GraphChangeEvent } from '/js/graph.js';
 import { createGraphController } from '/js/graph.js';
 
 // ~8 docs forming a small DAG, plus: one edge to a MISSING id, one CYCLE,
@@ -36,8 +37,19 @@ const docs = [
   { id: 'appendix',    title: 'Appendix A',        description: 'Reference tables and extra material.',                assumes: ['glossary'],           next: [] }
 ];
 
-const stage = document.getElementById('stage');
-const log = document.getElementById('log');
+/**
+ * Resolve an element this harness's own page declares. Throws rather than
+ * returning null: every id passed here is written in the sibling .html, so an
+ * absent one is a broken harness, not a runtime condition to handle.
+ */
+function $(id: string): HTMLElement {
+  const node = document.getElementById(id);
+  if (!node) throw new Error('harness: #' + id + ' is missing from the page');
+  return node;
+}
+
+const stage = $('stage');
+const log = $('log');
 
 // #stage is position:relative and sized by the harness stylesheet, which is all
 // the engine asks of the element it paints in - it appends its canvas and never
@@ -50,16 +62,16 @@ const graph = createGraphController(stage, docs, {
 // The emitter, made visible. Nothing here reaches into the engine to ask what
 // changed; every bit of it arrives in the event, which is the same contract the
 // real chrome runs on.
-graph.on('change', (s: { editMode: boolean; connector: string; pendingSourceTitle?: string }) => {
+graph.on('change', (s: GraphChangeEvent) => {
   console.log('[graph] change', s.editMode ? 'edit:' + s.connector : 'view', s.pendingSourceTitle || '');
 });
 
-document.getElementById('fitBtn').addEventListener('click', () => graph.fit());
-document.getElementById('findBtn').addEventListener('click', () => {
+$('fitBtn').addEventListener('click', () => graph.fit());
+$('findBtn').addEventListener('click', () => {
   const hit = graph.search('deploy');
   log.textContent = hit ? 'found → ' + hit : 'no match';
 });
-document.getElementById('themeBtn').addEventListener('click', () => {
+$('themeBtn').addEventListener('click', () => {
   const root = document.documentElement;
   const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', next);

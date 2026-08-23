@@ -9,7 +9,7 @@ import { auth } from '../auth.js';
 import { groupChip, destroyGroupChip } from '../auth-ui.js';
 import type { AccessStartBlock, AccessEndBlock } from '../editor.js';
 
-function span(text: string): HTMLElement { return elem('span', null, text); }
+function span(text: string): HTMLElement { return elem('span', undefined, text); }
 
 /* ---- table editor ---- */
 
@@ -30,8 +30,8 @@ export function tableEditor(b: TableBlock): HTMLElement {
   function draw() {
     box.textContent = '';
     const table = elem('table', 'blk-table',
-      elem('tr', null, b.headers.map((h, ci) => cell(h, v => b.headers[ci] = v, true))),
-      b.rows.map((row, ri) => elem('tr', null, row.map((c, ci) => cell(c, v => b.rows[ri][ci] = v, false)))));
+      elem('tr', undefined, b.headers.map((h, ci) => cell(h, v => b.headers[ci] = v, true))),
+      b.rows.map((row, ri) => elem('tr', undefined, row.map((c, ci) => cell(c, v => b.rows[ri][ci] = v, false)))));
     const controls = elem('div', 'blk-table-ctr',
       smallBtn([plusIcon(), ' Row'], () => { b.rows.push(b.headers.map(() => '')); draw(); }),
       smallBtn([plusIcon(), ' Column'], () => { b.headers.push('Column ' + (b.headers.length + 1)); b.aligns.push(''); b.rows.forEach(r => r.push('')); draw(); }),
@@ -48,7 +48,7 @@ export function tableEditor(b: TableBlock): HTMLElement {
    * @param value inline HTML
    */
   function cell(value: string, onChange: (value: string) => void, isHeader: boolean): HTMLElement {
-    return elem(isHeader ? 'th' : 'td', null, editable(value || '', 'tablecell', onChange, ''));
+    return elem(isHeader ? 'th' : 'td', undefined, editable(value || '', 'tablecell', onChange, ''));
   }
 
   draw();
@@ -230,18 +230,21 @@ function refsField(initial: string[], onChange: (refs: string[]) => void, getReq
     acItems = getReqs().filter(x => !refs.includes(x.id) &&
       (!q || x.id.toLowerCase().includes(q) || (x.description || '').toLowerCase().includes(q))).slice(0, 10);
     if (!acDrop) { acDrop = elem('div', 'ac-drop'); document.body.appendChild(acDrop); }
-    if (!acItems.length) { acDrop.hidden = true; return; }
+    // The line above makes it; a const also carries that through the forEach
+    // closure below, which a reassignable module-level `let` would not.
+    const drop = acDrop;
+    if (!acItems.length) { drop.hidden = true; return; }
     if (acActive >= acItems.length) acActive = acItems.length - 1;
-    acDrop.textContent = '';
-    acItems.forEach((match, idx) => append(acDrop,
+    drop.textContent = '';
+    acItems.forEach((match, idx) => append(drop,
       elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: MouseEvent) => { e.preventDefault(); addRef(match.id); closeAc(); } },
         elem('span', 'ac-id', match.id),
         elem('span', 'ac-desc', match.description || ''))));
     const rect = input.getBoundingClientRect();
-    acDrop.style.left = (window.scrollX + rect.left) + 'px';
-    acDrop.style.top = (window.scrollY + rect.bottom + 3) + 'px';
-    acDrop.style.minWidth = Math.max(240, rect.width) + 'px';
-    acDrop.hidden = false;
+    drop.style.left = (window.scrollX + rect.left) + 'px';
+    drop.style.top = (window.scrollY + rect.bottom + 3) + 'px';
+    drop.style.minWidth = Math.max(240, rect.width) + 'px';
+    drop.hidden = false;
   }
   input.addEventListener('focus', () => { acActive = -1; openAc(); });
   input.addEventListener('input', () => { acActive = -1; openAc(); });

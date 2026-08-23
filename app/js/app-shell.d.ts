@@ -20,6 +20,20 @@ export interface AppState {
 export declare const state: AppState;
 export declare const el: (id: string) => HTMLElement | null;
 /**
+ * el() for an id the shell CONTRACTUALLY has - every id in main.ts's REQUIRED_IDS
+ * (asserted once at boot by assertShellIds) plus the two overlay hosts
+ * (assertOverlayIds). Returns a plain HTMLElement, so the ~45 call sites that
+ * already relied on that invariant can stop re-stating it.
+ *
+ * It throws rather than returning null because that is what the code did anyway:
+ * `el('brand').textContent = ...` on a missing id threw "Cannot read properties of
+ * null" three modules from the cause. Same failure, named - which is the whole
+ * point of the shell contract. Use el() (and branch) for genuinely optional
+ * elements like #toc; use this one only where a missing element is a broken
+ * template.
+ */
+export declare function mustEl(id: string): HTMLElement;
+/**
  * A display title derived from a doc id's last segment (footer + new-doc
  * fallback, used when the full title isn't in the sparse client cache).
  */

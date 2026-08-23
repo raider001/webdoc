@@ -206,10 +206,13 @@ export function wireInteractions(g) {
     });
     // Click the minimap to recentre. The surface is the caller's element, so it is
     // optional - view.js draws a minimap only when there is one to draw on.
-    if (g.miniCanvas)
-        on(g.miniCanvas, 'click', function (e) {
+    // Held in a local: the handler runs long after this line, and the surface it
+    // was wired to is the one it must measure, whatever g.miniCanvas says later.
+    const mini = g.miniCanvas;
+    if (mini)
+        on(mini, 'click', function (e) {
             try {
-                const rect = g.miniCanvas.getBoundingClientRect();
+                const rect = mini.getBoundingClientRect();
                 const mx = (e.clientX - rect.left) * (MINI_W / rect.width);
                 const my = (e.clientY - rect.top) * (MINI_H / rect.height);
                 const wx = (mx - g.miniOX) / g.miniScale, wy = (my - g.miniOY) / g.miniScale;

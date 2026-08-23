@@ -28,13 +28,19 @@ export interface DocPickerEntry {
  *   switched off, in which case no access field is drawn
  */
 export function metadataPanel(meta: Partial<DocMeta>, allDocs: DocPickerEntry[], selfId: string, access?: DocAccess | null): HTMLElement {
+  // docPicker edits its list IN PLACE, so it has to be handed a real array to
+  // write into; a header that omits assumes/next gets an empty one here. That
+  // adds nothing to what gets saved - serializeDoc already writes `[]` for a
+  // missing list.
+  meta.assumes = meta.assumes || [];
+  meta.next = meta.next || [];
   return elem('aside', 'editor-meta',
     elem('h2', 'editor-meta-h', 'Document metadata'),
     labeledInput('Title', meta.title || '', v => meta.title = v),
     labeledTextarea('Description', meta.description || '', v => meta.description = v),
     docPicker('Assumed knowledge', meta.assumes, allDocs, selfId),
     docPicker('Recommended next', meta.next, allDocs, selfId),
-    auth.enabled ? accessField(meta, access) : null
+    auth.enabled ? accessField(meta, access || null) : null
   );
 }
 
@@ -111,7 +117,7 @@ function accessField(meta: Partial<DocMeta>, access: DocAccess | null): HTMLElem
 
   redraw();
   return elem('div', 'meta-field access-panel' + (mayEdit ? '' : ' access-readonly'),
-    elem('label', null, 'Who can read this'),
+    elem('label', undefined, 'Who can read this'),
     chips, picker,
     elem('label', 'access-pick', hidden,
       'Hide completely (not shown on the map or in search)'),
@@ -147,7 +153,7 @@ function docPicker(label: string, arr: string[], allDocs: DocPickerEntry[], self
   }
   redraw();
 
-  return elem('div', 'meta-field', elem('label', null, label), chips, select);
+  return elem('div', 'meta-field', elem('label', undefined, label), chips, select);
 }
 
 /* ---- new-document modal ---- */
@@ -160,7 +166,7 @@ export function openNewDocModal(opts: NewDocModalOpts): void {
   const error = elem('div', 'modal-err');
 
   const modal = elem('div', 'modal',
-    elem('h2', null, 'New document'),
+    elem('h2', undefined, 'New document'),
     elem('div', 'modal-field', labelEl('Component / source'), sourceSelect),
     elem('div', 'modal-field', labelEl('Path (folders you choose)'), pathInput),
     preview,
@@ -250,7 +256,7 @@ export function confirmDialog(opts?: ConfirmDialogOptions): Promise<boolean> {
       opts.confirmLabel || 'OK');
 
     const modal = elem('div', 'modal modal-confirm',
-      elem('h2', null, opts.title || 'Are you sure?'),
+      elem('h2', undefined, opts.title || 'Are you sure?'),
       opts.message && elem('p', 'modal-msg', opts.message),
       elem('div', 'modal-bar', cancel, ok)
     );

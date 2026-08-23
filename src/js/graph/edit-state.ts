@@ -1,4 +1,4 @@
-// graph/chrome.ts - the EDIT-MODE STATE MACHINE, and only that.
+// graph/edit-state.ts - the EDIT-MODE STATE MACHINE, and only that.
 // ---------------------------------------------------------------------------
 // This file used to build the overlay chrome (zoom controls, search box, legend,
 // edit toggle + hint, minimap, empty state) AND run the edit-mode state machine
@@ -14,6 +14,11 @@
 // All of it is canvas DRAW STATE - render.js reads g.pendingSource, g.selectedEdge
 // and g.vis every frame - so the machine mutates the context, asks for a repaint,
 // and REPORTS via g.emitChange(). It never touches a button.
+//
+// THE NAME. This was graph/chrome.ts, and it stayed graph/chrome.ts for a phase
+// after the DOM half left - which left the repo with a chrome.ts that owned no
+// chrome at all, sitting next to a chrome-view.ts that owned every bit of it.
+// The file is named for what it does now.
 
 import type { GraphContext } from '../graph.js';
 

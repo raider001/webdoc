@@ -298,7 +298,7 @@ export function parseDocument(src: string): ParsedDocument {
     }
 
     // Close unmatched open blocks (from tip down)
-    while (path.length > matched) closeBlock(path.pop());
+    while (path.length > matched) popTip(path);
     container = path[path.length - 1];
 
     // Now try to start new container/leaf blocks on `rest`
@@ -326,7 +326,7 @@ export function parseDocument(src: string): ParsedDocument {
         }
         // A blank line does not close a list - it may sit between items. Only a
         // non-blank line that is not a matching item ends the list.
-        if (!matchesItem && !reBlank.test(rest)) { closeBlock(path.pop()); container = path[path.length - 1]; }
+        if (!matchesItem && !reBlank.test(rest)) { popTip(path); container = path[path.length - 1]; }
       }
 
       // indented code (only if not able to be lazy paragraph and container can hold)
@@ -390,15 +390,18 @@ export function parseDocument(src: string): ParsedDocument {
             const hb = makeBlock('htmlblock', { kind: kind });
             hb.lines.push(rest);
             container.children.push(hb); path.push(hb);
-            if (htmlBlockCloses(kind, rest) || (kind >= 6 && false)) closeBlock(path.pop());
+            if (htmlBlockCloses(kind, rest) || (kind >= 6 && false)) popTip(path);
             rest = ''; lineConsumed = true; break;
           }
         }
         // setext heading (underline for an open paragraph)
-        if (reSetext.test(rest) && container.type !== 'document' && last(container) && last(container).type === 'paragraph' && last(container).open && !isRefOnly(last(container))) {
-          // Same story as the setext branch above: the tests established the
-          // variant, but last() is re-called so the narrowing does not survive.
-          const para = last(container) as MdParagraphBlock;
+        // Same story as the setext branch above: last() re-called hands back a
+        // fresh, unnarrowed value each time, so only one binding can carry the
+        // `type === 'paragraph'` test through to the rewrite - and that binding
+        // is also what says the child is there at all.
+        const tail = last(container);
+        if (reSetext.test(rest) && container.type !== 'document' && tail && tail.type === 'paragraph' && tail.open && !isRefOnly(tail)) {
+          const para: MdParagraphBlock = tail;
           if (stripLeadingRefs(para, refs)) {
             para.type = 'heading';
             para.level = body[0] === '=' ? 1 : 2;
@@ -421,7 +424,10 @@ export function parseDocument(src: string): ParsedDocument {
           const contentRaw = expandLeadingTabs(rest.slice(col0), col0);
           const blankContent = /^ *$/.test(contentRaw);
           // Don't interrupt a paragraph with an empty list item or ordered start != 1
-          if (container.type === 'paragraph' || (last(container) && last(container).type === 'paragraph' && last(container).open)) {
+          // (read once for the same reason as the setext test above - the tail is
+          // asked about twice here).
+          const prevChild = last(container);
+          if (container.type === 'paragraph' || (prevChild && prevChild.type === 'paragraph' && prevChild.open)) {
             if (blankContent) break;
             if (isOrdered && num !== 1) break;
           }
@@ -436,7 +442,7 @@ export function parseDocument(src: string): ParsedDocument {
           // A different list type/marker ends the current list; the new one is a
           // sibling of it, not a child - otherwise the old list swallows it.
           if (container.type === 'list' && !(container.listType === wantType && container.marker === markerCh)) {
-            closeBlock(path.pop());
+            popTip(path);
             container = path[path.length - 1];
           }
           if (!(container.type === 'list' && container.listType === wantType && container.marker === markerCh)) {
@@ -465,15 +471,19 @@ export function parseDocument(src: string): ParsedDocument {
     const cur = path[path.length - 1];
     if (cur.type === 'codeblock') {
       if (cur.kind === 'fenced') {
+        // fence / fenceLen / fenceIndent are written as a set when the opening
+        // fence matches; they are optional on MdCodeBlock only because an
+        // indented code block is the same variant and carries none of them.
+        const fenceIndent = cur.fenceIndent ?? 0;
         const cm = new RegExp('^ {0,3}' + cur.fence + '{' + cur.fenceLen + ',}[ \\t]*$');
-        if (cm.test(rest) && rest.replace(/^ {0,3}/, '')[0] === cur.fence) { closeBlock(path.pop()); }
-        else cur.lines.push(stripUpTo(rest, cur.fenceIndent));
+        if (cm.test(rest) && rest.replace(/^ {0,3}/, '')[0] === cur.fence) { popTip(path); }
+        else cur.lines.push(stripUpTo(rest, fenceIndent));
       } else {
         cur.lines.push(stripCols(rest, 4));
       }
     } else if (cur.type === 'htmlblock') {
       cur.lines.push(rest);
-      if (htmlBlockCloses(cur.kind, rest)) closeBlock(path.pop());
+      if (htmlBlockCloses(cur.kind, rest)) popTip(path);
     } else if (cur.type === 'paragraph') {
       cur.lines.push(rest.replace(/^ {0,3}/, ''));
     } else if (cur.type === 'heading') {
@@ -485,7 +495,7 @@ export function parseDocument(src: string): ParsedDocument {
       cur.children.push(p); path.push(p);
     }
   }
-  while (path.length) closeBlock(path.pop());
+  while (path.length) popTip(path);
 
   // collect link reference definitions from paragraphs
   collectRefs(doc, refs);
@@ -506,8 +516,11 @@ function canContain(b: MdBlockNode, childType: string): boolean {
  * @param path open blocks, document -> tip
  */
 function maybeCloseParagraph(container: MdBlockNode, path: MdBlockNode[]): void {
-  if (last(container) && last(container).type === 'paragraph' && last(container).open) {
-    closeBlock(last(container));
+  // Read once: the same child is asked about three ways and then closed, and a
+  // single binding is what says it is there at all.
+  const tail = last(container);
+  if (tail && tail.type === 'paragraph' && tail.open) {
+    closeBlock(tail);
     if (path[path.length - 1].type === 'paragraph') path.pop();
   }
 }
@@ -565,7 +578,7 @@ function continuesOpenList(rest: string, path: MdBlockNode[]): boolean {
  */
 function markBlank(path: MdBlockNode[], lineNo: number): void {
   const leaf = path[path.length - 1];
-  if (leaf.type === 'paragraph') { closeBlock(path.pop()); }
+  if (leaf.type === 'paragraph') { popTip(path); }
   const container = path[path.length - 1];
   // The child that a blank line lands after is recorded as ending with a blank
   // line - that is the signal a following block makes the enclosing list loose.
@@ -582,6 +595,16 @@ function markBlank(path: MdBlockNode[], lineNo: number): void {
 }
 
 function closeBlock(b: MdBlockNode): void { b.open = false; }
+/**
+ * Close and drop the tip of the open-block path. Every call site has just read
+ * `path[path.length - 1]`, or is inside a loop testing `path.length`, so the pop
+ * always hands back a block; one helper states that invariant once instead of
+ * repeating it at each of the eight places that close the tip.
+ * @param path open blocks, document -> tip
+ */
+function popTip(path: MdBlockNode[]): void {
+  closeBlock(path.pop()!);   // non-empty: see above
+}
 /**
  * @returns true if the paragraph is nothing but link reference definition(s)
  */

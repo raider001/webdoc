@@ -147,7 +147,9 @@ export async function buildRequirementIndex(_docs: Doc[] | null, sources: Source
   testIndex.clear();
   groupsByDoc.clear();
   const cbs: Record<string, string> = {};
-  for (const s of sources || []) cbs[s.name] = s.component;
+  // A source with no component id maps to '' - the same falsy value every
+  // reader already tests for (parse.js's "has no 'component' id" error).
+  for (const s of sources || []) cbs[s.name] = s.component || '';
   setComponentBySource(cbs);
 
   let data: CoverageIndexResponse | null = null;
@@ -179,7 +181,9 @@ export async function buildRequirementIndex(_docs: Doc[] | null, sources: Source
  * @param source - source name, for component lookup (see componentOf)
  */
 export function prepareDocGroups(body: string, docId: string, source: string): ReqOrTestBlock[] {
-  const component = componentOf(source);
+  // '' for a source the boot config never named, which is exactly how the
+  // extractors already read an absent component (they test it for falsiness).
+  const component = componentOf(source) || '';
   const blocks = extractGroups(String(body || ''), { id: docId, source: source }, component);
   for (const b of blocks) {
     if (b.kind === 'req') {
@@ -270,7 +274,9 @@ export function requirementTraceEdges(): DocEdgeRef[] {
     for (const raw of rec.traceTo) {
       const target = resolveReqRef(raw, rec);
       if (!target) continue;
-      const toDoc = index.get(target).docId;
+      // resolveReqRef only ever returns a candidate it found in `index`
+      // (resolveIn's has() test), so this lookup cannot miss.
+      const toDoc = index.get(target)!.docId;
       if (toDoc === rec.docId) continue;
       const key = rec.docId + ' ' + toDoc;
       if (seen.has(key)) continue;

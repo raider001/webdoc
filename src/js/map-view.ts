@@ -27,7 +27,7 @@
 // the island's own dynamic import (app/svelte/actions/graph.js), so the ~2,000
 // lines of canvas renderer are fetched by the click that draws a graph and by
 // nothing else.
-import { el, app } from './app-shell.js';
+import { mustEl, app } from './app-shell.js';
 import { mapOverlay } from './overlays.js';
 import { ensureGraphModel } from './graph-model.js';
 import { loadIslands } from './islands.js';
@@ -74,7 +74,10 @@ export interface OverlayHandle {
  * return the handle main.js drives the header button with.
  */
 export function setupGraphButton(): OverlayHandle {
-  const btn = el('graphBtn');
+  // mustEl, not el: #graphBtn and #content are both in main.ts's REQUIRED_IDS, so
+  // a missing one is a broken template and says so here rather than three
+  // dereferences later.
+  const btn = mustEl('graphBtn');
   // The host is created eagerly at boot by overlays.ensureOverlayHosts(), not
   // here. This module may load long after boot (or never), and #graphOverlay has
   // to exist from first paint because authoring asks whether the map is open on
@@ -94,7 +97,7 @@ export function setupGraphButton(): OverlayHandle {
     overlay.hidden = true;
     btn.setAttribute('aria-pressed', 'false');
     if (island) { island.destroy(); island = null; }   // stops the rAF loop and releases window.__graph
-    el('content').focus({ preventScroll: true });
+    mustEl('content').focus({ preventScroll: true });
   };
 
   /** Open the map overlay, loading the graph model before it mounts. */

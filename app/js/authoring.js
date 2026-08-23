@@ -5,7 +5,7 @@
 // reaches the shell through the `app` registry (app.navigate / app.showError /
 // app.closeDrawer, wired by main at boot); it registers its own map- and coverage-
 // facing handles (editDocRelation, deleteDocFlow, link/unlinkTestToRequirement).
-import { state, el, app, titleFromId, defaultId, getDoc } from './app-shell.js';
+import { state, mustEl, app, titleFromId, defaultId, getDoc } from './app-shell.js';
 // editor.js is NOT imported statically. It is the largest module graph in the app
 // (editor.js plus editor/{serialize,richtext,widgets,panels,ui}.js, ~1,800 lines),
 // and a reader who only ever reads never opens it. Every entry point below awaits
@@ -47,12 +47,13 @@ function rerenderTree() {
 }
 /** Wire the header's new-document / edit / delete buttons. */
 export function setupEditButtons() {
-    el('newDocBtn').addEventListener('click', () => openNewDocFlow());
-    el('editBtn').addEventListener('click', () => { if (state.current)
+    const newDocBtn = mustEl('newDocBtn');
+    newDocBtn.addEventListener('click', () => openNewDocFlow());
+    mustEl('editBtn').addEventListener('click', () => { if (state.current)
         editExisting(state.current); });
-    el('deleteBtn').addEventListener('click', () => { if (state.current)
+    mustEl('deleteBtn').addEventListener('click', () => { if (state.current)
         deleteDocFlow(state.current.id, { rebuildMap: false }); });
-    el('newDocBtn').hidden = !auth.canWrite;
+    newDocBtn.hidden = !auth.canWrite;
 }
 /**
  * Show or hide the edit / delete controls for the document now on screen.
@@ -62,7 +63,7 @@ export function setupEditButtons() {
  * anything. Called by the reader through the `app` registry on each render.
  */
 async function updateDocActions(docId) {
-    const edit = el('editBtn'), del = el('deleteBtn');
+    const edit = mustEl('editBtn'), del = mustEl('deleteBtn');
     if (!auth.enabled) {
         edit.hidden = false;
         del.hidden = false;
@@ -192,9 +193,23 @@ async function enterEdit(id, meta, blocks, isNew) {
         // serializeDoc has already folded the edited metadata into `md`, so the
         // second argument is redundant here - only `status` is wanted after it.
         onSave: (md, _newMeta, status) => saveDoc(id, md, isNew, status),
-        onClose: () => { exitEdit(); app.navigate(state.byId.has(id) ? id : defaultId()); }
+        onClose: () => {
+            exitEdit();
+            // Back to the document just edited if it is known, else the site default.
+            // With neither there is nowhere to route to, so stay put rather than push a
+            // "#/undefined" the router could only turn into an error screen.
+            const back = state.byId.has(id) ? id : defaultId();
+            if (back && app.navigate)
+                app.navigate(back);
+        }
     });
-    document.querySelector('.app-body').appendChild(editorEl);
+    // The editor mounts into the app-body shell. index.html always has it, and the
+    // whole editing flow is meaningless without it, so a missing host is a broken
+    // template rather than a state worth degrading through.
+    const appBody = document.querySelector('.app-body');
+    if (!appBody)
+        throw new Error('Cannot open the editor: .app-body is missing from the page.');
+    appBody.appendChild(editorEl);
 }
 /** Remove the open editor from the DOM, if any, and leave editing mode. */
 function exitEdit() {
@@ -212,7 +227,7 @@ function componentFor(id) {
     // state.site is the parsed site.json, so `sources` is already the declared
     // SourceConfig list (catalog.ts) and can be searched directly.
     const s = ((state.site && state.site.sources) || []).find(x => x.name === src);
-    return s ? s.component : '';
+    return (s && s.component) || ''; // `component` is an optional per-source key
 }
 /**
  * Write a document back to disk. `md` is the fully serialized document; `status`
@@ -241,7 +256,8 @@ async function saveDoc(id, md, wasNew, status) {
     if (wasNew)
         await rerenderTree(); // new file -> tree structure changed
     exitEdit();
-    app.navigate(id);
+    if (app.navigate)
+        app.navigate(id);
 }
 /**
  * After a write the SERVER index updates itself (serve.py do_PUT/do_DELETE hooks),
@@ -256,7 +272,7 @@ async function saveDoc(id, md, wasNew, status) {
 async function refreshCatalog(extraIds) {
     invalidateGraphModel();
     invalidateAccess(); // a write can change the effective ACL of everything downstream
-    await buildRequirementIndex(null, state.site.sources); // refresh the global req index (cheap, server-side)
+    await buildRequirementIndex(null, (state.site && state.site.sources) || []); // refresh the global req index (cheap, server-side)
     (extraIds || []).forEach(id => { const cached = state.byId.get(id); if (cached)
         cached._loaded = false; });
     if (state.current) {
@@ -315,9 +331,13 @@ async function deleteDocFlow(id, opts) {
     // If the reading view was showing the deleted doc, move it to a surviving one.
     if (wasCurrent) {
         const next = defaultId();
-        if (next && next !== id)
-            app.navigate(next);
-        else
+        // Both are wired by main.ts at boot, but the registry is optional by design -
+        // every other call site guards, and so does this one.
+        if (next && next !== id) {
+            if (app.navigate)
+                app.navigate(next);
+        }
+        else if (app.showError)
             app.showError('No documents left.');
     }
     // Refresh an open map in place so the deleted node is gone (keep view + animate).

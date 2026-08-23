@@ -96,7 +96,7 @@ registerBlockRenderer('mermaid', async (source) => {
   const svgEl = wrap.querySelector('svg');
   if (svgEl) {
     const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
-    const naturalW = (vb && vb.width) || parseFloat(svgEl.getAttribute('width')) || 0;
+    const naturalW = (vb && vb.width) || parseFloat(svgEl.getAttribute('width') || '') || 0;
     svgEl.removeAttribute('height');
     svgEl.style.maxWidth = 'none';
     svgEl.style.height = 'auto';

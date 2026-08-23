@@ -121,10 +121,13 @@ export function createPanZoom(content: HTMLElement | SVGElement, opts: PanZoomOp
     b.addEventListener('pointerdown', (e) => e.stopPropagation()); // don't start a pan
     return b;
   };
+  // The `!`s: every icons.js factory is a one-root template read back through
+  // .firstElementChild, so the element is always there - the null the DOM type
+  // allows for is an empty template, which none of these are.
   controls.append(
-    button(plusIcon(), 'Zoom in', () => zoomAt(1.2, midX(), midY())),
-    button(minusIcon(), 'Zoom out', () => zoomAt(1 / 1.2, midX(), midY())),
-    button(fitIcon(), 'Fit to view', fit)
+    button(plusIcon()!, 'Zoom in', () => zoomAt(1.2, midX(), midY())),
+    button(minusIcon()!, 'Zoom out', () => zoomAt(1 / 1.2, midX(), midY())),
+    button(fitIcon()!, 'Fit to view', fit)
   );
   viewport.appendChild(controls);
 

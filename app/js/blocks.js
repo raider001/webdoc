@@ -78,7 +78,7 @@ function renderFallback(host, lang, label, source, err) {
     host.textContent = '';
     host.classList.add('block-render-failed');
     const reason = (err && err.message) ? ': ' + err.message : '';
-    host.append(elem('div', 'block-render-note', (label || lang) + ' could not be rendered' + reason + ' — showing source.'), elem('pre', null, elem('code', { class: 'language-' + lang, text: source })));
+    host.append(elem('div', 'block-render-note', (label || lang) + ' could not be rendered' + reason + ' — showing source.'), elem('pre', undefined, elem('code', { class: 'language-' + lang, text: source })));
 }
 function fill(host, node) {
     if (node && node.nodeType)

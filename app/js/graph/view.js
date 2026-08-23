@@ -98,7 +98,9 @@ export function attachView(g) {
         let starts = null, includes = null;
         for (const id of g.sortedIds) {
             const meta = g.model.nodes.get(id);
-            const title = (meta.title || '').toLowerCase();
+            // A sorted id with no model entry would only be a bug upstream, but the id
+            // is still matchable on its own - so miss the title, not the whole search.
+            const title = ((meta && meta.title) || '').toLowerCase();
             const lid = id.toLowerCase();
             if (title === q || lid === q) {
                 g.focus(id);
@@ -131,7 +133,11 @@ export function attachView(g) {
             const cache = g.miniCache || (g.miniCache = document.createElement('canvas'));
             cache.width = Math.round(MINI_W * dpr);
             cache.height = Math.round(MINI_H * dpr);
+            // No 2D context (headless, or the browser's per-page context budget spent)
+            // means no minimap this time round - decorative, so nothing else changes.
             const cx = cache.getContext('2d');
+            if (!cx)
+                return;
             cx.setTransform(dpr, 0, 0, dpr, 0, 0);
             cx.clearRect(0, 0, MINI_W, MINI_H);
             const muted = (g.colors && g.colors.muted) || '#888';
@@ -156,7 +162,11 @@ export function attachView(g) {
                 g.miniCanvas.width = Math.round(MINI_W * dpr);
                 g.miniCanvas.height = Math.round(MINI_H * dpr);
             }
+            // g.miniCtx is null when the minimap canvas refused a 2D context; the cache
+            // above would be equally undrawable, so there is nothing to update.
             const ctx = g.miniCtx;
+            if (!ctx)
+                return;
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, MINI_W, MINI_H);
             ctx.drawImage(g.miniCache, 0, 0, MINI_W, MINI_H);

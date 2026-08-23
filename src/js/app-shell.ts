@@ -29,11 +29,37 @@ export const state: AppState = { site: null, docs: [], byId: new Map(), current:
 export const el = (id: string): HTMLElement | null => document.getElementById(id);
 
 /**
+ * el() for an id the shell CONTRACTUALLY has - every id in main.ts's REQUIRED_IDS
+ * (asserted once at boot by assertShellIds) plus the two overlay hosts
+ * (assertOverlayIds). Returns a plain HTMLElement, so the ~45 call sites that
+ * already relied on that invariant can stop re-stating it.
+ *
+ * It throws rather than returning null because that is what the code did anyway:
+ * `el('brand').textContent = ...` on a missing id threw "Cannot read properties of
+ * null" three modules from the cause. Same failure, named - which is the whole
+ * point of the shell contract. Use el() (and branch) for genuinely optional
+ * elements like #toc; use this one only where a missing element is a broken
+ * template.
+ */
+export function mustEl(id: string): HTMLElement {
+  const node = document.getElementById(id);
+  if (!node) {
+    const err = new Error('Required element #' + id + ' is missing from the page.');
+    err.name = 'ShellTemplateError';   // same name assertShellIds uses, so boot's catch reads alike
+    throw err;
+  }
+  return node;
+}
+
+/**
  * A display title derived from a doc id's last segment (footer + new-doc
  * fallback, used when the full title isn't in the sparse client cache).
  */
 export function titleFromId(id: string): string {
-  const base = String(id).split('/').pop().replace(/[-_]+/g, ' ');
+  // split() always yields at least one segment, so the last one is a string -
+  // indexing it says that in a way the compiler can see, where .pop() cannot.
+  const segments = String(id).split('/');
+  const base = segments[segments.length - 1].replace(/[-_]+/g, ' ');
   return base.replace(/\b\w/g, c => c.toUpperCase());
 }
 
@@ -61,7 +87,9 @@ export function docFromId(id: string): Doc | null {
  * the router (route) and authoring (deleteDocFlow).
  */
 export function getDoc(id: string): Doc | null | undefined {
-  let d = state.byId.get(id);
+  // Both halves of the return type in one binding: `undefined` from the Map miss,
+  // `null` from a docFromId that could not split an id.
+  let d: Doc | null | undefined = state.byId.get(id);
   if (!d && id) { d = docFromId(id); if (d) state.byId.set(id, d); }
   return d;
 }

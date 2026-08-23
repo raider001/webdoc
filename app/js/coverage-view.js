@@ -17,7 +17,7 @@
 // The button is wired by main.js, not here: this module is fetched lazily on the
 // first press, so the click that paid for the load is already over by the time
 // setupCoverageView() runs, and main.js calls open() for it.
-import { state, el, downloadFile, isoDate, app } from './app-shell.js';
+import { state, mustEl, downloadFile, isoDate, app } from './app-shell.js';
 import { requirementList, testList } from './requirements.js';
 import { loadResults, computeCoverage, computeTestStatus, testsFor } from './coverage.js';
 import { generateReportHtml } from './report.js';
@@ -30,7 +30,9 @@ import { announce } from './announce.js';
  * with.
  */
 export function setupCoverageView() {
-    const btn = el('covBtn');
+    // mustEl, not el: #covBtn is in main.ts's REQUIRED_IDS, so a missing one is a
+    // broken template and says so here rather than at the first setAttribute.
+    const btn = mustEl('covBtn');
     // The host and its stage are created eagerly at boot by
     // overlays.ensureOverlayHosts(); this module only fills the stage. The class
     // is added here rather than there because it is this view's requirement: the
@@ -69,7 +71,7 @@ export function setupCoverageView() {
         // Loaded HERE rather than inside the component so the first frame is the
         // real graph, and so exportReport() has something to report on even if the
         // reader presses it before touching anything.
-        results = await loadResults(state.site && state.site.sources);
+        results = await loadResults((state.site && state.site.sources) || []);
         const islands = await loadIslands();
         // Two awaits is two chances for the reader to have closed it again.
         if (overlay.hidden)
@@ -88,7 +90,7 @@ export function setupCoverageView() {
      * Build and download a self-contained, shareable Test Coverage Report.
      */
     async function exportReport() {
-        const res = results || await loadResults(state.site && state.site.sources);
+        const res = results || await loadResults((state.site && state.site.sources) || []);
         const reqs = requirementList();
         const tests = testList();
         const now = new Date();

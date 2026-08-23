@@ -9,7 +9,19 @@
 
 import { renderMarkdown } from '/js/commonmark.js';
 
-const $ = (id: string) => document.getElementById(id);
+/**
+ * Resolve an element this harness's own page declares.
+ *
+ * Throws rather than returning null: every id passed here is written in the
+ * sibling .html file, so an absent one is a broken harness, not a runtime
+ * condition to handle. Failing loudly at the first lookup beats threading a
+ * null through forty call sites - and beats a non-null assertion at each one.
+ */
+function $(id: string): HTMLElement {
+  const node = document.getElementById(id);
+  if (!node) throw new Error('harness: #' + id + ' is missing from the page');
+  return node;
+}
 /**
  * One example from the official CommonMark spec.json. `section` and `example`
  * are informational - the harness groups and labels by them - while `markdown`
@@ -25,7 +37,7 @@ interface SpecCase {
 /** Per-section tally, and the shape published on body[data-sections]. */
 interface SectionTally { total: number; pass: number; fail: number }
 
-document.getElementById('themeToggle').addEventListener('click', () => {
+$('themeToggle').addEventListener('click', () => {
   const root = document.documentElement;
   const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', next);
@@ -104,7 +116,8 @@ async function run() {
   for (const c of cases) {
     const section = c.section || '(no section)';
     if (!sections.has(section)) { sections.set(section, { total: 0, pass: 0, fail: 0 }); order.push(section); }
-    const bucket = sections.get(section);
+    // Seeded on the line above when absent, so this is always present.
+    const bucket = sections.get(section)!;
     bucket.total++;
 
     let actual;
@@ -148,7 +161,8 @@ async function run() {
   const tbody = document.createElement('tbody');
   const sectionReport: Record<string, SectionTally> = {};
   for (const name of order) {
-    const b = sections.get(name);
+    // `order` only ever receives a name that was just put into `sections`.
+    const b = sections.get(name)!;
     sectionReport[name] = { pass: b.pass, fail: b.fail, total: b.total };
     const tr = document.createElement('tr');
     tr.className = b.fail === 0 ? 'clean' : 'dirty';

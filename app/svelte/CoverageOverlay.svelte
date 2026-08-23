@@ -169,7 +169,7 @@
     return {
       docs: reqNodes.concat(testNodes),
       options: {
-        nodeStatus: model.status, nodeKind: nodeKind, hideLegend: true,
+        nodeStatus: model.status, nodeKind: nodeKind,
         autoSize: true, maxNodeW: 360, maxNodeH: 240,   // size boxes to fit the largest node
         onSelect: (id) => { selected = id; },
         onActivate: (id) => { selected = id; },

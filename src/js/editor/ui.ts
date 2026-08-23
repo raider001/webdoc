@@ -2,22 +2,25 @@
 // These primitives are used across the editor's canvas, widgets and panels, so
 // they live in one dependency-free place.
 import { elem } from '../dom.js';
+import type { ChildSlot } from '../dom.js';
 import { auth } from '../auth.js';
 
 /**
- * @param icon an icons.js node, e.g. closeIcon()
+ * @param icon an icons.js node, e.g. closeIcon() - nullable because every icon
+ *   builder returns `firstElementChild`, and elem() skips an absent child
  */
-export function iconBtn(icon: Element, title: string, onClick: (e: MouseEvent) => void): HTMLElement {
+export function iconBtn(icon: Element | null, title: string, onClick: (e: MouseEvent) => void): HTMLElement {
   return elem('button', { class: 'blk-ico', title, onClick }, icon);
 }
 /**
- * @param content text, an icons.js node, or a mix
+ * @param content text, an icons.js node, or a mix - a ChildSlot, i.e. exactly
+ *   what the elem() call below forwards it into
  */
-export function smallBtn(content: string | Node | (string | Node)[], onClick: (e: MouseEvent) => void): HTMLElement {
+export function smallBtn(content: ChildSlot, onClick: (e: MouseEvent) => void): HTMLElement {
   return elem('button', { class: 'blk-small', onClick }, content);
 }
 export function labelEl(text: string): HTMLElement {
-  return elem('label', null, text);
+  return elem('label', undefined, text);
 }
 export function labeledInput(label: string, value: string, onChange: (value: string) => void): HTMLElement {
   const input = elem('input', { value, onInput: () => onChange(input.value) });

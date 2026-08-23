@@ -1,4 +1,4 @@
-import type { GraphOptions, GraphController } from '../graph.js';
+import type { GraphController } from '../graph.js';
 /**
  * The handle mountGraphChrome() returns: the minimap surface the controller has
  * to be told about, the connect step that attaches the chrome to a live
@@ -13,9 +13,12 @@ export interface GraphChromeHandle {
 /**
  * Build the overlay chrome for a graph inside `container`.
  *
+ * It takes no options any more. What is left is the same for every caller, and
+ * the controls that were worth configuring are components now.
+ *
  * `container` is the same element the controller renders its canvas into: the
  * chrome sits on top by z-index (see app/css/graph.css), not by DOM order, and
  * NOTHING here ever clears the container - that habit is exactly what made the
  * engine and a component renderer fight over the same children.
  */
-export declare function mountGraphChrome(container: HTMLElement, options?: GraphOptions): GraphChromeHandle;
+export declare function mountGraphChrome(container: HTMLElement): GraphChromeHandle;

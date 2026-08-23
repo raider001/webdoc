@@ -8,7 +8,7 @@ import { setLinkSearch } from './editor/richtext.js';
 import { loadResults, combinedStatus } from './coverage.js';
 import { loadPlugins } from './plugins.js';
 import { buildRequirementIndex, revealRequirement, revealTest, routeParams, requirementList, testList, setCoverageStatus } from './requirements.js';
-import { state, el, app, defaultId, getDoc } from './app-shell.js';
+import { state, el, mustEl, app, defaultId, getDoc } from './app-shell.js';
 import { loadIslands } from './islands.js';
 import { renderDoc, setupDocSearch, registerMounted, teardownMounted } from './reader.js';
 import { setupEditButtons } from './authoring.js';
@@ -22,12 +22,16 @@ import { announce } from './announce.js';
 let appDrawer = null;
 // ---- Theme ----------------------------------------------------------------
 function setupTheme() {
-    const btn = el('themeBtn'), root = document.documentElement;
+    const btn = mustEl('themeBtn'), root = document.documentElement;
     const sync = () => {
         const dark = root.getAttribute('data-theme') === 'dark';
         btn.setAttribute('aria-pressed', String(dark));
         btn.textContent = '';
-        btn.appendChild(dark ? sunIcon() : moonIcon());
+        // The icon builders return the fragment's firstElementChild, so they are
+        // typed nullable; a button with no glyph beats a boot that throws over one.
+        const icon = dark ? sunIcon() : moonIcon();
+        if (icon)
+            btn.appendChild(icon);
     };
     btn.addEventListener('click', () => {
         const dark = root.getAttribute('data-theme') === 'dark';
@@ -58,8 +62,8 @@ async function mountShellIslands() {
         appDrawer.close(); };
     const islands = await loadIslands();
     // Drawer.
-    islands.mountDocTree(el('treeList'), select);
-    islands.mountSearchHits(el('searchResults'), select);
+    islands.mountDocTree(mustEl('treeList'), select);
+    islands.mountSearchHits(mustEl('searchResults'), select);
     app.setTreeActive = islands.setActive;
     app.invalidateTree = islands.invalidateTree;
     // The article's teardown registry, published so a module that MOUNTS something
@@ -70,9 +74,9 @@ async function mountShellIslands() {
     app.registerMounted = registerMounted;
     // Reading-view satellites. Mounted ONCE, here, and driven by props for the
     // rest of the session - see app/svelte/islands/reader.js for why.
-    islands.mountCrumbs(el('crumbs'));
-    islands.mountToc(el('tocList'), el('content'));
-    islands.mountFooter(el('footPrev'), el('footNext'));
+    islands.mountCrumbs(mustEl('crumbs'));
+    islands.mountToc(mustEl('tocList'), mustEl('content'));
+    islands.mountFooter(mustEl('footPrev'), mustEl('footNext'));
     app.setDocChrome = (docId, toc, assumes, next) => {
         islands.setCrumbs(docId);
         islands.setToc(toc);
@@ -105,7 +109,7 @@ let searchIsland = null;
  * also attached its own listener, every later click would toggle twice.
  */
 function lazyOverlayButton(btnId, load) {
-    const btn = el(btnId);
+    const btn = mustEl(btnId);
     let ready = null;
     btn.addEventListener('click', async () => {
         const first = !ready;
@@ -124,7 +128,7 @@ function lazyOverlayButton(btnId, load) {
 }
 // ---- Drawer ---------------------------------------------------------------
 function setupDrawer() {
-    const drawer = el('doc-tree'), scrim = el('scrim'), btn = el('hamburger');
+    const drawer = mustEl('doc-tree'), scrim = mustEl('scrim'), btn = mustEl('hamburger');
     /** Where focus was before the drawer took it, to hand back on close. */
     let lastFocus = null;
     const open = () => {
@@ -144,7 +148,7 @@ function setupDrawer() {
             lastFocus.focus();
     };
     btn.addEventListener('click', () => (drawer.hidden ? open() : close()));
-    el('drawerClose').addEventListener('click', close);
+    mustEl('drawerClose').addEventListener('click', close);
     scrim.addEventListener('click', close);
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !drawer.hidden)
         close(); });
@@ -152,9 +156,9 @@ function setupDrawer() {
 }
 // ---- All-documents search (titles + headings) in the drawer ---------------
 function setupDrawerSearch() {
-    const input = el('treeSearch');
-    const results = el('searchResults');
-    const tree = el('treeList');
+    const input = mustEl('treeSearch');
+    const results = mustEl('searchResults');
+    const tree = mustEl('treeList');
     let seq = 0, ctrl = null, timer = null;
     input.addEventListener('input', () => {
         const q = input.value.trim();
@@ -218,7 +222,11 @@ async function route() {
     const q = raw.indexOf('?'); // split off ?req=<ID>
     const id = decodeURIComponent(q === -1 ? raw : raw.slice(0, q));
     const query = q === -1 ? '' : raw.slice(q + 1);
-    const doc = getDoc(id) || getDoc(defaultId()); // lazy: id -> stub -> loadDoc on demand
+    // lazy: id -> stub -> loadDoc on demand. defaultId() is undefined when neither a
+    // configured defaultDoc nor a cached doc exists, which is the same "nothing to
+    // fall back to" the !doc branch below already reports.
+    const fallback = defaultId();
+    const doc = getDoc(id) || (fallback ? getDoc(fallback) : null);
     if (!doc)
         return showError('No documents found.');
     try {
@@ -249,9 +257,9 @@ function showRestricted(docId, detail) {
     // armed for the page the reader was on BEFORE hitting the restricted one - the
     // buttons acted on a document that is no longer what they are looking at.
     state.current = null;
-    el('editBtn').hidden = true;
-    el('deleteBtn').hidden = true;
-    const content = el('content');
+    mustEl('editBtn').hidden = true;
+    mustEl('deleteBtn').hidden = true;
+    const content = mustEl('content');
     teardownMounted(content); // the restricted panel replaces the article
     content.textContent = '';
     // restrictedPanel() returns a `.wd-mounted` host straight away and mounts the
@@ -266,8 +274,8 @@ function showRestricted(docId, detail) {
     // time the component updated - or, worse, would fight it silently.
     if (app.setDocChrome)
         app.setDocChrome(docId, [], [], []);
-    el('footPrev').hidden = true;
-    el('footNext').hidden = true;
+    mustEl('footPrev').hidden = true;
+    mustEl('footNext').hidden = true;
     const tocPane = el('toc');
     if (tocPane)
         tocPane.hidden = true;
@@ -275,7 +283,9 @@ function showRestricted(docId, detail) {
     announce('This page is restricted.');
 }
 function showError(msg) {
-    const content = el('content');
+    // mustEl, not el: a missing #content here is exactly the case the boot catch
+    // below wraps in its own try/catch and falls back to <body> for.
+    const content = mustEl('content');
     teardownMounted(content); // this replaces the article too
     content.textContent = '';
     content.appendChild(elem('div', 'doc-error', msg));
@@ -305,12 +315,13 @@ function setupTestRun() {
         const t = testList().find(x => x.id === id);
         if (!t)
             return;
-        const res = await loadResults(state.site && state.site.sources);
+        const sources = (state.site && state.site.sources) || [];
+        const res = await loadResults(sources);
         // runner.js imports editor.js (for richText), so it drags the whole editor
         // graph. Fetch it only when a reader actually presses Run on a test case.
         const { openRunner } = await import('./runner.js');
         openRunner({
-            tests: [t], results: res, sources: state.site && state.site.sources,
+            tests: [t], results: res, sources: sources,
             onSaved: () => {
                 setCoverageStatus(combinedStatus(requirementList(), testList(), res));
                 if (state.current)
@@ -342,7 +353,7 @@ function showIndexOverlay() {
         <div class="index-loading-note">First-time indexing of this library. Later starts are near-instant.</div>
       </div>
     </div>
-  `.firstElementChild;
+  `.firstElementChild; // the template above has exactly one root <div>, so never null
     document.body.appendChild(ov);
     announce('Preparing the document index.');
     indexOverlay = { ov: ov, track: track, fill: fill, stat: stat };
@@ -424,7 +435,7 @@ function startChangeWatcher() { setInterval(pollForChanges, 4000); }
 async function onExternalChange() {
     invalidateGraphModel();
     invalidateAccess(); // an edit anywhere can change a whole chapter's inherited ACL
-    await buildRequirementIndex(null, state.site.sources);
+    await buildRequirementIndex(null, (state.site && state.site.sources) || []);
     if (app.invalidateTree)
         app.invalidateTree(); // refetch open levels; keep the reader's expansion
     if (document.body.classList.contains('is-editing')) {
@@ -514,7 +525,7 @@ async function boot() {
     catch (e) {
         return showError('Could not reach the server config. Is serve.py running? (' + e.message + ')');
     }
-    el('brand').textContent = state.site.siteTitle || 'Documentation';
+    mustEl('brand').textContent = state.site.siteTitle || 'Documentation';
     // Accounts. loadAuth() is also what mints this browser's CSRF token, so it has
     // to happen before anything can be saved - and before the index calls below,
     // which the server answers differently depending on who is asking.
@@ -533,7 +544,7 @@ async function boot() {
     document.body.setAttribute('data-auth', auth.enabled ? (auth.user ? 'user' : 'anon') : 'off');
     // Load any opted-in renderer plugins (config "plugins"). Fault-tolerant: a
     // missing plugin or absent library is skipped, never blocking boot.
-    await loadPlugins(state.site.plugins);
+    await loadPlugins(state.site.plugins || []); // `plugins` is an optional site.json key
     // On a first-time cold index build, wait here with a progress bar (the tree /
     // search / map all need the index). Warm starts pass through instantly.
     await waitForIndex();

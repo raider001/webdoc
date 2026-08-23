@@ -8,7 +8,19 @@
 
 import { renderMarkdown, INTERIM } from '/js/commonmark.js';
 
-const $ = (id: string) => document.getElementById(id);
+/**
+ * Resolve an element this harness's own page declares.
+ *
+ * Throws rather than returning null: every id passed here is written in the
+ * sibling .html file, so an absent one is a broken harness, not a runtime
+ * condition to handle. Failing loudly at the first lookup beats threading a
+ * null through forty call sites - and beats a non-null assertion at each one.
+ */
+function $(id: string): HTMLElement {
+  const node = document.getElementById(id);
+  if (!node) throw new Error('harness: #' + id + ' is missing from the page');
+  return node;
+}
 /**
  * One case from the curated corpus (app/dev/corpus.json, 121 entries).
  *
@@ -24,7 +36,7 @@ interface CorpusCase {
   _note?: string;
 }
 
-document.getElementById('themeToggle').addEventListener('click', () => {
+$('themeToggle').addEventListener('click', () => {
   const root = document.documentElement;
   const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', next);
@@ -83,7 +95,12 @@ async function run() {
     return;
   }
 
-  const cases = corpus.filter(c => c && typeof c.markdown === 'string');
+  // A type predicate, not just a filter: it is what lets the loop below read
+  // c.markdown without re-proving it, and it encodes why the _note header entry
+  // (which carries no markdown) is skipped.
+  const hasMarkdown = (c: CorpusCase): c is CorpusCase & { markdown: string } =>
+    !!c && typeof c.markdown === 'string';
+  const cases = corpus.filter(hasMarkdown);
   const failures = $('failures');
   let pass = 0;
 
@@ -91,6 +108,9 @@ async function run() {
     let actual;
     try { actual = renderMarkdown(c.markdown); }
     catch (e) { actual = 'THREW: ' + e.message + '\n' + (e.stack || ''); }
+    // A corpus case without `html` asserts only that the parser does not throw;
+    // there is nothing to compare, so it counts as a pass and moves on.
+    if (typeof c.html !== 'string') { pass++; continue; }
     const expN = normalizeHtml(c.html);
     const actN = normalizeHtml(actual);
     if (expN === actN) { pass++; continue; }

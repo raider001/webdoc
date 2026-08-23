@@ -150,7 +150,7 @@ function escInline(s: string): string {
 function inlineToMd(node: Node): string {
   let out = '';
   node.childNodes.forEach(n => {
-    if (n.nodeType === 3) { out += escInline(n.nodeValue); return; }
+    if (n.nodeType === 3) { out += escInline(n.nodeValue || ''); return; }   // a text node always has one; `|| ''` is a no-op there
     if (n.nodeType !== 1) return;
     const el = n as Element;
     const tag = el.tagName.toLowerCase();
@@ -417,7 +417,7 @@ export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<st
   };
   holder.childNodes.forEach(n => {
     if (n.nodeType === 3) {
-      const hit = placeholder(n.nodeValue.trim());
+      const hit = placeholder((n.nodeValue || '').trim());   // nodeType 3 -> always a string
       if (hit) blocks.push(hit);
       return;
     }
@@ -433,7 +433,7 @@ export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<st
     else if (tag === 'pre') { const code = el.querySelector('code'); blocks.push({ type: 'code', lang: langOf(code), code: (code || el).textContent.replace(/\n$/, '') }); }
     else if (tag === 'hr') blocks.push({ type: 'hr' });
     else if (tag === 'table') blocks.push(tableBlock(el as HTMLTableElement));
-    else if (tag === 'figure' || tag === 'img') { const img = tag === 'img' ? el : el.querySelector('img'); if (img) blocks.push({ type: 'image', src: img.getAttribute('src'), alt: img.getAttribute('alt') || '' }); }
+    else if (tag === 'figure' || tag === 'img') { const img = tag === 'img' ? el : el.querySelector('img'); if (img) blocks.push({ type: 'image', src: img.getAttribute('src') || '', alt: img.getAttribute('alt') || '' }); }
     else if (el.textContent.trim()) blocks.push({ type: 'paragraph', html: el.innerHTML });
   });
   if (!blocks.length) blocks.push({ type: 'paragraph', html: '' });
@@ -445,17 +445,23 @@ export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<st
   const recovered = blocks.filter(b => b && (b.type === 'access-start' || b.type === 'access-end')).length;
   const lostMarkers = markers.length - recovered;
 
-  const meta: DocMeta = {
-    title: (docMeta && docMeta.title) || '',
-    description: (docMeta && docMeta.description) || '',
-    assumes: (docMeta && docMeta.assumes) ? docMeta.assumes.slice() : [],
-    next: (docMeta && docMeta.next) ? docMeta.next.slice() : [],
-    access: (docMeta && docMeta.access && typeof docMeta.access === 'object') ? docMeta.access : null,
-    _extra: {},
-  };
-  for (const key in (docMeta || {})) {
-    if (KNOWN_META_KEYS.indexOf(key) === -1) meta._extra[key] = docMeta[key];
+  // Unknown header keys ride through in _extra. Collected before the literal
+  // below so the header is read through one local that is definitely there,
+  // rather than through the optional parameter and the optional field.
+  const raw = docMeta || {};
+  const extra: Record<string, unknown> = {};
+  for (const key in raw) {
+    if (KNOWN_META_KEYS.indexOf(key) === -1) extra[key] = raw[key];
   }
+
+  const meta: DocMeta = {
+    title: raw.title || '',
+    description: raw.description || '',
+    assumes: raw.assumes ? raw.assumes.slice() : [],
+    next: raw.next ? raw.next.slice() : [],
+    access: (raw.access && typeof raw.access === 'object') ? raw.access : null,
+    _extra: extra,
+  };
   return { meta, blocks, lostMarkers };
 }
 function stripNums(el: Element): string {

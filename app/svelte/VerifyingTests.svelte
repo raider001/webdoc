@@ -25,6 +25,7 @@
   import { app } from '/js/app-shell.js';
   import { requirementList, testList } from '/js/requirements.js';
   import { computeTestStatus } from '/js/coverage.js';
+  import type { IconFactory } from './actions/icon.js';
   import { icon } from './actions/icon.js';
 
   import type { CoverageResults } from '/js/coverage.js';
@@ -76,7 +77,11 @@
     return (st && st.status) || 'untested';
   }
 
-  function glyph(status: string): () => Element {
+  // Returns an IconFactory, not `() => Element`: icons.ts builds each icon
+  // with a tagged template and hands back `.firstElementChild`, which is
+  // genuinely `Element | null`. The use:icon action already accepts that and
+  // renders nothing for a null - narrowing here would only be a lie.
+  function glyph(status: string): IconFactory {
     return status === 'pass' ? checkIcon : status === 'fail' ? closeIcon : circleIcon;
   }
 

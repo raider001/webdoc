@@ -27,11 +27,14 @@ import type { TestReportData } from './coverage-view.js';
  */
 type ReportDetail = TestReportData['detail'][number];
 
+// Hoisted out of esc() and named by its key domain. Indexed with the `string`
+// the replacer hands over, an inline object literal reads back as
+// possibly-absent even though the regex only ever matches these five - and it
+// was being rebuilt once per escaped character besides.
+const ESC_MAP: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 /** @param s - null/undefined render as empty, never "null" */
 function esc(s: string | null | undefined): string {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC_MAP[c]);
 }
 // Markdown as a SANITIZED HTML string, safe to embed in the standalone report.
 /** @param text - markdown source @returns sanitized HTML */
@@ -63,8 +66,14 @@ const LABEL: Record<string, string> = { pass: 'Pass', fail: 'Fail', partial: 'Pa
 // glyphs for the evidence list, same shapes as icons/check.svg and icons/close.svg.
 const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12L10 17L19 7"/></svg>';
 const CROSS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6L18 18"/><path d="M18 6L6 18"/></svg>';
-/** @param status - a CoverageStatus.status; missing/unknown falls back to 'untested' @returns HTML */
-function pill(status: string): string {
+/**
+ * @param status - a CoverageStatus.status; missing/unknown falls back to
+ *   'untested'. Undefined is a real case, not a defensive one: both call sites
+ *   read `.status` off a `statusOf(...) || {}`, which is empty for any id the
+ *   coverage map has no entry for.
+ * @returns HTML
+ */
+function pill(status: string | undefined): string {
   const st = status || 'untested';
   return '<span class="pill pill-' + st + '">' + esc(LABEL[st] || st) + '</span>';
 }

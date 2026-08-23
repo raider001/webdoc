@@ -7,8 +7,21 @@
 // would wait for data-done on a page that had run nothing at all.
 // Still type="module": it imports the engine straight from /js/commonmark.js.
 import { renderMarkdown } from '/js/commonmark.js';
-const $ = (id) => document.getElementById(id);
-document.getElementById('themeToggle').addEventListener('click', () => {
+/**
+ * Resolve an element this harness's own page declares.
+ *
+ * Throws rather than returning null: every id passed here is written in the
+ * sibling .html file, so an absent one is a broken harness, not a runtime
+ * condition to handle. Failing loudly at the first lookup beats threading a
+ * null through forty call sites - and beats a non-null assertion at each one.
+ */
+function $(id) {
+    const node = document.getElementById(id);
+    if (!node)
+        throw new Error('harness: #' + id + ' is missing from the page');
+    return node;
+}
+$('themeToggle').addEventListener('click', () => {
     const root = document.documentElement;
     const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', next);
@@ -96,6 +109,7 @@ async function run() {
             sections.set(section, { total: 0, pass: 0, fail: 0 });
             order.push(section);
         }
+        // Seeded on the line above when absent, so this is always present.
         const bucket = sections.get(section);
         bucket.total++;
         let actual;
@@ -145,6 +159,7 @@ async function run() {
     const tbody = document.createElement('tbody');
     const sectionReport = {};
     for (const name of order) {
+        // `order` only ever receives a name that was just put into `sections`.
         const b = sections.get(name);
         sectionReport[name] = { pass: b.pass, fail: b.fail, total: b.total };
         const tr = document.createElement('tr');

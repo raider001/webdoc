@@ -309,7 +309,12 @@ export async function describeFailure(res: Response): Promise<string> {
   if (res.status === 403 && body.aclChange) {
     return body.error || 'Changing who can see this page needs access-management rights.';
   }
-  if (res.status === 403 && body.redactedSections) return body.error;
+  if (res.status === 403 && body.redactedSections) {
+    // The server pairs this flag with its own sentence; the fallback is for a
+    // refusal that arrives without one, which otherwise handed the author the
+    // word "undefined" as their error message.
+    return body.error || 'This page contains sections you are not cleared to see, so it cannot be saved here.';
+  }
   if (res.status === 403) {
     const groups = body.requiresGroups || [];
     return groups.length
@@ -385,7 +390,7 @@ export function signInRequired(): boolean {
  * (a save can change a whole chapter's inherited ACL).
  */
 export async function docAccess(docId: string): Promise<DocAccess | null> {
-  if (accessCache.has(docId)) return accessCache.get(docId);
+  if (accessCache.has(docId)) return accessCache.get(docId)!;   // has() on the same line is the guarantee; a cached null is a real answer
   let info: DocAccess | null = null;
   try {
     const res = await fetch('/api/index/access?id=' + encodeURIComponent(docId),

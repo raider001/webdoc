@@ -22,6 +22,11 @@ function covLabel(st, kind) {
 // no forced reflow (the old version did ~2 reflows per node; this does none).
 export function computeNodeSize(g) {
     const ctx = document.createElement('canvas').getContext('2d');
+    // No 2D context (headless, or the browser's per-page context budget spent) means
+    // no text metrics to size the box from - fall back to the default box rather
+    // than taking the whole graph down over an optional measurement.
+    if (!ctx)
+        return { nodeW: LO.nodeW, nodeH: LO.nodeH };
     ctx.font = '600 13.5px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     let titleW = 0;
     for (const meta of g.model.nodes.values())
@@ -60,9 +65,10 @@ export function positionExternal(g) {
         const srcOf = new Map(); // external id -> the doc ids that link to it
         for (const pl of g.pageLinks) {
             if (String(pl.to).indexOf('ext:') === 0) {
-                if (!srcOf.has(pl.to))
-                    srcOf.set(pl.to, []);
-                srcOf.get(pl.to).push(pl.from);
+                let srcs = srcOf.get(pl.to);
+                if (!srcs)
+                    srcOf.set(pl.to, srcs = []);
+                srcs.push(pl.from);
             }
         }
         const PAD = 16;
@@ -218,7 +224,14 @@ export function renderScene(g) {
     g.container.appendChild(canvas);
     g.canvas = canvas;
     g.svgEl = canvas; // view.js/interactions.js address the surface as g.svgEl
-    g.ctx = canvas.getContext('2d');
+    // A canvas that hands back no 2D context can never paint a frame, and every
+    // line below assumes it can. Say so here, once and by name: the alternative is
+    // the same failure surfacing as "cannot read setTransform of null" from inside
+    // the draw loop two calls further down.
+    const ctx = canvas.getContext('2d');
+    if (!ctx)
+        throw new Error('The document map could not get a 2D drawing context for its canvas.');
+    g.ctx = ctx;
     g.dpr = window.devicePixelRatio || 1;
     g.colors = readColors(g.container);
     // Draw-state defaults (were DOM classes in the SVG version).
@@ -595,7 +608,7 @@ function doff(off, id, ax) { if (!off)
 /**
  * @returns whether either endpoint is a missing (dangling-reference) node
  */
-function touchesMissing(g, e) { const a = g.model.nodes.get(e.from), b = g.model.nodes.get(e.to); return (a && a.missing) || (b && b.missing); }
+function touchesMissing(g, e) { const a = g.model.nodes.get(e.from), b = g.model.nodes.get(e.to); return !!((a && a.missing) || (b && b.missing)); }
 /**
  * Draw the arrowhead at an edge's head end (prereq edges point AT the
  * prerequisite, i.e. the visually inverted end).
@@ -730,7 +743,7 @@ function drawNode(g, ctx, id, meta, isExt, st, sx, sy, sw, sh, tier) {
     if (hasCov) {
         ctx.font = fmt(11 * g.k) + 'px ui-sans-serif, system-ui, sans-serif';
         ctx.fillStyle = statusColor(C, st.status);
-        ctx.fillText(covLabel(st, g.kindOf(id)), sx + pad, cy + 2 * g.k);
+        ctx.fillText(covLabel(st, g.kindOf(id) || ''), sx + pad, cy + 2 * g.k);
         cy += 13 * g.k;
     }
     if (hasDesc && tier === 2) {

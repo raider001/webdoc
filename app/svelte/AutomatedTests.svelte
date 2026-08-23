@@ -27,6 +27,7 @@
   import { checkIcon, closeIcon, circleIcon } from '/js/icons.js';
   import { state as appState } from '/js/app-shell.js';
   import { testsFor, connectAutomated, disconnectAutomated, rememberAutoUrl, fetchXUnitCatalog } from '/js/coverage.js';
+  import type { IconFactory } from './actions/icon.js';
   import { icon } from './actions/icon.js';
 
   import type { AutoTestCatalogEntry, AutoTestRef, CoverageResults } from '/js/coverage.js';
@@ -75,7 +76,11 @@
     return e ? (e.pass ? 'pass' : 'fail') : 'untested';
   }
 
-  function glyph(status: string): () => Element {
+  // Returns an IconFactory, not `() => Element`: icons.ts builds each icon
+  // with a tagged template and hands back `.firstElementChild`, which is
+  // genuinely `Element | null`. The use:icon action already accepts that and
+  // renders nothing for a null - narrowing here would only be a lie.
+  function glyph(status: string): IconFactory {
     return status === 'pass' ? checkIcon : status === 'fail' ? closeIcon : circleIcon;
   }
 

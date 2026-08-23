@@ -10,9 +10,20 @@ import { highlightWithin } from '/js/highlighter.js';
 highlightWithin(document.body);
 
 const root = document.documentElement;
-const which = document.getElementById('which');
+/**
+ * Resolve an element this harness's own page declares. Throws rather than
+ * returning null: every id passed here is written in the sibling .html, so an
+ * absent one is a broken harness, not a runtime condition to handle.
+ */
+function $(id: string): HTMLElement {
+  const node = document.getElementById(id);
+  if (!node) throw new Error('harness: #' + id + ' is missing from the page');
+  return node;
+}
+
+const which = $('which');
 const show = () => { which.textContent = 'data-theme = ' + root.getAttribute('data-theme'); };
-document.getElementById('toggle').addEventListener('click', () => {
+$('toggle').addEventListener('click', () => {
   root.setAttribute('data-theme',
     root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
   show();

@@ -27,6 +27,10 @@ function covLabel(st: CoverageStatus, kind: string): string {
 // no forced reflow (the old version did ~2 reflows per node; this does none).
 export function computeNodeSize(g: GraphContext): { nodeW: number, nodeH: number } {
   const ctx = document.createElement('canvas').getContext('2d');
+  // No 2D context (headless, or the browser's per-page context budget spent) means
+  // no text metrics to size the box from - fall back to the default box rather
+  // than taking the whole graph down over an optional measurement.
+  if (!ctx) return { nodeW: LO.nodeW, nodeH: LO.nodeH };
   ctx.font = '600 13.5px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
   let titleW = 0;
   for (const meta of g.model.nodes.values()) titleW = Math.max(titleW, ctx.measureText(meta.title || '').width);
@@ -60,8 +64,8 @@ export function positionExternal(g: GraphContext): void {
     const srcOf = new Map<string, string[]>();  // external id -> the doc ids that link to it
     for (const pl of g.pageLinks) {
       if (String(pl.to).indexOf('ext:') === 0) {
-        if (!srcOf.has(pl.to)) srcOf.set(pl.to, []);
-        srcOf.get(pl.to).push(pl.from);
+        let srcs = srcOf.get(pl.to); if (!srcs) srcOf.set(pl.to, srcs = []);
+        srcs.push(pl.from);
       }
     }
     const PAD = 16;
@@ -95,7 +99,7 @@ export function positionExternal(g: GraphContext): void {
       return { x: Math.max(0, ax), y: ay + MAXR * STEP };
     };
     for (const en of g.externalNodes) {
-      let src: LayoutNode = null;
+      let src: LayoutNode | null = null;
       for (const s of (srcOf.get(en.id) || [])) { const p = layout.nodes.get(s); if (p) { src = p; break; } }
       const pos = src
         ? nearestFree(src.x + src.w / 2 - EXT_W / 2, src.y + src.h + DROP)
@@ -229,7 +233,13 @@ export function renderScene(g: GraphContext): void {
   g.container.appendChild(canvas);
   g.canvas = canvas;
   g.svgEl = canvas;                               // view.js/interactions.js address the surface as g.svgEl
-  g.ctx = canvas.getContext('2d');
+  // A canvas that hands back no 2D context can never paint a frame, and every
+  // line below assumes it can. Say so here, once and by name: the alternative is
+  // the same failure surfacing as "cannot read setTransform of null" from inside
+  // the draw loop two calls further down.
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('The document map could not get a 2D drawing context for its canvas.');
+  g.ctx = ctx;
   g.dpr = window.devicePixelRatio || 1;
   g.colors = readColors(g.container);
 
@@ -291,7 +301,7 @@ export function renderScene(g: GraphContext): void {
     return null;
   };
   g.edgeAtWorld = function (wx, wy, tol) {
-    let best: GraphEdgeItem = null, bestD = tol == null ? 8 : tol;
+    let best: GraphEdgeItem | null = null, bestD = tol == null ? 8 : tol;
     for (const e of g.edgeItems) {
       if (!g.vis[e.cat]) continue;
       const a = e.aabb;
@@ -443,7 +453,7 @@ function stepTween(g: GraphContext): void {
 interface VisibleNode {
   id: string;
   /** undefined for an external-link node */
-  meta: ModelGraphNode;
+  meta: ModelGraphNode | undefined;
   isExt: boolean;
   st: CoverageStatus | null;
   sx: number;
@@ -558,7 +568,7 @@ function doff(off: Map<string, { dx: number, dy: number }> | null, id: string, a
 /**
  * @returns whether either endpoint is a missing (dangling-reference) node
  */
-function touchesMissing(g: GraphContext, e: { from: string, to: string }): boolean { const a = g.model.nodes.get(e.from), b = g.model.nodes.get(e.to); return (a && a.missing) || (b && b.missing); }
+function touchesMissing(g: GraphContext, e: { from: string, to: string }): boolean { const a = g.model.nodes.get(e.from), b = g.model.nodes.get(e.to); return !!((a && a.missing) || (b && b.missing)); }
 
 /**
  * Draw the arrowhead at an edge's head end (prereq edges point AT the
@@ -589,7 +599,7 @@ function drawArrow(ctx: CanvasRenderingContext2D, pts: { x: number, y: number }[
  * @param meta - undefined for an external-link node
  * @param tier - 0 | 1 | 2
  */
-function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, meta: ModelGraphNode, isExt: boolean, st: CoverageStatus | null, sx: number, sy: number, sw: number, sh: number, tier: number): void {
+function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, meta: ModelGraphNode | undefined, isExt: boolean, st: CoverageStatus | null, sx: number, sy: number, sw: number, sh: number, tier: number): void {
   const C = g.colors;
   const isCurrent = !isExt && id === g.currentId;
   const isFlash = id === g.flashId;
@@ -651,7 +661,7 @@ function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, me
   if (hasCov) {
     ctx.font = fmt(11 * g.k) + 'px ui-sans-serif, system-ui, sans-serif';
     ctx.fillStyle = statusColor(C, st.status);
-    ctx.fillText(covLabel(st, g.kindOf(id)), sx + pad, cy + 2 * g.k); cy += 13 * g.k;
+    ctx.fillText(covLabel(st, g.kindOf(id) || ''), sx + pad, cy + 2 * g.k); cy += 13 * g.k;
   }
   if (hasDesc && tier === 2) {
     ctx.font = fmt(11.5 * g.k) + 'px ui-sans-serif, system-ui, sans-serif';
@@ -671,7 +681,7 @@ function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, me
  * group legend. Unrestricted nodes are never dimmed - "no groups" is not a group
  * you can switch off.
  */
-function dimmed(g: GraphContext, meta: ModelGraphNode): boolean {
+function dimmed(g: GraphContext, meta: ModelGraphNode | undefined): boolean {
   const groups = (meta && meta.groups) || [];
   if (!groups.length || !g.hiddenGroups || !g.hiddenGroups.size) return false;
   return groups.every(name => g.hiddenGroups.has(name));
@@ -680,7 +690,7 @@ function dimmed(g: GraphContext, meta: ModelGraphNode): boolean {
 /**
  * The first read group's colour, used as a node's identity tint at far zoom.
  */
-function groupTint(g: GraphContext, meta: ModelGraphNode): string | null {
+function groupTint(g: GraphContext, meta: ModelGraphNode | undefined): string | null {
   const groups = (meta && meta.groups) || [];
   return groups.length && g.groupColor ? g.groupColor(groups[0]) : null;
 }
@@ -693,7 +703,7 @@ function groupTint(g: GraphContext, meta: ModelGraphNode): string | null {
  * The band is drawn INSIDE the border and clipped to the node, so it reads as
  * part of the node rather than as another edge.
  */
-function drawAccess(g: GraphContext, ctx: CanvasRenderingContext2D, meta: ModelGraphNode, sx: number, sy: number, sw: number, sh: number, tier: number): void {
+function drawAccess(g: GraphContext, ctx: CanvasRenderingContext2D, meta: ModelGraphNode | undefined, sx: number, sy: number, sw: number, sh: number, tier: number): void {
   const groups = (meta && meta.groups) || [];
   if (!groups.length && !(meta && meta.locked)) return;
   const bandW = Math.max(2.5, 4 * g.k);

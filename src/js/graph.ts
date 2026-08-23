@@ -8,7 +8,7 @@
 //   layout.js        pure model + Sugiyama-lite layout math (DOM-free, testable)
 //   render.js        build the SVG scene (edges, nodes, external boxes) + sizing
 //   view.js          pan/zoom transform, fit, focus, search, minimap
-//   chrome.js        the edit-mode state machine (state only - no DOM)
+//   edit-state.js    the edit-mode state machine (state only - no DOM)
 //   interactions.js  pointer/wheel/keyboard wiring, init fit/flash, destroy
 //
 // THE ENGINE OWNS ONE ELEMENT: the <canvas> it appends to the host it was given.
@@ -24,7 +24,7 @@
 import { buildModel, layoutGraph, focusLayout } from './graph/layout.js';
 import { computeNodeSize, positionExternal, renderScene, startTween } from './graph/render.js';
 import { attachView } from './graph/view.js';
-import { attachEditState } from './graph/chrome.js';
+import { attachEditState } from './graph/edit-state.js';
 import { mountGraphChrome } from './graph/chrome-view.js';
 import { wireInteractions } from './graph/interactions.js';
 import { groupColor } from './auth.js';
@@ -61,10 +61,17 @@ export interface GraphInputDoc {
 
 /**
  * The options object accepted by createGraphController(): a large config /
- * callback bag mixing doc-map-only features (onDelete/mapModes/focus),
+ * callback bag mixing doc-map-only features (onDelete/mapMode/focusId),
  * coverage-view-only features (nodeStatus/nodeKind/autoSize), and edge data
  * (traceEdges/pageLinks/externalNodes). This file defines/defaults every
- * field; coverage-view.js is one concrete caller building an instance.
+ * field; MapOverlay.svelte and CoverageOverlay.svelte are the two concrete
+ * callers building an instance.
+ *
+ * IT IS ENGINE OPTIONS ONLY NOW. The fields that existed for the vanilla
+ * chrome to render - the list of offered map modes, the roster of access
+ * groups, the focus toggle, hideLegend - went when the map's chrome became
+ * components and graph/chrome-view.js stopped rendering any of them. What is
+ * left is what the CANVAS reads.
  */
 export interface GraphOptions {
   currentId?: string | null;
@@ -77,16 +84,11 @@ export interface GraphOptions {
   onConnect?: (from: string, to: string, type: string) => void;
   onDisconnect?: (from: string, to: string, type: string) => void;
   onDelete?: (id: string) => void;
-  mapModes?: { value: string, label: string, swatch: string }[];
   mapMode?: string | null;
   onMapMode?: (mode: string) => void;
-  /** every access group named in this payload (doc map) */
-  accessGroups?: string[];
   /** groups toggled off in the group legend */
   hiddenGroups?: Set<string>;
-  focusMode?: boolean;
   focusId?: string | null;
-  onFocusToggle?: () => void;
   traceEdges?: DocEdgeRef[];
   pageLinks?: DocEdgeRef[];
   externalNodes?: ExternalLinkNode[];
@@ -97,8 +99,6 @@ export interface GraphOptions {
   autoSize?: boolean;
   maxNodeW?: number;
   maxNodeH?: number;
-  /** chrome-view.js only; the engine has no legend to hide */
-  hideLegend?: boolean;
   /**
    * The surface to paint the minimap on. The engine draws it and handles clicks
    * on it, but never creates it: the frame around it is chrome.
@@ -255,7 +255,8 @@ export interface GraphRenderCtx {
   drawStop: () => void;
   /** synchronous full frame (perf harness / tests) */
   drawNow: () => void;
-  themeObs: MutationObserver;
+  /** nulled by destroy(), like g.ro, so a torn-down context holds no observer */
+  themeObs: MutationObserver | null;
   /** uniform spatial index for hit-testing */
   grid: { cell: number, map: Map<string, string[]> };
   nodeAtWorld: (wx: number, wy: number) => (string | null);
@@ -298,7 +299,7 @@ export interface GraphViewCtx {
 }
 
 /**
- * Stage 4, ./graph/chrome.js: the edit-mode state machine. No DOM: every one of
+ * Stage 4, ./graph/edit-state.js: the edit-mode state machine. No DOM: every one of
  * these mutates draw state and then reports through g.emitChange().
  */
 export interface GraphEditCtx {
@@ -453,9 +454,12 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
   // Both lookups accept a Map OR a plain object, so `.get` doubles as the probe
   // for which one arrived; the cast just tells the checker what that probe proved.
   g.nodeStatus = opts.nodeStatus || null; // Map/obj id -> {status, pct} for the coverage view (mutable via setStatus)
-  g.statusOf = (id: string) => g.nodeStatus ? (g.nodeStatus.get ? (g.nodeStatus as Map<string, CoverageStatus>).get(id) : (g.nodeStatus as Record<string, CoverageStatus>)[id]) : null;
+  // The trailing `?? null` normalises the miss: a Map reports it as undefined and
+  // an object as undefined too, and both callers ask "is there a status" - so one
+  // absent value, not two.
+  g.statusOf = (id: string) => (g.nodeStatus ? (g.nodeStatus.get ? (g.nodeStatus as Map<string, CoverageStatus>).get(id) : (g.nodeStatus as Record<string, CoverageStatus>)[id]) : null) ?? null;
   const nodeKind = opts.nodeKind || null;     // Map/obj id -> 'req' | 'test' (coverage view)
-  g.kindOf = (id: string) => nodeKind ? (nodeKind.get ? (nodeKind as Map<string, string>).get(id) : (nodeKind as Record<string, string>)[id]) : null;
+  g.kindOf = (id: string) => (nodeKind ? (nodeKind.get ? (nodeKind as Map<string, string>).get(id) : (nodeKind as Record<string, string>)[id]) : null) ?? null;
   // Edit-connections mode (enabled when connect/disconnect callbacks are given).
   g.onConnect = typeof opts.onConnect === 'function' ? opts.onConnect : null;
   g.onDisconnect = typeof opts.onDisconnect === 'function' ? opts.onDisconnect : null;
@@ -470,7 +474,8 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
   g.onMapMode = typeof opts.onMapMode === 'function' ? opts.onMapMode : null;
   // Access groups: which groups are dimmed, and the colour function. Purely
   // visual - the server already decided what is in this payload at all. The list
-  // of every group in the payload (opts.accessGroups) is the legend's, not ours.
+  // of every group to OFFER is the legend's business, and the legend is
+  // GroupLegend.svelte, which reads it off the map model without asking us.
   g.hiddenGroups = opts.hiddenGroups instanceof Set ? new Set(opts.hiddenGroups) : new Set();
   g.groupColor = groupColor;
   // Focus mode (doc map): when a node is focused, the map is laid out radially
@@ -555,7 +560,9 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
     },
     center: function (id) { const r = g.svgEl.getBoundingClientRect(); const n = g.layout.nodes.get(id) || (g.extPos && g.extPos.get(id)); return n ? { x: r.left + (n.cx != null ? n.cx : n.x + n.w / 2) * g.k + g.tx, y: r.top + (n.cy != null ? n.cy : n.y + n.h / 2) * g.k + g.ty } : null; },
     transform: function () { return { tx: g.tx, ty: g.ty, k: g.k }; },
-    setTransform: function (t) { if (t) { if (isFinite(t.tx)) g.tx = t.tx; if (isFinite(t.ty)) g.ty = t.ty; if (isFinite(t.k)) g.k = t.k; g.applyTransform(); } },
+    // Every field is optional, so each one is probed for presence before being
+    // range-checked - isFinite(undefined) was already false, this just says so.
+    setTransform: function (t) { if (t) { if (t.tx != null && isFinite(t.tx)) g.tx = t.tx; if (t.ty != null && isFinite(t.ty)) g.ty = t.ty; if (t.k != null && isFinite(t.k)) g.k = t.k; g.applyTransform(); } },
     redraw: function () { if (g.drawNow) g.drawNow(); },
     count: function () { return g.model.nodes.size; }
   };
@@ -631,11 +638,13 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
 /**
  * The engine plus this repo's standard vanilla chrome, composed into `container`.
  *
- * Kept because two callers still want exactly that pairing: map-view.js and, one
- * dynamic import away, the coverage view's `use:graph` action. Both hand over a
- * whole stage element and expect a map with zoom controls, a search box and a
- * minimap in it. It is a composition, not a layer: it adds no behaviour of its
- * own, and everything it returns is the controller's.
+ * Kept for ONE caller: the coverage view's `use:graph` action, a dynamic import
+ * away. It hands over a whole stage element and expects a graph with zoom
+ * controls, a search box and a minimap in it, and has no components of its own
+ * for those. The document map went the other way - it builds
+ * createGraphController directly and renders its chrome as Svelte - so this
+ * pairing is the coverage view's alone. It is a composition, not a layer: it
+ * adds no behaviour of its own, and everything it returns is the controller's.
  * @param container - a stage element the graph and its chrome may fill
  */
 export function createGraph(container: HTMLElement, docs: GraphInputDoc[], options?: GraphOptions): GraphController {
@@ -643,7 +652,7 @@ export function createGraph(container: HTMLElement, docs: GraphInputDoc[], optio
   // Chrome is BUILT first (it adds .graph-root, which is what gives the stage its
   // height - and the engine measures that height while fitting) but APPENDED last,
   // by connect(), so the canvas keeps its place at the front of the container.
-  const chrome = mountGraphChrome(container, opts);
+  const chrome = mountGraphChrome(container);
   const ctl = createGraphController(container, docs,
     Object.assign({}, opts, { minimapCanvas: chrome.minimapCanvas }));
   chrome.connect(ctl);

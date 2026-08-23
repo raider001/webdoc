@@ -18,7 +18,7 @@ So these tests pin two contracts:
     into screen pixels and click it.
 
 Deliberately selected on CLASS NAMES and roles rather than on DOM order between
-chrome elements: the port replaces the imperative builders in graph/chrome.js
+chrome elements: the port replaced the imperative builders in graph/chrome-view.js
 with components that keep the class names but need not keep the sibling order.
 
 The corpus is tests/fixtures/, mounted as the single source "Guides" by

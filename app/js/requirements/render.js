@@ -84,6 +84,10 @@ export function renderRequirements(article, docId) {
     const pending = [];
     article.querySelectorAll('pre > code.language-reqgroup').forEach(code => {
         const pre = code.parentElement;
+        // The `pre > code` selector is what guarantees the parent element; the
+        // early return is for the checker, which only sees Element | null here.
+        if (!pre)
+            return;
         const key = code.textContent.trim();
         const sep = key.indexOf('::');
         const dId = sep >= 0 ? key.slice(0, sep) : docId;

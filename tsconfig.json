@@ -15,6 +15,14 @@
     "baseUrl": ".",
     "paths": { "/js/*": ["src/js/*"] },
 
+    // Rung 4, reached 2026-08-23. The one class of bug the earlier rungs could
+    // not see: with this off, TypeScript also refuses to narrow a discriminated
+    // union keyed on a boolean literal, so `if (!r.ok)` does not refine a
+    // {ok:true} | {ok:false, error:string} result. Every nullable read in the
+    // codebase is now either proved, handled, or carries an assertion naming the
+    // line that establishes its invariant.
+    "strictNullChecks": true,
+
     "strict": false,
     "noImplicitAny": true,
 

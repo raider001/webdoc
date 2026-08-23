@@ -88,7 +88,10 @@ function ensureBar() {
 
 function wrapCode() {
   const sel = window.getSelection();
-  if (!sel.rangeCount || sel.isCollapsed) return;
+  // getSelection() really does return null (no selection host, detached document),
+  // which is why addLink and addImage below both guard for it. This one did not:
+  // reading .rangeCount off null threw instead of quietly doing nothing.
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
   const code = elem('code', { text: range.toString() });
   range.deleteContents();
@@ -199,7 +202,7 @@ function addImage() {
 export interface PopoverRect { bottom: number; left: number }
 // Shared bits: a labelled input row, and positioning below the anchoring rect.
 function popRow(labelText: string, input: HTMLElement) {
-  return elem('label', 'link-pop-row', elem('span', null, labelText), input);
+  return elem('label', 'link-pop-row', elem('span', undefined, labelText), input);
 }
 function positionPopover(pop: HTMLElement, rect: PopoverRect | null) {
   const r = rect || { bottom: 80, left: 80 };
@@ -239,8 +242,9 @@ function openImagePopover(o: ImagePopoverOptions) {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   }));
-  linkOff = e => { if (linkPop && !linkPop.contains(e.target as Node)) closeLinkPop(); };
-  setTimeout(() => document.addEventListener('mousedown', linkOff), 0);
+  const off = (e: MouseEvent) => { if (linkPop && !linkPop.contains(e.target as Node)) closeLinkPop(); };
+  linkOff = off;   // closeLinkPop() unregisters it again through this same reference
+  setTimeout(() => document.addEventListener('mousedown', off), 0);
   setTimeout(() => urlInput.focus(), 20);
 }
 
@@ -340,15 +344,18 @@ function openLinkPopover(o: LinkPopoverOptions) {
     if (!acItems.length) { if (acDrop) { acDrop.remove(); acDrop = null; } return; }
     if (acActive >= acItems.length) acActive = acItems.length - 1;
     if (!acDrop) { acDrop = elem('div', 'ac-drop link-ac'); document.body.appendChild(acDrop); }
-    acDrop.textContent = '';
-    acItems.forEach((d, idx) => append(acDrop,
+    // The line above makes it; a const also carries that through the forEach
+    // closure below, which a reassignable `let` would not.
+    const drop = acDrop;
+    drop.textContent = '';
+    acItems.forEach((d, idx) => append(drop,
       elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: MouseEvent) => { e.preventDefault(); pickDoc(d); } },
         elem('span', 'ac-id', d.title || d.id),
         elem('span', 'ac-desc', d.id))));
     const rc = urlInput.getBoundingClientRect();
-    acDrop.style.left = (window.scrollX + rc.left) + 'px';
-    acDrop.style.top = (window.scrollY + rc.bottom + 3) + 'px';
-    acDrop.style.minWidth = Math.max(220, rc.width) + 'px';
+    drop.style.left = (window.scrollX + rc.left) + 'px';
+    drop.style.top = (window.scrollY + rc.bottom + 3) + 'px';
+    drop.style.minWidth = Math.max(220, rc.width) + 'px';
   }
   function openUrlAc() {
     const raw = urlInput.value.trim();
@@ -360,7 +367,7 @@ function openLinkPopover(o: LinkPopoverOptions) {
       acTimer = setTimeout(async () => {
         const mySeq = ++acSeq;
         let items: LinkDoc[] = [];
-        try { items = await linkSearch(raw); } catch (e) { items = []; }
+        try { if (linkSearch) items = await linkSearch(raw); } catch (e) { items = []; }   // re-read at fire time; no hook = no suggestions
         if (mySeq !== acSeq) return;
         acItems = (items || []).slice(0, 8);
         renderUrlAc();
@@ -388,10 +395,11 @@ function openLinkPopover(o: LinkPopoverOptions) {
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   });
 
-  linkOff = function (e) {
+  const off = function (e: MouseEvent) {
     const t = e.target as Element;
     if (linkPop && !linkPop.contains(t) && !(t.closest && t.closest('.link-ac'))) closeLinkPop();
   };
-  setTimeout(() => document.addEventListener('mousedown', linkOff), 0);
+  linkOff = off;   // closeLinkPop() unregisters it again through this same reference
+  setTimeout(() => document.addEventListener('mousedown', off), 0);
   setTimeout(() => ((o.canText && !textInput.value) ? textInput : urlInput).focus(), 20);
 }
