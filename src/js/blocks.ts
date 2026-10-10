@@ -135,6 +135,7 @@ export function renderBlocks(root: Element, ctx: Record<string, unknown> = {}): 
   catch (e) { return; }
 
   Array.from(codes).forEach(code => {
+    if (code.closest('[data-reader-retained]')) return;
     const lang = langOf(code);
     if (!lang) return;
     const entry = registry.get(lang);

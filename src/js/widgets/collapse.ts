@@ -30,6 +30,9 @@ registerWidget({
       const saved = localStorage.getItem(key);
       if (saved !== null) details.open = saved === 'true';
     } catch { /* blocked storage still leaves an accessible disclosure */ }
+    if (details.dataset.readerOpen !== undefined) {
+      details.open = details.dataset.readerOpen === 'true'; delete details.dataset.readerOpen;
+    }
     let printing = false;
     let wasOpen = details.open;
     const toggle = () => {

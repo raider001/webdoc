@@ -2,6 +2,7 @@
 import { scanMetaBlocks, replaceMetaBlocks } from './meta-blocks.js';
 import { widgetDefinition } from './widgets/registry.js';
 import { scrubRendered } from './blocks.js';
+import { widgetFingerprint } from './reader-fingerprint.js';
 import './widgets/collapse.js';
 import './widgets/live.js';
 import './widgets/live-table.js';
@@ -24,6 +25,7 @@ export interface WidgetServices {
   renderContent: (markdown: string, docId: string, path: string, depth: number, complete?: boolean) => HTMLElement;
   register: (host: Element, destroy: () => void) => void;
   teardown: (root: Element) => void;
+  reuse?: (key: string, fingerprint: string) => HTMLElement | undefined;
 }
 
 export function preprocessWidgets(markdown: string): string {
@@ -38,8 +40,19 @@ export function renderWidgets(root: HTMLElement, services: WidgetServices): void
   codes.forEach((code, index) => {
     const pre = code.parentElement;
     if (!pre) return;
+    let spec: WidgetBlockSpec;
+    let fingerprint: string;
+    try {
+      spec = JSON.parse(code.textContent || '{}');
+      if (!spec || !spec.options || typeof spec.options !== 'object' || Array.isArray(spec.options) || typeof spec.markdown !== 'string') throw new Error('Invalid widget specification');
+      fingerprint = widgetFingerprint(spec, services.docId);
+    } catch { spec = { options: {}, markdown: '', error: 'Invalid widget specification' }; fingerprint = widgetFingerprint(spec, services.docId); }
+    const key = services.path + '.' + index;
+    const retained = services.reuse?.(key, fingerprint);
+    if (retained) { pre.replaceWith(retained); return; }
     const host = document.createElement('div');
     host.className = 'wd-widget';
+    host.dataset.widgetFingerprint = fingerprint;
     pre.replaceWith(host);
     const abort = new AbortController();
     let context: WidgetContext | undefined;
@@ -68,12 +81,10 @@ export function renderWidgets(root: HTMLElement, services: WidgetServices): void
       }
     });
     try {
-      const spec: WidgetBlockSpec = JSON.parse(code.textContent || '{}');
       if (spec.error) throw new Error(spec.error);
       if (services.depth >= 16) throw new Error('Widget nesting limit (16) reached');
       definition = widgetDefinition(String(spec.options?.widget || ''));
       if (!definition) throw new Error('Unknown widget: ' + String(spec.options?.widget || '(unnamed)'));
-      const key = services.path + '.' + index;
       host.dataset.widgetKey = key;
       const content = services.renderContent(spec.markdown || '', services.docId, key, services.depth + 1);
       context = {

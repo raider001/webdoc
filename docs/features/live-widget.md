@@ -68,5 +68,14 @@ This is interval polling, not a server push feed. Avoid cyclic live inclusions;
 all widgets have a nesting limit of 16. A changed live body is replaced as a
 fragment, so unsaved interactions inside that changed body are not retained.
 Neighbouring widgets remain untouched, and collapsible state inside the body
-can be restored by its stable `id`. Editing the dashboard file itself still
-rebuilds the article; editing only a live source does not.
+can be restored by its stable `id`.
+
+Background changes to the open document preserve the reading position using a
+nearby heading or block and its viewport offset, with a pixel-scroll fallback.
+Unchanged widgets retain their fetched data, local scroll and refresh state.
+Focus, unchanged selected text, open collapsibles and the contents highlight
+are restored where their corresponding elements still exist. Changes only to
+live/live-table fallback Markdown, or to source that produces the same sanitized
+output, leave the article mounted. An unrelated index change revalidates the
+current source with its ETag and refreshes the tree without moving the article.
+Explicit document navigation still starts at the top.

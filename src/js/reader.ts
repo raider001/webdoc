@@ -16,6 +16,8 @@ import { resolveResourceUrl } from './doclinks.js';
 import { restrictedSection } from './auth-ui.js';
 import { announce } from './announce.js';
 import { preprocessWidgets, renderWidgets } from './widgets.js';
+import { documentFingerprint } from './reader-fingerprint.js';
+import { captureReadingPosition } from './reader-position.js';
 
 import type { Doc } from './catalog.js';
 import type { TocEntry } from './numbering.js';
@@ -34,6 +36,8 @@ import type { RestrictedSectionSpec } from './auth-ui.js';
 // document, and auth-ui.ts, for a restricted-section notice. It is the ONLY such
 // registry - a second one would mean a teardown path that some mounts are not on.
 const mountedInArticle = new Map<Element, () => void>();
+const renderedFingerprints = new WeakMap<Element, string>();
+type WidgetReuse = (key: string, fingerprint: string) => HTMLElement | undefined;
 
 /**
  * Record a component mounted inside the article so it can be destroyed when the
@@ -54,14 +58,14 @@ export function teardownMounted(root: Element): void {
 }
 
 /** Render a fragment through the same pipeline, without page chrome or scroll resets. */
-export function renderContent(markdown: string, docId: string, path = 'page', depth = 0, complete = false, pageId = docId): HTMLElement {
+export function renderContent(markdown: string, docId: string, path = 'page', depth = 0, complete = false, pageId = docId, reuse?: WidgetReuse): HTMLElement {
   const body = preprocessWidgets(markdown);
   const root = elem('div', 'wd-widget-content', sanitizeToFragment(renderMarkdown(preprocessRequirements(body, docId))));
   prepareDocGroups(body, docId, docId.split('/')[0]);
   renderRequirements(root, docId);
   renderWidgets(root, { docId, pageId, path, depth,
-    renderContent: (body, sourceId, key, level, decorate) => renderContent(body, sourceId, key, level, decorate, pageId),
-    register: registerMounted, teardown: teardownMounted });
+    renderContent: (body, sourceId, key, level, decorate) => renderContent(body, sourceId, key, level, decorate, pageId, decorate ? undefined : reuse),
+    register: registerMounted, teardown: teardownMounted, reuse });
   if (complete) {
     numberHeadings(root, h => !h.closest('.wd-live,.wd-mounted'));
     root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(h => {
@@ -82,6 +86,7 @@ export function renderContent(markdown: string, docId: string, path = 'page', de
 function numberLiveHeadings(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>('.wd-live > .wd-widget-content').forEach(body => {
     const live = body.parentElement;
+    if (body.querySelector('[data-widget-heading-id]')) return;
     const key = live?.parentElement?.dataset.widgetKey || 'live';
     numberHeadings(body, h => h.closest('.wd-live') === live && !h.closest('.wd-mounted'));
     body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(h => {
@@ -116,8 +121,25 @@ function setDocChrome(doc: Doc, toc: TocEntry[]): void {
  * and refresh the header/footer chrome. The single entry point the shell's router
  * calls on every document navigation.
  */
-export function renderDoc(doc: Doc): void {
+export function renderDoc(doc: Doc, options: { preserveReading?: boolean } = {}): void {
   const content = mustEl('content');
+  const previous = content.querySelector<HTMLElement>('article.doc');
+  const fingerprint = documentFingerprint(doc);
+  const preserving = !!options.preserveReading && previous?.dataset.docId === doc.id && state.current?.id === doc.id;
+  if (preserving && renderedFingerprints.get(previous!) === fingerprint) return;
+  const restore = preserving ? captureReadingPosition(content, mustEl('tocList')) : null;
+  const widgets = new Map<string, HTMLElement>();
+  if (preserving) previous!.querySelectorAll<HTMLElement>('.wd-widget[data-widget-key]').forEach(host => widgets.set(host.dataset.widgetKey!, host));
+  const reuse: WidgetReuse | undefined = preserving ? (key, signature) => {
+    const host = widgets.get(key);
+    if (host?.dataset.widgetFingerprint !== signature) return undefined;
+    widgets.delete(key); host.dataset.readerRetained = 'true'; return host;
+  } : undefined;
+  // Retained widget hosts move into the new fragment before old mounts are
+  // destroyed, keeping their subscriptions, fetched data and local state.
+  const fragment = renderContent(doc.body || '', doc.id, 'page', 0, false, doc.id, reuse);
+  const behavior = content.style.scrollBehavior;
+  content.style.scrollBehavior = 'auto';
   // Tear down anything mounted INSIDE the previous article before the DOM it
   // lives in is destroyed. `content.textContent = ''` detaches nodes; it does
   // not stop a component's effects, which would go on running against detached
@@ -128,8 +150,8 @@ export function renderDoc(doc: Doc): void {
   content.textContent = '';
 
   // pipeline: extract requirement groups -> parse -> sanitize (inert) -> adopt
-  const fragment = renderContent(doc.body || '', doc.id);
   const article = elem('article', 'doc', ...Array.from(fragment.childNodes));
+  article.dataset.docId = doc.id;
   content.appendChild(article);
 
   // Surface the metadata description as a subtitle under the first heading.
@@ -143,6 +165,7 @@ export function renderDoc(doc: Doc): void {
   // `.secnum` labels onto the real headings - and returns the flat list the TOC
   // component renders. The mutation stays vanilla because it edits document
   // CONTENT; only its return value crosses into the store.
+  article.querySelectorAll('[data-reader-retained] .secnum').forEach(node => { if (!node.closest('.wd-live,.wd-mounted')) node.remove(); });
   const toc = numberHeadings(article, h => !h.closest('.wd-live,.wd-mounted'));
   numberLiveHeadings(article);
   const tocList = mustEl('tocList');
@@ -189,9 +212,11 @@ export function renderDoc(doc: Doc): void {
   // registers this; the server still re-checks every write).
   if (app.updateDocActions) app.updateDocActions(doc.id);
 
-  content.scrollTop = 0;
-  content.focus({ preventScroll: true });
-  announce('Loaded: ' + doc.title);
+  renderedFingerprints.set(article, fingerprint);
+  article.querySelectorAll<HTMLElement>('[data-reader-retained]').forEach(host => delete host.dataset.readerRetained);
+  if (restore) restore(article);
+  else { content.scrollTop = 0; content.focus({ preventScroll: true }); announce('Loaded: ' + doc.title); }
+  content.style.scrollBehavior = behavior;
 }
 
 /**
@@ -260,7 +285,7 @@ async function resolveLinks(article: HTMLElement, baseId: string): Promise<void>
   // undone by the component's next update, and the listeners attached here would
   // outlive the node they were bound to. A component that renders links is
   // responsible for its own routing.
-  const anchors = [...article.querySelectorAll('a[href]')].filter(a => !a.closest('.wd-mounted')) as HTMLAnchorElement[];
+  const anchors = [...article.querySelectorAll('a[href]')].filter(a => !a.closest('.wd-mounted,[data-reader-retained]')) as HTMLAnchorElement[];
   anchors.forEach(a => {
     const raw = a.getAttribute('href') || '';
     if (!raw) return;
@@ -322,7 +347,7 @@ async function resolveLinks(article: HTMLElement, baseId: string): Promise<void>
 // srcs are the author's explicit choice and left untouched. Pure client-side math.
 function resolveImages(article: HTMLElement, baseId: string): void {
   article.querySelectorAll('img[src]').forEach(img => {
-    if (img.closest('.wd-mounted')) return;   // Svelte's DOM; see resolveLinks
+    if (img.closest('.wd-mounted,[data-reader-retained]')) return;   // Svelte's or retained widget DOM
     const src = img.getAttribute('src');
     if (!src) return;                         // the img[src] selector above is what guarantees this
     const url = resolveResourceUrl(baseId, src);

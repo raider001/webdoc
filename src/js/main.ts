@@ -12,6 +12,7 @@ import { buildRequirementIndex, revealRequirement, revealTest, routeParams, requ
 import { state, el, mustEl, app, defaultId, getDoc } from './app-shell.js';
 import { loadIslands } from './islands.js';
 import { renderDoc, setupDocSearch, registerMounted, teardownMounted } from './reader.js';
+import { refreshReadingDocument } from './reader-refresh.js';
 import { setupEditButtons } from './authoring.js';
 import { elem } from './dom.js';
 import { html } from './html.js';
@@ -475,7 +476,9 @@ function startChangeWatcher(): void { setInterval(pollForChanges, 4000); }
 async function onExternalChange(): Promise<void> {
   const current = state.current;
   const sequence = routeSequence;
-  for (const doc of state.byId.values()) doc._loaded = false;
+  // Keep the current successful entry so conditional revalidation can use its
+  // ETag. Other pages are loaded lazily on navigation, never rendered here.
+  for (const doc of state.byId.values()) if (doc !== current) doc._loaded = false;
   invalidateGraphModel();
   invalidateAccess();   // an edit anywhere can change a whole chapter's inherited ACL
   await buildRequirementIndex(null, (state.site && state.site.sources) || []);
@@ -483,12 +486,8 @@ async function onExternalChange(): Promise<void> {
   if (document.body.classList.contains('is-editing')) {
     announce('Files changed on disk. Close the editor to see the latest version.');
   } else if (current && current === state.current && sequence === routeSequence) {
-    const previousBody = current.body;
-    const previousMeta = JSON.stringify(current.meta);
     try {
-      await loadDoc(current, true);
-      // A changed live source must not rebuild an unchanged dashboard article.
-      if (current === state.current && sequence === routeSequence && (current.body !== previousBody || JSON.stringify(current.meta) !== previousMeta)) renderDoc(current);
+      await refreshReadingDocument(current, () => current === state.current && sequence === routeSequence);
     }
     catch (e) { if (current === state.current && sequence === routeSequence) showError('This document is no longer available.'); }
   }
