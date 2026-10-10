@@ -15,6 +15,7 @@ import { highlightWithin } from './highlighter.js';
 import { resolveResourceUrl } from './doclinks.js';
 import { restrictedSection } from './auth-ui.js';
 import { announce } from './announce.js';
+import { preprocessWidgets, renderWidgets } from './widgets.js';
 
 import type { Doc } from './catalog.js';
 import type { TocEntry } from './numbering.js';
@@ -50,6 +51,45 @@ export function teardownMounted(root: Element): void {
     try { destroy(); } catch (e) { /* a failed teardown must not block the render */ }
     mountedInArticle.delete(host);
   }
+}
+
+/** Render a fragment through the same pipeline, without page chrome or scroll resets. */
+export function renderContent(markdown: string, docId: string, path = 'page', depth = 0, complete = false, pageId = docId): HTMLElement {
+  const body = preprocessWidgets(markdown);
+  const root = elem('div', 'wd-widget-content', sanitizeToFragment(renderMarkdown(preprocessRequirements(body, docId))));
+  prepareDocGroups(body, docId, docId.split('/')[0]);
+  renderRequirements(root, docId);
+  renderWidgets(root, { docId, pageId, path, depth,
+    renderContent: (body, sourceId, key, level, decorate) => renderContent(body, sourceId, key, level, decorate, pageId),
+    register: registerMounted, teardown: teardownMounted });
+  if (complete) {
+    numberHeadings(root, h => !h.closest('.wd-live,.wd-mounted'));
+    root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(h => {
+      if (h.closest('.wd-live,.wd-mounted')) return;
+      h.dataset.widgetHeadingId = h.id;
+      h.id = path + '-' + h.id;
+    });
+    numberLiveHeadings(root);
+    resolveLinks(root, docId);
+    resolveImages(root, docId);
+    renderBlocks(root, { docId });
+    renderRestrictedSections(root);
+    highlightWithin(root);
+  }
+  return root;
+}
+
+function numberLiveHeadings(root: HTMLElement): void {
+  root.querySelectorAll<HTMLElement>('.wd-live > .wd-widget-content').forEach(body => {
+    const live = body.parentElement;
+    const key = live?.parentElement?.dataset.widgetKey || 'live';
+    numberHeadings(body, h => h.closest('.wd-live') === live && !h.closest('.wd-mounted'));
+    body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(h => {
+      if (h.closest('.wd-live') !== live || h.closest('.wd-mounted')) return;
+      h.dataset.widgetHeadingId = h.id;
+      h.id = key + '-' + h.id;
+    });
+  });
 }
 
 /**
@@ -88,7 +128,8 @@ export function renderDoc(doc: Doc): void {
   content.textContent = '';
 
   // pipeline: extract requirement groups -> parse -> sanitize (inert) -> adopt
-  const article = elem('article', 'doc', sanitizeToFragment(renderMarkdown(preprocessRequirements(doc.body || '', doc.id))));
+  const fragment = renderContent(doc.body || '', doc.id);
+  const article = elem('article', 'doc', ...Array.from(fragment.childNodes));
   content.appendChild(article);
 
   // Surface the metadata description as a subtitle under the first heading.
@@ -102,14 +143,13 @@ export function renderDoc(doc: Doc): void {
   // `.secnum` labels onto the real headings - and returns the flat list the TOC
   // component renders. The mutation stays vanilla because it edits document
   // CONTENT; only its return value crosses into the store.
-  const toc = numberHeadings(article);
+  const toc = numberHeadings(article, h => !h.closest('.wd-live,.wd-mounted'));
+  numberLiveHeadings(article);
   const tocList = mustEl('tocList');
   setDocChrome(doc, toc);
 
   // Build THIS document's requirement/test blocks from its (loaded) body - enriched
   // with the server-resolved trace-from / verified-by - then replace the placeholders.
-  prepareDocGroups(doc.body || '', doc.id, doc.source);
-  renderRequirements(article, doc.id);
 
   // Resolve in-body links: internal doc-id refs -> hash routes, in-page anchors
   // -> smooth scroll, external URLs -> open in a new tab. (Heading ids exist now.)
@@ -236,8 +276,17 @@ async function resolveLinks(article: HTMLElement, baseId: string): Promise<void>
     if (raw.startsWith('#')) {                                  // in-page anchor
       const id = decodeURIComponent(raw.slice(1));
       a.addEventListener('click', ev => {
-        const target = article.querySelector('#' + cssEsc(id));
-        if (target) { ev.preventDefault(); target.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+        const scope = a.closest('.wd-widget-content') || article;
+        const target = scope.querySelector('#' + cssEsc(id)) ||
+          [...scope.querySelectorAll<HTMLElement>('[data-widget-heading-id]')].find(h => h.dataset.widgetHeadingId === id) ||
+          article.querySelector('#' + cssEsc(id));
+        if (target) {
+          ev.preventDefault();
+          for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+            if (parent instanceof HTMLDetailsElement) parent.open = true;
+          }
+          target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }
       });
       return;
     }

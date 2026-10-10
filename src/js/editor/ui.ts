@@ -4,6 +4,7 @@
 import { elem } from '../dom.js';
 import type { ChildSlot } from '../dom.js';
 import { auth } from '../auth.js';
+import { registeredWidgets, widgetDisplayName } from '../widgets.js';
 
 /**
  * @param icon an icons.js node, e.g. closeIcon() - nullable because every icon
@@ -58,11 +59,14 @@ let menuEl: HTMLElement | null = null;
  * @param anchor the menu is positioned below this element
  * @param pick called with the chosen block type
  */
-export function openBlockMenu(anchor: Element, pick: (type: string) => void): void {
+export function openBlockMenu(anchor: Element, pick: (type: string) => void, widgetsOnly = false): void {
   if (menuEl) menuEl.remove();
   menuEl = elem('div', 'blk-menu',
-    BLOCK_MENU.filter(item => !item.acl || auth.canEditAccess)
-      .map(item => elem('button', { onClick: () => { pick(item.type); close(); } }, item.label)));
+    (widgetsOnly ? [] : BLOCK_MENU).filter(item => !item.acl || auth.canEditAccess)
+      .map(item => elem('button', { type: 'button', onClick: () => { pick(item.type); close(); } }, item.label)),
+    registeredWidgets().map(widget => elem('button', { type: 'button', class: 'blk-widget-menu-item', 'aria-label': widgetDisplayName(widget), onClick: () => { pick('widget:' + widget.name); close(); } },
+      elem('span', { class: 'widget-type-icon', 'aria-hidden': true }, widget.icon || '◇'),
+      elem('span', undefined, elem('strong', undefined, widgetDisplayName(widget)), elem('small', undefined, widget.description || '')))));
   document.body.appendChild(menuEl);
 
   const rect = anchor.getBoundingClientRect();

@@ -79,6 +79,8 @@ export interface GraphOptions {
   onOpenDoc?: (id: string) => void;
   /** single click / Enter */
   onSelect?: (id: string) => void;
+  /** Optional: a background click clears document selection in the map. */
+  onClearSelection?: () => void;
   /** double click */
   onActivate?: (id: string) => void;
   onConnect?: (from: string, to: string, type: string) => void;
@@ -284,7 +286,7 @@ export interface GraphViewCtx {
   zoomCenter: (factor: number) => void;
   flash: (id: string) => void;
   focus: (id: string) => boolean;
-  setCurrent: (id: string) => void;
+  setCurrent: (id: string | null) => void;
   search: (query: string) => (string | null);
   buildMinimap: () => void;
   updateMinimap: () => void;
@@ -392,7 +394,7 @@ export interface GraphController {
   fit: () => void;
   focus: (id: string) => boolean;
   search: (query: string) => (string | null);
-  setCurrent: (id: string) => void;
+  setCurrent: (id: string | null) => void;
   setEditMode: (on: boolean) => void;
   setConnector: (type: string) => void;
   setMapMode: (mode: string) => void;

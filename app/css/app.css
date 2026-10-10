@@ -139,7 +139,7 @@ a:hover { text-decoration:underline; }
 }
 .toc-pane {
   border-right:1px solid var(--border); background:var(--surface);
-  overflow:auto; padding:20px 12px 40px 18px;
+  overflow:auto; padding:20px 12px 40px 18px; scrollbar-gutter:stable;
 }
 .toc-cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); opacity:.9; margin:0 0 10px; }
 #tocList ol { list-style:none; margin:0; padding:0; }
@@ -160,7 +160,7 @@ a:hover { text-decoration:underline; }
 #tocList .lvl-4 a { padding-left:54px; }
 #tocList .lvl-5 a, #tocList .lvl-6 a { padding-left:70px; }
 
-.content-pane { overflow:auto; padding:0 0 100px; }
+.content-pane { overflow:auto; padding:0 0 100px; scrollbar-gutter:stable; }
 .doc { max-width:var(--content-max); margin:0 auto; padding:8px 32px 0; }
 
 /* ---- Footer --------------------------------------------------------------- */
@@ -199,7 +199,7 @@ a:hover { text-decoration:underline; }
 .drawer-title { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); opacity:.85; }
 .drawer-search { padding:0 14px 10px; }
 .drawer-search input { width:100%; }
-.tree { overflow:auto; padding:4px 8px 24px; }
+.tree { overflow:auto; padding:4px 8px 24px; scrollbar-gutter:stable; }
 .tree details { margin:1px 0; }
 .tree summary {
   list-style:none; cursor:pointer; padding:5px 8px; border-radius:6px;
@@ -218,7 +218,7 @@ a:hover { text-decoration:underline; }
 .tree a.doc-link:hover { background:var(--surface-2); color:var(--text); text-decoration:none; transform:translateX(2px); }
 
 /* All-documents search results (drawer) */
-.search-results { overflow:auto; padding:6px 8px 24px; }
+.search-results { overflow:auto; padding:6px 8px 24px; scrollbar-gutter:stable; }
 .search-results[hidden] { display:none; }
 .search-empty { color:var(--muted); font-size:13.5px; padding:8px 10px; }
 .search-hit {
@@ -278,6 +278,8 @@ a:hover { text-decoration:underline; }
 }
 .doc hr { border:none; border-top:1px solid var(--border); margin:32px 0; }
 .doc table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow-sm); }
+/* Narrow screens: a wide table scrolls inside its own box instead of pushing the whole page sideways (10 Oct). */
+@media (max-width: 760px) { .doc table { display:block; max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; } }
 .doc th, .doc td { border:1px solid var(--border); padding:8px 11px; text-align:left; }
 .doc th { background:linear-gradient(180deg, var(--surface-2), var(--surface)); font-weight:700; }
 .doc tbody tr { transition:background var(--dur); }

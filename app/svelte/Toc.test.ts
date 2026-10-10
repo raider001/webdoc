@@ -81,4 +81,15 @@ describe('Toc', () => {
     expect(container.querySelector('ol')).toBeTruthy();
     expect(container.querySelectorAll('a').length).toBe(0);
   });
+
+  it('opens enclosing collapsible widgets before focusing a heading', () => {
+    const pane = contentPane(entries);
+    const heading = pane.querySelector('#getting-started')!;
+    const details = document.createElement('details');
+    details.append(heading); pane.append(details);
+    const { container } = render(Toc, { props: { entries, contentEl: pane } });
+    container.querySelector('a[data-target="getting-started"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(details.open).toBe(true);
+    expect(document.activeElement).toBe(heading);
+  });
 });

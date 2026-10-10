@@ -27,6 +27,7 @@ const keepNative: Plugin = {
 };
 
 export default defineConfig({
+  cacheDir: '.cache/vite',
   plugins: [keepNative, svelte({ emitCss: false })],
   build: {
     outDir: 'app/build',

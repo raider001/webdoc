@@ -4,6 +4,12 @@
 
 # Authoring Reference
 
+For paired Markdown widgets and their visual-editor blocks, see
+[Collapsible Sections](Docs/features/collapsible),
+[Widget Extension API](Docs/features/widget-api) and
+[Auto-Update Sections](Docs/features/live-widget) and
+[Auto-Update Tables](Docs/how-to/live-table).
+
 A WebDocs document is a plain Markdown file. There is no build step for a
 document and no front-matter processor to install — you save a `.md` file inside
 a configured source folder and it is discovered the next time the library loads.
@@ -54,7 +60,9 @@ The recognised fields:
 | `access` | object | Who may read and modify this document. Only meaningful on a server with accounts enabled; inert otherwise. See [Access rules](#access-rules). |
 
 `assumes` and `next` are arrays of document ids, and either may hold several
-entries. A reference to an id that does not resolve to a real document is not an
+entries. Repeated ids are kept once, in first-occurrence order, in both the
+server index and reader. A reference to an id that does not resolve to a real
+document is not an
 error — it is flagged as a dangling link and shown as a placeholder node on the
 map, which is a useful way to spot a document you have not written yet.
 

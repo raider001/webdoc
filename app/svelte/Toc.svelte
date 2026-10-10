@@ -18,6 +18,7 @@
 -->
 <script lang="ts">
   import type { TocEntry } from '/js/numbering.js';
+  import { uniqueBy } from '/js/lists.js';
 
   interface Props {
     entries?: TocEntry[];
@@ -43,6 +44,9 @@
     ev.preventDefault();
     const target = contentEl.querySelector<HTMLElement>('#' + cssEscape(entry.id));
     if (!target) return;
+    for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
     target.scrollIntoView({ block: 'start', behavior: 'smooth' });
     target.setAttribute('tabindex', '-1');
     target.focus({ preventScroll: true });
@@ -66,7 +70,7 @@
 </script>
 
 <ol>
-  {#each entries as entry (entry.id)}
+  {#each uniqueBy(entries, entry => entry.id) as entry (entry.id)}
     <li class="lvl-{entry.level}"><a href="#{entry.id}" data-target={entry.id} onclick={ev => jump(ev, entry)}><span class="n">{entry.number}</span>{entry.text}</a></li>
   {/each}
 </ol>

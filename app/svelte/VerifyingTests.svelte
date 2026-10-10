@@ -23,6 +23,7 @@
 <script lang="ts">
   import { closeIcon, checkIcon, circleIcon } from '/js/icons.js';
   import { app } from '/js/app-shell.js';
+  import { uniqueStrings, uniqueBy } from '/js/lists.js';
   import { requirementList, testList } from '/js/requirements.js';
   import { computeTestStatus } from '/js/coverage.js';
   import type { IconFactory } from './actions/icon.js';
@@ -63,7 +64,7 @@
   const linked = $derived.by(() => {
     void version;
     const rec = requirementList().find(r => r.id === reqId);
-    return (rec && rec.verifiedBy) || [];
+    return uniqueStrings(rec && rec.verifiedBy);
   });
 
   /** Status per test id, for the dot in front of each entry. */
@@ -176,7 +177,7 @@
     <span class="cov-medit-status">{note}</span>
   </div>
   <div class="cov-vtest-drop" hidden={!dropOpen || !options.length}>
-    {#each options as t (t.id)}
+    {#each uniqueBy(options, t => t.id) as t (t.id)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="cov-vtest-opt" onmousedown={ev => link(ev, t.id)}>
         <span class="cov-vtest-optname">{t.name || t.id}</span>

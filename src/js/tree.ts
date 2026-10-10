@@ -32,10 +32,29 @@ export interface TreeLevel {
   docs: TreeDoc[];
 }
 
-export async function fetchChildren(path: string): Promise<TreeLevel> {
+import { uniqueBy, uniqueStrings } from './lists.js';
+
+export function normalizeTree(data: TreeLevel): TreeLevel {
+  return { folders: uniqueStrings(data.folders), docs: uniqueBy(data.docs || [], doc => doc.id) };
+}
+
+// Render/effect retries share even failed requests. Retry belongs to a new
+// index generation, never to an unrelated document rendering failure.
+let cachedGeneration: number | undefined;
+const levels = new Map<string, Promise<TreeLevel>>();
+export function fetchChildren(path: string, generation = 0): Promise<TreeLevel> {
+  if (generation !== cachedGeneration) { levels.clear(); cachedGeneration = generation; }
+  const existing = levels.get(path);
+  if (existing) return existing;
+  const request = readChildren(path);
+  levels.set(path, request);
+  return request;
+}
+
+async function readChildren(path: string): Promise<TreeLevel> {
   try {
     const res = await fetch('/api/index/tree?path=' + encodeURIComponent(path || ''), { cache: 'no-cache' });
     if (!res.ok) return { folders: [], docs: [] };
-    return await res.json();
+    return normalizeTree(await res.json());
   } catch (e) { return { folders: [], docs: [] }; }
 }

@@ -22,6 +22,7 @@
 -->
 <script lang="ts">
   import { groupColor, groupLabel } from '/js/auth.js';
+  import { uniqueStrings } from '/js/lists.js';
 
   /**
    * `hidden` arrives as the Set inside the controller's change event, which is a
@@ -40,7 +41,7 @@
 
 <div class="graph-groups">
   <p class="graph-groups-title">Access groups</p>
-  {#each groups as name (name)}
+  {#each uniqueStrings(groups) as name (name)}
     <button
       type="button"
       class="graph-group-item"

@@ -40,9 +40,12 @@ tests/.serve-e2e.log
 # See .github/workflows/ and docs/requirements/system.md (sys_9).
 # ---------------------------------------------------------------------------
 .vite/
+.cache/
 app/js/
 app/build/
 app/dev/*.js
 app/dev/*.d.ts
 app/thirdpartyrenderer/mermaid.js
 app/thirdpartyrenderer/mermaid.d.ts
+app/thirdpartyrenderer/widget-panel.js
+app/thirdpartyrenderer/widget-panel.d.ts

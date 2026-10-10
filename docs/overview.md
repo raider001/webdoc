@@ -83,7 +83,11 @@ See [Test Coverage](Docs/features/test-coverage).
 new-document modal or the in-page edit button, that normalises back to Markdown
 and saves it to the server. See [Authoring](Docs/reference/authoring).
 - **Search** — an all-documents search over titles and headings, from the drawer.
-See [Search](Docs/features/search).
+  See [Search](Docs/features/search).
+- **Widgets** — [collapsible sections](Docs/features/collapsible), a
+  [widget extension API](Docs/features/widget-api), and
+  [auto-update sections](Docs/features/live-widget) and
+  [auto-update tables](Docs/how-to/live-table) that refresh in place.
 - **Access control** — optional accounts and access groups, with per-document
 read and modify rules that flow recursively down the Recommended-next chain, and
 restrictions on individual sections. Off by default; on a server without it

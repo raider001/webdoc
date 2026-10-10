@@ -5,7 +5,10 @@ import { tick } from 'svelte';
 // The server is the thing under test's only dependency, so it is the only thing
 // faked. Everything else - the store, the lazy effect, the recursion - is real.
 const fetchChildren = vi.fn();
-vi.mock('/js/tree.js', () => ({ fetchChildren: (...a: unknown[]) => fetchChildren(...a) }));
+vi.mock('/js/tree.js', async importOriginal => ({
+  ...await importOriginal<typeof import('/js/tree.js')>(),
+  fetchChildren: (...a: unknown[]) => fetchChildren(...a),
+}));
 
 const { default: TreeFolder } = await import('./TreeFolder.svelte');
 const { treeState, invalidateTree } = await import('./stores/tree.svelte.js');
@@ -30,7 +33,7 @@ describe('TreeFolder', () => {
     treeState.expanded['Guides/concepts'] = true;
     const { container } = render(TreeFolder, { props: { name: 'concepts', path: 'Guides/concepts', onSelect: () => {} } });
     await tick(); await wait(); await tick();
-    expect(fetchChildren).toHaveBeenCalledWith('Guides/concepts');
+    expect(fetchChildren).toHaveBeenCalledWith('Guides/concepts', expect.any(Number));
     expect(container.querySelector('a.doc-link[data-id="Guides/concepts/a"]')).toBeTruthy();
   });
 
@@ -62,5 +65,18 @@ describe('TreeFolder', () => {
     const { container } = render(TreeFolder, { props: { name: 'concepts', path: 'Guides/concepts', onSelect: () => {} } });
     await tick(); await wait(); await tick();
     expect(container.querySelector('details[data-path="Guides/concepts/deeper"]')).toBeTruthy();
+  });
+
+  it('does not subscribe the loading effect to incidental synchronous dependency reads', async () => {
+    fetchChildren.mockImplementation(() => {
+      void treeState.activeId;
+      return Promise.resolve({ folders: [], docs: [] });
+    });
+    treeState.expanded['LM/models'] = true;
+    render(TreeFolder, { props: { name: 'models', path: 'LM/models', onSelect: () => {} } });
+    await tick(); await wait();
+    treeState.activeId = 'LM/models/failed';
+    await tick(); await wait();
+    expect(fetchChildren).toHaveBeenCalledTimes(1);
   });
 });

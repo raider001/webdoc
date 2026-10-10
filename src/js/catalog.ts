@@ -5,6 +5,7 @@
 // on demand (whose <!--meta--> header is split off client-side).
 
 import { errorMessage } from './errors.js';
+import { uniqueStrings } from './lists.js';
 
 /**
  * One entry of site.json's `sources` array, describing a doc source folder;
@@ -70,6 +71,7 @@ export interface Doc {
   assumes?: string[];
   next?: string[];
   _loaded?: boolean;
+  _etag?: string;
   /**
    * bumped by loadDoc every time the body is (re)read; see the comment at that
    * assignment for who needs it and why the id alone is not enough to tell two
@@ -86,7 +88,7 @@ export async function loadSite(): Promise<SiteConfig> {
 
 // Split a raw file into { meta, body }. The metadata is a JSON object wrapped
 // in an HTML comment: <!--meta { ... } -->  at the very top of the file.
-const META_RE = /^﻿?\s*<!--\s*meta\b([\s\S]*?)-->\s*/i;
+const META_RE = /^﻿?\s*<!--\s*meta\b(?!\s+(?:start|end)\b)([\s\S]*?)-->\s*/i;
 
 /**
  * @param text - raw file contents
@@ -97,7 +99,12 @@ export function splitMeta(text: string): { meta: DocMeta, body: string, metaErro
   let meta: DocMeta = {}, metaError: string | null = null;
   try {
     meta = JSON.parse(m[1].trim());
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw new Error('Metadata must be an object');
+    for (const field of ['assumes', 'next'] as const) {
+      if (field in meta) meta[field] = uniqueStrings(meta[field]);
+    }
   } catch (e) {
+    meta = {};
     metaError = String(e && errorMessage(e) || e);
   }
   return { meta, body: text.slice(m[0].length), metaError };
@@ -153,13 +160,21 @@ export function isRestrictedError(e: unknown): e is RestrictedError {
 
 /**
  * Fetch a single document's text and parse its metadata. Caches on the doc
- * (mutates and returns the same object; a no-op if already loaded).
+ * (mutates and returns the same object; a no-op if already loaded unless the
+ * navigation path asks for session-protected conditional revalidation).
  *
  * Throws a RestrictedError when the server refuses the document (401/403).
  */
-export async function loadDoc(doc: Doc): Promise<Doc> {
-  if (doc._loaded) return doc;
-  const res = await fetch(doc.url, { cache: 'no-cache', credentials: 'same-origin' });
+export async function loadDoc(doc: Doc, revalidate = false): Promise<Doc> {
+  if (doc._loaded && !revalidate) return doc;
+  const headers: Record<string, string> = {};
+  if (doc._loaded && doc._etag) headers['If-None-Match'] = doc._etag;
+  let res: Response;
+  try { res = await fetch(doc.url, { cache: 'no-cache', credentials: 'same-origin', headers }); }
+  catch (error) { doc._loaded = false; throw error; }
+  if (res.status === 304 && doc._loaded) return doc;
+  // A refusal or network error must not leave a reusable successful cache entry.
+  doc._loaded = false;
   if (res.status === 401 || res.status === 403) {
     // Restricted, not missing. Carry the server's explanation (which groups would
     // open it, whether signing in would help) on the error so the router can show
@@ -170,6 +185,7 @@ export async function loadDoc(doc: Doc): Promise<Doc> {
   }
   if (!res.ok) throw new Error('Document not found: ' + doc.id);
   const text = await res.text();
+  doc._etag = res.headers.get('ETag') || undefined;
   const { meta, body, metaError } = splitMeta(text);
   doc.meta = meta || {};
   doc.body = body;

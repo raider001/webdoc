@@ -16,6 +16,7 @@
 -->
 <script lang="ts">
   import { state, titleFromId } from '/js/app-shell.js';
+  import { uniqueStrings } from '/js/lists.js';
 
   interface Props {
     caption: string;
@@ -23,6 +24,7 @@
   }
 
   let { caption, ids = [] }: Props = $props();
+  const links = $derived(uniqueStrings(ids));
 
   /**
    * Lazy boot no longer preloads every document, so a target's real title is
@@ -40,6 +42,6 @@
   }
 </script>
 
-{#if ids.length}
-  <span class="foot-cap">{caption}</span><ul class="foot-links">{#each ids as id (id)}<li><a href="#/{id}">{label(id)}</a></li>{/each}</ul>
+{#if links.length}
+  <span class="foot-cap">{caption}</span><ul class="foot-links">{#each links as id (id)}<li><a href="#/{id}">{label(id)}</a></li>{/each}</ul>
 {/if}

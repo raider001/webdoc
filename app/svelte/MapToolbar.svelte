@@ -23,12 +23,13 @@
    */
   interface Props {
     focusMode: boolean;
+    focusDisabled?: boolean;
     onZoom: (factor: number) => void;
     onFit: () => void;
     onFocusToggle: () => void;
   }
 
-  let { focusMode, onZoom, onFit, onFocusToggle }: Props = $props();
+  let { focusMode, focusDisabled = false, onZoom, onFit, onFocusToggle }: Props = $props();
 
   /**
    * One zoom step. 1.25 in, its reciprocal out, so an in-then-out pair returns
@@ -66,6 +67,7 @@
   class="graph-focus-toggle"
   class:is-on={focusMode}
   aria-pressed={focusMode ? 'true' : 'false'}
-  title="Focus mode: click a node to centre the map on it and its links (Esc resets)"
+  disabled={focusDisabled}
+  title={focusDisabled ? 'Turn off selected tree filtering to use radial focus' : 'Focus mode: click a node to centre the map on it and its links (Esc resets)'}
   onclick={onFocusToggle}
 ><span class="wd-mounted" use:icon={focusIcon}></span> Focus</button>

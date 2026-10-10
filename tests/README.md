@@ -1,5 +1,28 @@
 # Web Document Tool — dev test harness
 
+## Widget unit checks
+
+Build first (`npm run build`), then run `npm test`, `npm run check` and
+`npm run lint`. Vitest includes `tests/unit/` alongside the Svelte component
+tests. The widget tests cover nested/malformed metadata, real requirement/test
+component rendering, plugin lifecycle failures, mocked live fetches, session
+changes, polling/cancellation, typed/custom editors, CSV/JSON/Markdown tables,
+column formats and editor round-trips. They exercise the compiled
+`app/js/` modules served to readers, so rebuild after changing `src/`.
+
+The server index/redaction/validator and data access/containment tests need only
+Python's standard library:
+
+```powershell
+python -m unittest discover -s tests/unit -p 'test_*.py' -v
+```
+
+Vite/Vitest use the runner config loader and worktree-local `.cache/` directories
+so a shared read-only `node_modules` junction is supported. Vitest uses one
+worker. For a separate preview of a site with an external `indexDir`, set
+`WEBDOC_INDEX_DIR` to a worktree-local folder and `WEBDOC_INDEX_WORKERS=1`
+before starting `serve.py`. These variables affect that process only.
+
 Playwright end-to-end tests **and** the true CommonMark conformance measurement,
 driven entirely through Playwright's **Python** binding (`pytest-playwright`).
 
@@ -95,6 +118,14 @@ python -m pytest tests --junitxml=tests\report.xml
 ```
 
 ## Notes
+
+The built-module and Svelte widget/metadata regressions run with `npm run build`
+followed by `npm test`. Server extraction, duplicate relation rows and document
+ETag/access checks also have a stdlib-only suite:
+
+```powershell
+python -m unittest discover -s tests/unit -p 'test_*.py'
+```
 
 * `test_conformance.py` is **non-gating on 100%**. The engine was validated
   against a curated 120-case subset, so the official number is expected to be

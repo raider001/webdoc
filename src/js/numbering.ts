@@ -32,13 +32,14 @@ export interface TocEntry {
  * Walk headings in document order, inject "1.2.1"-style labels, assign stable
  * ids, and return a flat TOC array.
  */
-export function numberHeadings(root: ParentNode): TocEntry[] {
+export function numberHeadings(root: ParentNode, include: (heading: HTMLHeadingElement) => boolean = () => true): TocEntry[] {
   const heads = root.querySelectorAll('h1,h2,h3,h4,h5,h6') as NodeListOf<HTMLHeadingElement>;
   const counters = [0, 0, 0, 0, 0, 0];
   const used = new Set<string>();
   const toc: TocEntry[] = [];
 
   heads.forEach(h => {
+    if (!include(h)) return;
     const L = +h.tagName[1];
     counters[L - 1] += 1;
     for (let d = L; d < 6; d++) counters[d] = 0;

@@ -29,6 +29,7 @@
 <script lang="ts">
   import { closeIcon, externalLinkIcon, playIcon } from '/js/icons.js';
   import { requirementList, testList } from '/js/requirements.js';
+  import { uniqueStrings } from '/js/lists.js';
   import { computeTestStatus, manualTests } from '/js/coverage.js';
   import { icon } from './actions/icon.js';
   import StepReport from './StepReport.svelte';
@@ -191,7 +192,7 @@
   {:else if id}
     <p class="cov-report-desc tc-report-sub"><code>{id}</code> <span class="tc-result tc-result-{testStatus}">{testLabel}</span></p>
     {#if test && test.verifies.length}
-      <p class="cov-report-link">Verifies: {#each test.verifies as rid, i (rid)}{#if i}, {/if}<a href="#/{reqDoc(rid)}?req={rid}" onclick={onCloseView}>{rid}</a>{/each}</p>
+      <p class="cov-report-link">Verifies: {#each uniqueStrings(test.verifies) as rid, i (rid)}{#if i}, {/if}<a href="#/{reqDoc(rid)}?req={rid}" onclick={onCloseView}>{rid}</a>{/each}</p>
     {/if}
     {#if test}
       <a class="cov-report-link" href="#/{test.docId}?test={id}" onclick={onCloseView}>Open in its document <span class="wd-mounted" use:icon={externalLinkIcon}></span></a>

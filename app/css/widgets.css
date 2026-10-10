@@ -1,0 +1,118 @@
+.wd-widget { margin: 1rem 0; }
+.wd-extension-panel {
+  border: 1px solid var(--border); border-radius: .5rem;
+  background: var(--surface); overflow: hidden;
+}
+:is(.doc, .blk-widget-preview) details.wd-collapse {
+  margin: 0; border: 0; border-inline-start: 2px solid var(--border-strong);
+  border-radius: 0; background: transparent; overflow: visible;
+}
+:is(.doc, .blk-widget-preview) details.wd-collapse > summary {
+  display: grid; grid-template-columns: 1em minmax(0, 1fr); gap: .5em;
+  padding: .625em .875em; position: relative; list-style: none; cursor: pointer;
+  color: var(--text); background: transparent; border: 0; border-radius: var(--radius);
+  font-size: 1.125em; font-weight: 700; line-height: 1.35; letter-spacing: -.01em;
+  transition: background var(--dur) ease;
+}
+:is(.doc, .blk-widget-preview) details.wd-collapse > summary::-webkit-details-marker { display: none; }
+:is(.doc, .blk-widget-preview) details.wd-collapse > summary::marker { content: ''; }
+:is(.doc, .blk-widget-preview) details.wd-collapse > summary::before {
+  content: ''; position: static; width: 1em; height: 1em; margin-block-start: .175em;
+  border: 0; background: var(--accent); transform: rotate(0);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m9 5 7 7-7 7' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform var(--dur) ease;
+}
+:is(.doc, .blk-widget-preview) details.wd-collapse[open] { border-inline-start-color: var(--accent); }
+:is(.doc, .blk-widget-preview) details.wd-collapse[open] > summary::before { transform: rotate(90deg); }
+:is(.doc, .blk-widget-preview) details.wd-collapse > summary:hover { background: var(--surface); }
+.wd-collapse-title { min-width: 0; overflow-wrap: anywhere; }
+.wd-collapse-title[contenteditable] { cursor: text; user-select: text; }
+:is(.doc, .blk-widget-preview) details.wd-collapse > summary:focus-visible,
+.wd-collapse-title:focus-visible, .wd-live button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; box-shadow: var(--ring); }
+:is(.doc, .blk-widget-preview) details.wd-collapse > .wd-widget-content {
+  margin: 0; padding: .25em .875em .625em 2.375em;
+}
+/* Native details semantics remain intact; modern engines interpolate auto height. */
+@supports (interpolate-size: allow-keywords) {
+  .wd-collapse::details-content {
+    block-size: 0; overflow: clip; interpolate-size: allow-keywords;
+    transition: block-size var(--dur) ease, content-visibility var(--dur) allow-discrete;
+  }
+  .wd-collapse[open]::details-content { block-size: auto; }
+}
+.wd-widget-content { padding: .4rem 1rem; overflow-wrap: anywhere; }
+.wd-widget-content:empty { display: none; }
+.wd-live { min-width: 0; background: transparent; border: 0; }
+.wd-live-toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5em .875em; align-items: baseline; padding: .25em 1em; border: 0; background: transparent; }
+.wd-collapse .wd-live-toolbar { padding-inline: 0; }
+.wd-live button { color: var(--accent); background: transparent; border: 1px solid transparent; border-radius: var(--radius); padding: .25em .625em; font: inherit; font-size: .8125em; cursor: pointer; transition: background var(--dur), color var(--dur); }
+.wd-live button:hover { color: var(--accent-hover); background: var(--accent-soft); }
+.wd-live button:disabled { color: var(--muted); cursor: progress; }
+.wd-live-status { min-width: 0; overflow-wrap: anywhere; font-size: .8125em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wd-collapse .wd-live > .wd-widget-content { padding: 0; }
+.wd-collapse .wd-live > .wd-widget-content > :first-child { margin-block-start: .5em; }
+.wd-widget-error { padding: .8rem 1rem; border: 1px solid var(--border); color: var(--text); }
+.wd-extension-panel > strong { display: block; padding: .8rem 1rem 0; }
+.blk-widget-children { padding-left: .5rem; border-left: 2px solid var(--border); }
+.blk-widget-fields label, .blk-widget > label { display: flex; flex-direction: column; gap: .3rem; }
+.blk-widget-fields input[type="checkbox"] { align-self: flex-start; }
+.widget-editor-heading { display: flex; align-items: center; gap: .6rem; padding: .5rem 0; }
+.widget-edit-btn { margin-left: auto; }
+.widget-editor-description, .widget-field-hint { color: var(--muted); font-size: .85rem; }
+.blk-widget-settings { padding: 1rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--surface); }
+.blk-widget-settings[hidden] { display: none; }
+.widget-field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .9rem; }
+.widget-field-error { color: #c73535; font-size: .85rem; min-height: .2rem; }
+.widget-field[data-invalid="true"] input, .widget-field[data-invalid="true"] select { border-color: #c73535; }
+.blk-widget input:not([type="checkbox"]), .blk-widget select, .blk-widget textarea { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: .35rem; padding: .4rem .5rem; min-width: 0; }
+.blk-widget button:not(.wd-live button) { color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: .35rem; padding: .3rem .6rem; cursor: pointer; }
+.blk-widget button:disabled { opacity: .55; cursor: default; }
+.widget-document-picker { display: flex; flex-wrap: wrap; gap: .4rem; }
+.widget-document-picker > input { flex: 1; }
+.widget-picker-tree { flex-basis: 100%; max-height: 18rem; overflow: auto; border: 1px solid var(--border); padding: .5rem; }
+.widget-picker-tree > button { display: block; width: 100%; text-align: left; margin-top: .3rem; }
+.widget-picker-tree[hidden] { display: none; }
+.widget-picker-path { display: flex; justify-content: space-between; gap: .5rem; }
+.widget-column-row { display: grid; grid-template-columns: minmax(5rem,1fr) minmax(5rem,1fr) minmax(5rem,1fr) auto auto auto; gap: .3rem; margin-bottom: .4rem; }
+.widget-columns-editor > button { margin-right: .4rem; }
+.widget-interval { display: flex; align-items: center; gap: .5rem; }
+.widget-advanced, .widget-fallback-editor { margin: .7rem 0; }
+.widget-advanced summary, .widget-fallback-editor summary { cursor: pointer; }
+.widget-advanced textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
+.blk-widget-menu-item { display: flex !important; gap: .6rem; align-items: flex-start; }
+.blk-widget-menu-item small { display: block; max-width: 23rem; white-space: normal; color: var(--muted); margin-top: .15rem; }
+.widget-type-icon { font-size: 1.2rem; min-width: 1.1rem; }
+.wd-table-data { overflow: auto; max-height: 36rem; padding: .5rem 1rem; }
+.wd-table-data table { width: 100%; border-collapse: collapse; }
+.wd-table-data th, .wd-table-data td { padding: .4rem .6rem; border-bottom: 1px solid var(--border); text-align: left; }
+.wd-status { display: inline-block; border-radius: 1rem; padding: .15rem .5rem; font-size: .85rem; border: 1px solid currentColor; }
+.wd-status-good { color: #248446; }.wd-status-bad { color: #c73535; }.wd-status-pending { color: #a46d00; }.wd-status-neutral { color: var(--muted); }
+@media (max-width: 700px) { .widget-column-row { grid-template-columns: 1fr 1fr; } }
+@media (prefers-reduced-motion: reduce) {
+  .wd-collapse::details-content, .wd-collapse > summary, .wd-collapse > summary::before, .wd-live button { transition: none; }
+}
+@media print {
+  .wd-collapse > .wd-widget-content { display: block !important; }
+  .wd-collapse::details-content { block-size: auto !important; content-visibility: visible !important; overflow: visible; transition: none; }
+  :is(.doc, .blk-widget-preview) details.wd-collapse { border: 0; }
+  .wd-live-toolbar { display: none; }
+  .wd-collapse, .wd-live, .wd-extension-panel { background: transparent; overflow: visible; }
+  .wd-table-data { max-height: none; overflow: visible; }
+}
+
+/* 10 Oct (the user): Refresh and "updated" sit in line with the title instead of taking their own row.
+   Inside a collapsible: overlaid on the collapsible's header row (outside <summary>, so clicking Refresh never toggles it).
+   Standalone: floated beside the first line of the fetched content. */
+:is(.doc, .blk-widget-preview) details.wd-collapse { position: relative; }
+:is(.doc, .blk-widget-preview) details.wd-collapse:has(> .wd-widget-content > .wd-widget:first-child > .wd-live) > summary { padding-inline-end: 12em; }
+:is(.doc, .blk-widget-preview) details.wd-collapse > .wd-widget-content > .wd-widget:first-child > .wd-live > .wd-live-toolbar {
+  position: absolute; inset-block-start: 0; inset-inline-end: .875em; block-size: calc(1.125em * 2.6);
+  display: flex; flex-wrap: nowrap; align-items: center; padding: 0; z-index: 1;
+}
+:is(.doc, .blk-widget-preview) details.wd-collapse > .wd-widget-content > .wd-widget:first-child > .wd-live > .wd-widget-content > :first-child { margin-block-start: 0; }
+.wd-live { display: flow-root; }
+.wd-live > .wd-live-toolbar { float: right; padding: .15em 0 0 1em; }
+@media (max-width: 520px) {
+  :is(.doc, .blk-widget-preview) details.wd-collapse:has(> .wd-widget-content > .wd-widget:first-child > .wd-live) > summary { padding-inline-end: 7em; }
+  :is(.doc, .blk-widget-preview) details.wd-collapse > .wd-widget-content > .wd-widget:first-child > .wd-live > .wd-live-toolbar { flex-direction: column; align-items: flex-end; justify-content: center; gap: 0; }
+}

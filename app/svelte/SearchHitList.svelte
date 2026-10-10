@@ -11,6 +11,7 @@
 -->
 <script lang="ts">
   import { searchState } from './stores/search.svelte.js';
+  import { uniqueBy } from '/js/lists.js';
   import SearchHit from './SearchHit.svelte';
 
   interface Props {
@@ -25,7 +26,7 @@
 {:else if !searchState.hits.length}
   <p class="search-empty">No documents match “{searchState.query}”.</p>
 {:else}
-  {#each searchState.hits as hit (hit.docId)}
+  {#each uniqueBy(searchState.hits, hit => hit.docId) as hit (hit.docId)}
     <SearchHit {hit} {onSelect} />
   {/each}
 {/if}

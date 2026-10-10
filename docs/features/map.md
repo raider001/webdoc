@@ -41,6 +41,27 @@ Each category has a **legend toggle**, so you can show or hide prerequisite,
 recommended-next, requirement-trace or page-link edges independently to
 declutter the view and focus on one kind of relationship at a time.
 
+## Display selected tree only
+
+The bottom display bar includes **Display selected tree only**, off by default.
+Turn it on to show the selected page, its entire prerequisite chain (`assumes`)
+and its entire recommended-next chain (`next`). These chains are followed
+independently: a prerequisite's other recommendations do not enter the view.
+Only requirement traces and page links directly touching the selected page are
+included, in either direction. Links from those neighbours are not followed.
+The existing edge legend keeps the relationship types distinguishable.
+
+Selecting another page recomputes and animates the smaller layout using the
+already-loaded graph. Click empty canvas space or press Escape to clear the
+selection; the full graph returns with the hint **Select a page to show its
+tree**. Switching the option off also returns to the full graph and restores
+its earlier pan/zoom during the same map session. Edge visibility and access
+group settings remain in place. Radial Focus is disabled while this option is
+on. The option is keyboard accessible and remembered per site in localStorage.
+
+Cycles are handled without recursion. Missing prerequisite or next targets
+retain the map's existing missing-page placeholders.
+
 ## External links become boxes
 
 Not every link points at another document. When the prose links to an outside

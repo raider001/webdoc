@@ -21,6 +21,7 @@
 // The `.svelte.ts` extension is required - it is what tells the compiler to
 // process runes in a plain module rather than treat $state as an undefined name.
 import type { TocEntry } from '/js/numbering.js';
+import { uniqueStrings } from '/js/lists.js';
 
 export interface ShellState {
   /** the routed document; the breadcrumb is its id, segment by segment */
@@ -53,6 +54,6 @@ export function setToc(toc: TocEntry[]): void { shellState.toc = toc; }
  * neither must clear both.
  */
 export function setFootLinks(assumes: string[], next: string[]): void {
-  shellState.assumes = assumes || [];
-  shellState.next = next || [];
+  shellState.assumes = uniqueStrings(assumes);
+  shellState.next = uniqueStrings(next);
 }

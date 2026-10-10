@@ -31,6 +31,10 @@ Read them in order for a tour, or jump straight to the job at hand:
   code highlighting, and embedded HTML.
 - [Add a diagram](Docs/how-to/diagrams) — turn a fenced block into a rendered,
   pannable diagram.
+- [Add a collapsible section](Docs/how-to/collapsible),
+  [add a widget plugin](Docs/how-to/widget-plugins), and
+  [refresh a section in place](Docs/how-to/live-widget), and
+  [add an auto-update table](Docs/how-to/live-table).
 - [Trace requirements](Docs/how-to/requirements) — author requirement tables that
   trace to and from one another.
 - [Check test coverage](Docs/how-to/coverage) — see which requirements are

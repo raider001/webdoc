@@ -19,6 +19,7 @@ import { sunIcon, moonIcon } from './icons.js';
 import { auth, loadAuth, signInRequired, invalidateAccess } from './auth.js';
 import { setupAccountButton, mountSignInWall, restrictedPanel } from './auth-ui.js';
 import { announce } from './announce.js';
+import { createIndexWatcher } from './index-watch.js';
 
 import type { RestrictedDetail, SourceConfig } from './catalog.js';
 import type { CoverageResults } from './coverage.js';
@@ -68,6 +69,7 @@ interface IndexStatus {
   docs: number;
   /** bumped by the server every time it rescans and finds the corpus changed */
   generation?: number;
+  version?: string;
 }
 
 /**
@@ -273,7 +275,9 @@ function setupDrawerSearch() {
  * document (lazily loading it via getDoc/loadDoc), renders it, and reveals any
  * deep-linked requirement or test.
  */
+let routeSequence = 0;
 async function route(): Promise<void> {
+  const sequence = ++routeSequence;
   const hash = location.hash || '';
   if (!hash.startsWith('#/')) return; // ignore in-page anchors etc.
   const raw = hash.slice(2);
@@ -287,17 +291,30 @@ async function route(): Promise<void> {
   const doc = getDoc(id) || (fallback ? getDoc(fallback) : null);
   if (!doc) return showError('No documents found.');
   try {
-    await loadDoc(doc);
+    // Navigation also checks the index; disk edits need no full-page reload.
+    // Raw-document ETags catch an edit even before the ten-second rescan.
+    try { await indexWatcher.check(); } catch (e) { /* document fetch can still succeed */ }
+    if (sequence !== routeSequence) return;
+    await loadDoc(doc, true);
+    if (sequence !== routeSequence) return;
     state.current = doc;
     renderDoc(doc);
     const { req, test } = routeParams(query);      // deep-link to a requirement or test
     if (req) requestAnimationFrame(() => revealRequirement(req));
     if (test) requestAnimationFrame(() => revealTest(test));
   } catch (e) {
+    if (sequence !== routeSequence) return;
+    doc._loaded = false;
     // A restricted page is not an error - it is a page with a different body.
     // loadDoc attaches the server's refusal so the reader is told which groups
     // would open it rather than being shown "could not load".
     if (isRestrictedError(e)) return showRestricted(doc.id, e.detail || {});
+    state.current = null;
+    mustEl('editBtn').hidden = true;
+    mustEl('deleteBtn').hidden = true;
+    // Clear the failed render's pending chrome too, so resolving tree promises
+    // cannot keep retrying it in the shell's shared Svelte flush.
+    if (app.setDocChrome) app.setDocChrome(doc.id, [], [], []);
     showError('Could not load "' + id + '": ' + errorMessage(e));
   }
 }
@@ -428,6 +445,7 @@ async function waitForIndex(): Promise<void> {
       const r = await fetch('/api/index/status', { cache: 'no-cache' });
       if (!r.ok) break;              // index disabled / unavailable -> proceed (app degrades gracefully)
       s = await r.json();
+      await indexWatcher.observe(s);
     } catch (e) { break; }
     if (!s || s.state === 'ready' || s.state === 'error') break;
     showIndexOverlay();
@@ -442,20 +460,11 @@ async function waitForIndex(): Promise<void> {
 // so .md files added/edited/removed OUTSIDE the app (a text editor, git, etc)
 // are picked up without a restart. Poll the same /api/index/status endpoint
 // boot already uses and react when its "generation" counter moves.
-/** The last index generation seen; null until the first poll sets the baseline. */
-let lastGeneration: number | null = null;
+/** Shared navigation/timer watcher, seeded by waitForIndex at boot. */
+const indexWatcher = createIndexWatcher(onExternalChange);
 async function pollForChanges(): Promise<void> {
-  let s: IndexStatus;
-  try {
-    const r = await fetch('/api/index/status', { cache: 'no-cache' });
-    if (!r.ok) return;
-    s = await r.json();
-  } catch (e) { return; }
-  if (!s || typeof s.generation !== 'number') return;
-  if (lastGeneration === null) { lastGeneration = s.generation; return; }   // first sample: just record the baseline
-  if (s.generation === lastGeneration) return;
-  lastGeneration = s.generation;
-  onExternalChange();
+  if (document.hidden) return;
+  try { await indexWatcher.check(); } catch (e) { /* retry at the next scheduled check */ }
 }
 function startChangeWatcher(): void { setInterval(pollForChanges, 4000); }
 /**
@@ -464,16 +473,24 @@ function startChangeWatcher(): void { setInterval(pollForChanges, 4000); }
  * alone (just a status note) so unsaved work is never silently discarded.
  */
 async function onExternalChange(): Promise<void> {
+  const current = state.current;
+  const sequence = routeSequence;
+  for (const doc of state.byId.values()) doc._loaded = false;
   invalidateGraphModel();
   invalidateAccess();   // an edit anywhere can change a whole chapter's inherited ACL
   await buildRequirementIndex(null, (state.site && state.site.sources) || []);
   if (app.invalidateTree) app.invalidateTree();   // refetch open levels; keep the reader's expansion
   if (document.body.classList.contains('is-editing')) {
     announce('Files changed on disk. Close the editor to see the latest version.');
-  } else if (state.current) {
-    state.current._loaded = false;
-    try { await loadDoc(state.current); renderDoc(state.current); }
-    catch (e) { showError('This document is no longer available.'); }
+  } else if (current && current === state.current && sequence === routeSequence) {
+    const previousBody = current.body;
+    const previousMeta = JSON.stringify(current.meta);
+    try {
+      await loadDoc(current, true);
+      // A changed live source must not rebuild an unchanged dashboard article.
+      if (current === state.current && sequence === routeSequence && (current.body !== previousBody || JSON.stringify(current.meta) !== previousMeta)) renderDoc(current);
+    }
+    catch (e) { if (current === state.current && sequence === routeSequence) showError('This document is no longer available.'); }
   }
   await requestMapRebuild();
 }

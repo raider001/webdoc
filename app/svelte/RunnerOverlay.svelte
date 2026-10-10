@@ -27,6 +27,7 @@
 -->
 <script lang="ts">
   import { checkIcon, closeIcon } from '/js/icons.js';
+  import { uniqueBy } from '/js/lists.js';
   import { manualTests, saveManual } from '/js/coverage.js';
   import { sanitizeToFragment } from '/js/sanitize.js';
   import { icon } from './actions/icon.js';
@@ -203,7 +204,7 @@
       {#if !model.length}
         <p class="runner-empty">No test cases to run. Author a test-case table first.</p>
       {/if}
-      {#each model as t, ti (t.id)}
+      {#each uniqueBy(model, t => t.id) as t, ti (t.id)}
         <section class="run-test" data-test-id={t.id}>
           <div class="run-test-head">
             <h3>{t.name} <span class="tc-id">{t.id}</span></h3>

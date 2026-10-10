@@ -26,6 +26,7 @@
 <script lang="ts">
   import { checkIcon, closeIcon, circleIcon } from '/js/icons.js';
   import { state as appState } from '/js/app-shell.js';
+  import { uniqueBy } from '/js/lists.js';
   import { testsFor, connectAutomated, disconnectAutomated, rememberAutoUrl, fetchXUnitCatalog } from '/js/coverage.js';
   import type { IconFactory } from './actions/icon.js';
   import { icon } from './actions/icon.js';
@@ -58,12 +59,12 @@
    */
   const keyOf = (tc: AutoTestRef): string => (tc.classname || '') + ' ' + (tc.name || '');
 
-  const connected = $derived((results.autoLinks && results.autoLinks[id]) || []);
+  const connected = $derived(uniqueBy((results.autoLinks && results.autoLinks[id]) || [], keyOf));
 
   /** Declared entries the connected list already covers are dropped. */
   const declared = $derived.by(() => {
     const names = new Set(connected.map(tc => tc.name));
-    return ((testsFor(id, results).auto) || []).filter(a => !names.has(a.name));
+    return uniqueBy(((testsFor(id, results).auto) || []).filter(a => !names.has(a.name)), a => a.name);
   });
 
   /**
@@ -195,7 +196,7 @@
     <span class="cov-medit-status">{note}</span>
   </div>
   <div class="cov-vtest-drop" hidden={!dropOpen || !options.length}>
-    {#each options as c (c.key)}
+    {#each uniqueBy(options, c => c.key) as c (c.key)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="cov-vtest-opt" onmousedown={ev => connect(ev, c)}>
         <span class="cov-vtest-optname">{c.name}</span>

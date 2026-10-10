@@ -10,8 +10,8 @@
 //
 // TWO KINDS OF STATE LIVE HERE, and telling them apart is the whole point.
 //
-//   * REACTIVE (`mapState`). Read by markup. Deliberately five fields, not
-//     twelve: a field belongs here only if something on screen changes when it
+//   * REACTIVE (`mapState`). Read by markup. A field belongs here only if
+//     something on screen changes when it
 //     changes. `version` is the one an effect tracks - see the {#key} block in
 //     MapOverlay.svelte - because it answers the only question a component has
 //     to re-ask: "is this a different LAYOUT from the one on screen?".
@@ -59,6 +59,8 @@ export interface MapState {
   focusMode: boolean;
   /** the radial-focus centre, or null for the hierarchy */
   focusId: string | null;
+  selectedTreeOnly: boolean;
+  selectedId: string | null;
 }
 
 export const mapState: MapState = $state({
@@ -67,6 +69,8 @@ export const mapState: MapState = $state({
   mapMode: 'all',
   focusMode: false,
   focusId: null,
+  selectedTreeOnly: false,
+  selectedId: null,
 });
 
 /**
@@ -92,6 +96,7 @@ let savedConnector = 'recnext';
  * bargain.
  */
 let savedHiddenGroups: string[] = [];
+let savedVisibility: Record<string, boolean> = {};
 
 /** Tween the next build from savedPositions. Set by nextLayout(), read by mapBuildSeeds(). */
 let animate = false;
@@ -111,6 +116,7 @@ export interface MapBuildSeeds {
   connector: string;
   /** still an array; the caller makes the Set the engine wants */
   hiddenGroups: string[];
+  visibility: Record<string, boolean>;
 }
 
 export function mapBuildSeeds(): MapBuildSeeds {
@@ -124,6 +130,7 @@ export function mapBuildSeeds(): MapBuildSeeds {
     // reads from, and "two writers, one collection" is the exact bug the whole
     // reassign-never-mutate rule around hidden groups exists to prevent.
     hiddenGroups: savedHiddenGroups.slice(),
+    visibility: { ...savedVisibility },
   };
 }
 
@@ -142,6 +149,7 @@ export function rememberMapView(
   savedEditMode = editState.editMode;
   savedConnector = editState.connector;
   savedHiddenGroups = Array.from(editState.hiddenGroups);
+  savedVisibility = { ...editState.visibility };
 }
 
 /**

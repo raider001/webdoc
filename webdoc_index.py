@@ -26,27 +26,24 @@ from concurrent.futures import ThreadPoolExecutor
 
 import webdoc_access
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 8  # data-widget asset references inherit document access
 
 # ---- extraction regexes (ported from the client) ---------------------------
-META_RE = re.compile(r'^﻿?\s*<!--\s*meta\b(.*?)-->\s*', re.I | re.S)
+META_RE = re.compile(r'^﻿?\s*<!--\s*meta\b(?!\s+(?:start|end)\b)(.*?)-->\s*', re.I | re.S)
 FENCE_OPEN = re.compile(r'^ {0,3}([`~]{3,})')
 FENCE_CLOSE = re.compile(r'^ {0,3}([`~]{3,})[ \t]*$')
 HEADING_RE = re.compile(r'^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$', re.M)
 LINK_RE = re.compile(r'\[(?:[^\]\\]|\\.)*\]\(\s*(<[^>]*>|[^()\s]+)')
-META_BLOCK_RE = re.compile(r'<!--\s*meta\s+start\s*(\{.*?\})\s*-->(.*?)<!--\s*meta\s+end\b.*?-->', re.I | re.S)
+META_TOKEN_RE = re.compile(r'<!--\s*meta\s+(start|end)\b\s*(.*?)-->', re.I | re.S)
 FENCED_STRIP = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*$', re.M | re.S)
 INLINE_CODE = re.compile(r'`[^`]*`')
-META_REGION_STRIP = re.compile(r'<!--\s*meta\s+start.*?<!--\s*meta\s+end\b.*?-->', re.I | re.S)
 HAS_SCHEME = re.compile(r'^(?:[a-z][a-z0-9+.-]*:)', re.I)
 INLINE_MD = re.compile(r'[*_`~]')
 
 
 def split_meta(text):
     """Reproduce catalog.splitMeta: a leading <!--meta ...--> (JSON in an HTML
-    comment) is stripped to metadata; the rest is the body. Note this also matches
-    <!--meta start ...-->, matching the client's behaviour exactly (a doc opening
-    with a requirement block loses that first block from body - intentional parity)."""
+    comment) is stripped to metadata; paired block openers remain in the body."""
     meta, body, _ok = split_meta_ex(text)
     return meta, body
 
@@ -69,6 +66,10 @@ def split_meta_ex(text):
         return {}, text[m.end():], False
     if not isinstance(meta, dict):
         return {}, text[m.end():], False
+    for field in ('assumes', 'next'):
+        if field in meta:
+            items = meta[field] if isinstance(meta[field], list) else []
+            meta[field] = list(dict.fromkeys(item for item in items if isinstance(item, str)))
     return meta, text[m.end():], True
 
 
@@ -103,9 +104,59 @@ def in_fence(ranges, pos):
     return False
 
 
+def meta_blocks(body):
+    """Paired, nested, whole-line metadata; mirrors src/js/meta-blocks.ts."""
+    ranges = fenced_ranges(body)
+    blocks, stack = [], []
+
+    def identity(meta):
+        if 'widget' in meta:
+            return 'widget:' + str(meta['widget'])
+        return str(meta.get('test') or meta.get('test-case') or
+                   meta.get('requirement-group') or meta.get('group') or '')
+
+    for match in META_TOKEN_RE.finditer(body):
+        start, end = match.span()
+        line_end = body.find('\n', end)
+        if in_fence(ranges, start) or not re.fullmatch(r' {0,3}', body[body.rfind('\n', 0, start) + 1:start]) \
+                or not re.fullmatch(r'[ \t\r]*', body[end:line_end if line_end >= 0 else len(body)]):
+            continue
+        error = False
+        try:
+            options = json.loads(match.group(2) or '{}')
+            if not isinstance(options, dict):
+                raise ValueError('Expected object')
+        except (ValueError, TypeError):
+            options, error = {}, True
+        widget = 'widget' in options or bool(re.search(r'["\']widget["\']\s*:', match.group(2)))
+        if match.group(1).lower() == 'start':
+            block = {'start': start, 'end': end, 'inner_start': end, 'inner_end': end,
+                     'options': options, 'widget': widget, 'error': error}
+            blocks.append(block)
+            stack.append(block)
+        elif stack:
+            block = stack.pop()
+            block.update(end=end, inner_end=start)
+            block['error'] = block['error'] or error or (block['widget'] and 'widget' not in options) \
+                or bool(identity(options) and identity(options) != identity(block['options']))
+    for block in stack:
+        block['error'] = True
+    return blocks
+
+
+def strip_meta_blocks(body):
+    """Index ordinary prose inside widgets while excluding requirement/test data."""
+    spans = [(b['start'], b['end']) for b in meta_blocks(body) if not b['widget']]
+    outer = [(a, b) for a, b in spans if not any(c < a and d >= b for c, d in spans)]
+    for start, end in sorted(outer, reverse=True):
+        # Requirement/test blocks cannot themselves contain widgets.
+        body = body[:start] + body[end:]
+    return META_TOKEN_RE.sub('', body)
+
+
 def extract_headings(body):
     s = FENCED_STRIP.sub('', body)
-    s = META_REGION_STRIP.sub('', s)
+    s = strip_meta_blocks(s)
     out = []
     for m in HEADING_RE.finditer(s):
         t = INLINE_MD.sub('', m.group(1)).strip()
@@ -119,7 +170,7 @@ def extract_links(body):
     doclinks.documentLinks pre-classification (fences / inline code / meta stripped)."""
     s = FENCED_STRIP.sub('', body)
     s = INLINE_CODE.sub('', s)
-    s = META_REGION_STRIP.sub('', s)
+    s = strip_meta_blocks(s)
     out = []
     for m in LINK_RE.finditer(s):
         target = m.group(1).strip()
@@ -128,7 +179,14 @@ def extract_links(body):
         if not target or target[0] == '#':
             continue
         out.append((target, bool(HAS_SCHEME.match(target))))
-    return out
+    # A table source is an asset reference even without an inline Markdown link.
+    for block in meta_blocks(body):
+        options = block['options']
+        source = options.get('source')
+        if not block['error'] and options.get('widget') == 'live-table' and isinstance(source, dict) \
+                and source.get('kind') in ('csv', 'json') and isinstance(source.get('src'), str):
+            out.append(('/docs/' + source['src'], False))
+    return list(dict.fromkeys(out))
 
 
 def _split_row(line):
@@ -175,22 +233,18 @@ def _pick(rec, names):
 
 
 def _split_refs(raw):
-    return [s.strip() for s in str(raw).split(',') if s.strip()] if raw else []
+    return list(dict.fromkeys(s.strip() for s in str(raw).split(',') if s.strip())) if raw else []
 
 
 def extract_blocks(body, component):
     """Requirement groups + test cases (fence-aware), matching requirements.extractGroups.
     Returns (requirements, tests). Requirement id upper-cased; test id NOT (client parity)."""
     reqs, tests = [], []
-    ranges = fenced_ranges(body)
-    for m in META_BLOCK_RE.finditer(body):
-        if in_fence(ranges, m.start()):
+    for block in meta_blocks(body):
+        if block['widget']:
             continue
-        try:
-            meta = json.loads(m.group(1))
-        except Exception:
-            meta = None
-        rows = _parse_table(m.group(2))
+        meta = None if block['error'] else block['options']
+        rows = _parse_table(body[block['inner_start']:block['inner_end']])
         is_test = bool(meta and (meta.get('test') or meta.get('test-case')))
         if is_test:
             key = meta.get('test') or meta.get('test-case')
@@ -210,7 +264,7 @@ def extract_blocks(body, component):
                     e = _pick(row, ['expected-response', 'expected', 'response', 'result', 'then'])
                     if a or e:
                         steps.append({'action': a, 'expected': e})
-            verifies = [str(v) for v in meta['verifies']] if isinstance(meta.get('verifies'), list) \
+            verifies = list(dict.fromkeys(str(v) for v in meta['verifies'])) if isinstance(meta.get('verifies'), list) \
                 else _split_refs(meta.get('verifies') or meta.get('verify') or '')
             tests.append({
                 'id': 'T_' + component + '_' + key, 'component': component, 'key': key,
@@ -342,6 +396,7 @@ class Index:
         self.state = 'building'          # building | ready | error
         self.progress = {'done': 0, 'total': 0}
         self.generation = 0               # bumped on any write (own or externally-detected), for client polling
+        self.epoch = str(time.time_ns())   # distinguish a restarted server with the same counter
         os.makedirs(self.dir, exist_ok=True)
         self._ensure_schema()
 
@@ -581,8 +636,8 @@ class Index:
                     # way the browser resolves an <img src> (doclinks.resolveResourceUrl),
                     # so a request for the file can be judged by the pages that use it.
                     ref = raw[:hi] if hi >= 0 else raw
-                    if ref and not ref.startswith('/'):
-                        path = join_doc_path(r['from_id'], ref)
+                    if ref and (not ref.startswith('/') or ref.startswith('/docs/')):
+                        path = ref[len('/docs/'):] if ref.startswith('/docs/') else join_doc_path(r['from_id'], ref)
                         if path:
                             c.execute('INSERT INTO doc_asset(path_lc,doc_id) VALUES(?,?)',
                                       (path.lower(), r['from_id']))
@@ -687,7 +742,8 @@ class Index:
                         return ('skip', doc_id)
                     return ('doc', doc_id, s['name'], rel, s.get('component'),
                             self._parse(doc_id, s.get('component'), text), st.st_mtime_ns, st.st_size)
-                with ThreadPoolExecutor(max_workers=16) as ex:
+                workers = max(1, min(16, int(os.environ.get('WEBDOC_INDEX_WORKERS', '16'))))
+                with ThreadPoolExecutor(max_workers=workers) as ex:
                     for res in ex.map(read_parse, files, chunksize=64):
                         self.progress['done'] += 1
                         if not res:
@@ -890,7 +946,8 @@ class Index:
         c = self._conn()
         n = c.execute('SELECT COUNT(*) n FROM doc').fetchone()['n'] if self.state == 'ready' else self.progress['done']
         pct = 100 if self.state == 'ready' else (round(100 * self.progress['done'] / self.progress['total']) if self.progress['total'] else 0)
-        return {'state': self.state, 'docs': n, 'pct': pct, 'generation': self.generation}
+        return {'state': self.state, 'docs': n, 'pct': pct, 'generation': self.generation,
+                'version': self.epoch + ':' + str(self.generation)}
 
     @staticmethod
     def _fts_query(q):

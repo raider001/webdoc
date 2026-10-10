@@ -43,7 +43,7 @@ export function setActive(id: string | null): void {
   let path = '';
   for (let i = 0; i < parts.length - 1; i++) {
     path = path ? path + '/' + parts[i] : parts[i];
-    treeState.expanded[path] = true;
+    setFolderOpen(path, true);
   }
 }
 
@@ -54,5 +54,9 @@ export function setActive(id: string | null): void {
 export function invalidateTree(): void { treeState.generation++; }
 
 export function toggleFolder(path: string): void {
-  treeState.expanded[path] = !treeState.expanded[path];
+  setFolderOpen(path, !treeState.expanded[path]);
+}
+
+export function setFolderOpen(path: string, open: boolean): void {
+  if (treeState.expanded[path] !== open) treeState.expanded[path] = open;
 }

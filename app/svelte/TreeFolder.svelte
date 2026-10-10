@@ -11,8 +11,9 @@
   and collapsed everything the reader had opened.
 -->
 <script lang="ts">
-  import { fetchChildren, type TreeLevel } from '/js/tree.js';
-  import { treeState, toggleFolder } from './stores/tree.svelte.js';
+  import { untrack } from 'svelte';
+  import { fetchChildren, normalizeTree, type TreeLevel } from '/js/tree.js';
+  import { treeState, setFolderOpen } from './stores/tree.svelte.js';
   import DocLink from './DocLink.svelte';
   import TreeFolder from './TreeFolder.svelte';
 
@@ -26,6 +27,9 @@
 
   let level: TreeLevel = $state({ folders: [], docs: [] });
   let loaded = $state(false);
+  // Plain request data, outside runes: an effect replay must not publish a
+  // freshly allocated level back into the same failed Svelte flush.
+  let applied: TreeLevel | undefined;
 
   const open = $derived(!!treeState.expanded[path]);
 
@@ -36,9 +40,12 @@
     const gen = treeState.generation;
     if (!open) return;
     let cancelled = false;
-    fetchChildren(path).then(data => {
+    const folderPath = path;
+    untrack(() => fetchChildren(folderPath, gen)).then(data => {
       if (cancelled) return;
-      level = data;
+      if (applied === data) return;
+      applied = data;
+      level = normalizeTree(data);
       loaded = true;
     });
     void gen;
@@ -47,7 +54,7 @@
 
   function ontoggle(e: Event): void {
     const el = e.currentTarget as HTMLDetailsElement;
-    if (el.open !== open) toggleFolder(path);
+    setFolderOpen(path, el.open);
   }
 </script>
 

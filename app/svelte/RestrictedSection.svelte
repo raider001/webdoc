@@ -17,6 +17,7 @@
 -->
 <script lang="ts">
   import { lockIcon } from '/js/icons.js';
+  import { uniqueStrings } from '/js/lists.js';
   import { icon } from './actions/icon.js';
   import GroupChip from './GroupChip.svelte';
 
@@ -53,7 +54,7 @@
     <p class="restricted-section-title">{spec.label || 'Restricted section'}</p>
     <p class="restricted-section-sub">{sub}</p>
     {#if groups.length}
-      <div class="group-chips">{#each groups as group (group)}<GroupChip name={group} small />{/each}</div>
+      <div class="group-chips">{#each uniqueStrings(groups) as group (group)}<GroupChip name={group} small />{/each}</div>
     {/if}
   </div>
 </aside>

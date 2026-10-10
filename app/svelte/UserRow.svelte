@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
   import type { GroupSpec } from '/js/auth.js';
+  import { uniqueBy } from '/js/lists.js';
   import type { AdminUser } from './stores/auth.svelte.js';
   import GroupChip from './GroupChip.svelte';
 
@@ -67,7 +68,7 @@
     {#if user.disabled}<span class="auth-badge is-warn">Disabled</span>{/if}
   </div>
   <div class="admin-groups">
-    {#each groups as spec (spec.name)}
+    {#each uniqueBy(groups, spec => spec.name) as spec (spec.name)}
       <label class="admin-group">
         <input
           type="checkbox"

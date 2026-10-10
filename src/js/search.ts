@@ -10,6 +10,8 @@
  * (The wire response from GET /api/index/search is `{ results: [{ id, title, snippet }] }`;
  * searchDocs() unwraps `results` and renames `id` to `docId` for consumers.)
  */
+import { uniqueBy } from './lists.js';
+
 export interface SearchResult {
   docId: string;
   title: string;
@@ -60,5 +62,5 @@ export async function searchDocs(query: string, limit?: number, signal?: AbortSi
   try { data = await res.json(); } catch (e) { return []; }
   // `locked` marks a hit the reader may see listed but not open; the server
   // already withheld its snippet, and hidden documents never appear at all.
-  return (data.results || []).map(r => ({ docId: r.id, title: r.title, snippet: r.snippet || '', locked: !!r.locked }));
+  return uniqueBy(data.results || [], r => r.id).map(r => ({ docId: r.id, title: r.title, snippet: r.snippet || '', locked: !!r.locked }));
 }

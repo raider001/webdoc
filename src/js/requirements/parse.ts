@@ -7,6 +7,7 @@
 // resolution; imports nothing else.
 // ---------------------------------------------------------------------------
 import { index } from './store.js';
+import { scanMetaBlocks, replaceMetaBlocks } from '../meta-blocks.js';
 
 import type { RequirementEntry, TestCaseEntry, TestStep } from '../requirements.js';
 
@@ -101,49 +102,9 @@ export interface TestCaseDocBlock {
  */
 export type ReqOrTestBlock = ReqGroupBlock | TestCaseDocBlock;
 
-/** Fresh regex each call (global-flag lastIndex safety). */
-function metaBlockRe(): RegExp {
-  return /<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->([\s\S]*?)<!--\s*meta\s+end\b[\s\S]*?-->/gi;
-}
-/**
- * @returns the id with any character outside [A-Za-z0-9_-] replaced by '-'
- *   (safe for use as an element id)
- */
+/** Safe DOM id for requirement and test links. */
 export function cssSafe(id: unknown): string { return String(id).replace(/[^A-Za-z0-9_-]/g, '-'); }
-/** @param raw - a comma-separated reference list, or any falsy value */
-function splitRefs(raw: string | null): string[] { return raw ? String(raw).split(',').map(s => s.trim()).filter(Boolean) : []; }
-
-/**
- * Character ranges [start,end) that lie inside a fenced code block. A document
- * that DOCUMENTS this syntax (e.g. the authoring reference, the how-to guide)
- * shows a `<!--meta start … -->` / `<!--meta end … -->` pair literally inside a
- * code fence; those must NOT be mistaken for real requirement/test blocks. Both
- * the index build (extractGroups) and the placeholder pass (preprocessRequirements)
- * skip fenced matches identically, so their Nth-block counting stays aligned.
- * @returns start/end index pairs
- */
-function fencedRanges(body: string): [number, number][] {
-  const ranges: [number, number][] = [];
-  let offset = 0;
-  let open: { ch: string, len: number, from: number } | null = null;
-  for (const line of String(body).split('\n')) {
-    const start = offset, end = offset + line.length;
-    if (!open) {
-      const o = /^ {0,3}([`~]{3,})/.exec(line);            // opening fence (info string allowed)
-      if (o) open = { ch: o[1][0], len: o[1].length, from: start };
-    } else {
-      const c = /^ {0,3}([`~]{3,})[ \t]*$/.exec(line);     // closing fence: bare, no info
-      if (c && c[1][0] === open.ch && c[1].length >= open.len) { ranges.push([open.from, end]); open = null; }
-    }
-    offset = end + 1;                                       // + the consumed '\n'
-  }
-  if (open) ranges.push([open.from, String(body).length]); // an unterminated fence runs to the end
-  return ranges;
-}
-function inFence(ranges: [number, number][], pos: number): boolean {
-  for (let i = 0; i < ranges.length; i++) if (pos >= ranges[i][0] && pos < ranges[i][1]) return true;
-  return false;
-}
+function splitRefs(raw: string | null): string[] { return raw ? [...new Set(String(raw).split(',').map(s => s.trim()).filter(Boolean))] : []; }
 
 // ---- table parsing --------------------------------------------------------
 /**
@@ -214,14 +175,9 @@ export function resolveRequirementRef(raw: unknown, component: string): string |
  */
 export function extractGroups(body: string, doc: DocRef, component: string): ReqOrTestBlock[] {
   const blocks: ReqOrTestBlock[] = [];
-  const ranges = fencedRanges(body);
-  const RE = metaBlockRe();
-  let m;
-  while ((m = RE.exec(body)) !== null) {
-    if (inFence(ranges, m.index)) continue;   // literal example in a code fence, not a real block
-    let meta: BlockMeta | null = null;
-    try { meta = JSON.parse(m[1]); } catch (e) { /* handled below */ }
-    const table = parseTable(m[2]);
+  for (const block of scanMetaBlocks(body).filter(b => !b.widget)) {
+    const meta = block.error ? null : block.options as BlockMeta;
+    const table = parseTable(body.slice(block.innerStart, block.innerEnd));
     const isTest = !!(meta && (meta.test || meta['test-case']));
     blocks.push(isTest ? extractTestCase(meta, table, doc, component)
                        : extractReqGroup(meta, table, doc, component));
@@ -294,7 +250,7 @@ function extractTestCase(meta: BlockMeta | null, table: ParsedTable, doc: DocRef
   // a list of ids or the older comma-separated string, and only the list form
   // may be mapped.
   const authoredVerifies = meta && meta.verifies;
-  const verifiesRaw = Array.isArray(authoredVerifies) ? authoredVerifies.map(String)
+  const verifiesRaw = Array.isArray(authoredVerifies) ? [...new Set(authoredVerifies.map(String))]
                     : splitRefs(meta && (authoredVerifies || meta.verify || ''));
   const rec: TestCaseEntry = {
     id: id, docId: doc.id, component: component, key: key || '',
@@ -313,11 +269,8 @@ function extractTestCase(meta: BlockMeta | null, table: ParsedTable, doc: DocRef
  */
 export function preprocessRequirements(body: string, docId: string): string {
   const src = String(body);
-  const ranges = fencedRanges(src);
-  let n = 0;
-  return src.replace(metaBlockRe(), (whole, _json, _inner, offset) => {
-    if (inFence(ranges, offset)) return whole;   // leave a literal example untouched
-    const key = docId + '::' + (n++);
+  return replaceMetaBlocks(src, scanMetaBlocks(src).filter(b => !b.widget), (_block, n) => {
+    const key = docId + '::' + n;
     return '\n```reqgroup\n' + key + '\n```\n';
   });
 }

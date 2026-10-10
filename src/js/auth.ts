@@ -167,8 +167,11 @@ export const auth: AuthState = {
 
 /** Listeners notified whenever the signed-in identity changes. */
 const listeners: (() => void)[] = [];
-export function onAuthChange(fn: () => void): void { listeners.push(fn); }
-function emit() { listeners.forEach(fn => { try { fn(); } catch (e) {} }); }
+export function onAuthChange(fn: () => void): () => void {
+  listeners.push(fn);
+  return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); };
+}
+function emit() { [...listeners].forEach(fn => { try { fn(); } catch (e) {} }); }
 
 // ---- the session ----------------------------------------------------------
 /**

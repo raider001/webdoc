@@ -237,6 +237,9 @@ function reveal(prefix: string, id: string): void {
   if (!id) return;
   const el = document.getElementById(prefix + cssSafe(id));
   if (!el) return;
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    if (parent instanceof HTMLDetailsElement) parent.open = true;
+  }
   el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   el.classList.add('req-flash');
   setTimeout(() => el.classList.remove('req-flash'), 1600);

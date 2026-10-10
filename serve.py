@@ -43,6 +43,7 @@ APP_DIR = os.path.join(HERE, "app")
 MAX_DOC_BODY = 8 * 1024 * 1024
 MAX_JSON_BODY = 1 * 1024 * 1024
 MAX_AUTH_BODY = 16 * 1024
+MAX_DATA_BYTES = 2 * 1024 * 1024
 
 
 class _Refused(Exception):
@@ -153,7 +154,9 @@ def load_config(path):
         "testResults": cfg.get("testResults"),
         "plugins": [str(p) for p in plugins],
         "indexBody": bool(cfg.get("indexBody", False)),
-        "indexDir": cfg.get("indexDir"),
+        # A preview worktree can reuse the real source config while keeping its
+        # writable SQLite index separate from the live dashboard's index.
+        "indexDir": os.environ.get("WEBDOC_INDEX_DIR") or cfg.get("indexDir"),
         # Seconds between background filesystem re-scans that pick up .md files
         # added/edited/removed OUTSIDE the app (a text editor, git, etc). 0/false
         # disables the watcher; the app's own writes (PUT/DELETE) stay instant
@@ -185,6 +188,23 @@ def safe_join(root, rel):
     full = os.path.abspath(os.path.join(root, *parts))
     root_abs = os.path.abspath(root)
     if full != root_abs and not full.startswith(root_abs + os.sep):
+        return None
+    return full
+
+
+def safe_data_path(root, rel):
+    """Strict read-only data path, including symlink/junction containment."""
+    if not rel or '\\' in rel or '%' in rel:
+        return None
+    parts = rel.split('/')
+    if any(not p or p.startswith('.') or _HOSTILE_CHARS.search(p) or p != p.rstrip(' .') for p in parts):
+        return None
+    base = os.path.normcase(os.path.realpath(root))
+    full = os.path.realpath(os.path.join(root, *parts))
+    try:
+        if os.path.commonpath([base, os.path.normcase(full)]) != base:
+            return None
+    except ValueError:
         return None
     return full
 
@@ -543,7 +563,7 @@ class DocHandler(BaseHTTPRequestHandler):
             if not self._readable_site():
                 # Boot needs state/pct to show the index-build progress bar; the
                 # document count is library data and waits for a sign-in.
-                st = {"state": st["state"], "pct": st["pct"], "generation": st["generation"], "docs": 0}
+                st = {"state": st["state"], "pct": st["pct"], "generation": st["generation"], "version": st["version"], "docs": 0}
             return self._json(200, st)
         if idx.state != "ready":
             return self._json(503, {"error": "index building", "status": idx.status()})
@@ -1080,6 +1100,8 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._auth_route_get(path[len("/api/auth/"):])
         if path.startswith("/api/index/"):
             return self._index_route(path[len("/api/index/"):])
+        if path.startswith("/api/data/"):
+            return self._data_get(path[len("/api/data/"):])
         if path.startswith("/api/tests/"):
             return self._tests_get(path[len("/api/tests/"):])
         if path.startswith("/api/auto/"):
@@ -1096,6 +1118,94 @@ class DocHandler(BaseHTTPRequestHandler):
         if fspath and os.path.isfile(fspath):
             return self._file(fspath)
         return self._json(404, {"error": "not found", "path": path})
+
+    def _data_folder_visible(self, source, rel, kind):
+        """Also discover data-only directories without naming unreadable files."""
+        if self.gate.unrestricted or self._listing_visible(source['name'], rel, True):
+            return True
+        pending, visited, budget = [(rel, 0)], set(), 1000
+        while pending and budget:
+            current, depth = pending.pop()
+            folder = safe_data_path(source['path'], current) if current else os.path.realpath(source['path'])
+            if not folder or folder in visited or depth > 16:
+                continue
+            visited.add(folder)
+            try:
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        budget -= 1
+                        child = (current + '/' + entry.name).strip('/')
+                        full = safe_data_path(source['path'], child)
+                        if full and os.path.isdir(full):
+                            pending.append((child, depth + 1))
+                        elif full and entry.name.lower().endswith('.' + kind) and self._asset_readable(source['name'], child):
+                            return True
+                        if not budget:
+                            break
+            except OSError:
+                continue
+        return False
+
+    def _data_get(self, action):
+        """CSV/JSON GET/HEAD only; borrow the existing asset access policy."""
+        if not self._readable_site():
+            return self._deny(what="data")
+        if self._acl_blocked():
+            return self._not_ready()
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if action == 'tree':
+            path = (qs.get('path') or [''])[0]
+            kind = (qs.get('format') or [''])[0]
+            if kind not in ('csv', 'json'):
+                return self._json(400, {'error': 'format must be csv or json'})
+            if not path:
+                return self._json(200, {'folders': [s['name'] for s in self.config['sources']
+                    if self._data_folder_visible(s, '', kind)], 'files': []})
+            name, _, rel = path.partition('/')
+            source = self._source(name)
+            folder = safe_data_path(source['path'], rel) if source and rel else (source['path'] if source else None)
+            if not folder or not os.path.isdir(folder):
+                return self._not_found()
+            folders, files = [], []
+            try:
+                names = sorted(os.listdir(folder))
+            except OSError:
+                return self._not_found()
+            for entry in names:
+                child = (rel + '/' + entry).strip('/')
+                full = safe_data_path(source['path'], child)
+                if not full:
+                    continue
+                if os.path.isdir(full):
+                    if self._data_folder_visible(source, child, kind):
+                        folders.append(entry)
+                elif entry.lower().endswith('.' + kind) and self._asset_readable(name, child):
+                    files.append({'id': name + '/' + child, 'title': entry})
+                if len(folders) + len(files) >= 1000:
+                    break
+            return self._json(200, {'folders': folders, 'files': files})
+        if action != 'file':
+            return self._not_found()
+        identifier = (qs.get('src') or [''])[0]
+        name, _, rel = identifier.partition('/')
+        source = self._source(name)
+        full = safe_data_path(source['path'], rel) if source else None
+        if not full or not rel.lower().endswith(('.csv', '.json')) or not os.path.isfile(full):
+            return self._not_found()
+        # Match the raw-asset endpoint: never name a refused data file.
+        if not self._asset_readable(name, rel):
+            return self._not_found()
+        try:
+            with open(full, 'rb') as stream:
+                data = stream.read(MAX_DATA_BYTES + 1)
+        except OSError:
+            return self._not_found()
+        if len(data) > MAX_DATA_BYTES:
+            return self._json(413, {'error': 'Data source exceeds 2 MiB'})
+        etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+        if self.headers.get('If-None-Match') == etag:
+            return self._send(304, b'', content_type(full), [('ETag', etag)])
+        return self._send_static(200, data, 'text/csv; charset=utf-8' if rel.lower().endswith('.csv') else 'application/json; charset=utf-8', [('ETag', etag)])
 
     def route_docs(self, rest):
         rest = rest.strip("/")
@@ -1164,7 +1274,12 @@ class DocHandler(BaseHTTPRequestHandler):
             data = redacted.encode("utf-8")
         # Same read-a-file-and-send path as _file, so it gets the same encoding
         # treatment - documents are Markdown, and Markdown compresses well.
-        self._send_static(200, data, content_type(fspath))
+        # Validate only AFTER access checks and section redaction. The validator
+        # describes exactly the bytes this session may see, including ACL edits.
+        etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+        if self.headers.get('If-None-Match') == etag:
+            return self._send(304, b'', content_type(fspath), [('ETag', etag)])
+        self._send_static(200, data, content_type(fspath), [('ETag', etag)])
 
     # -- writing (authoring) ------------------------------------------------
     # Per-source hidden sidecars INSIDE each source folder (dotfiles, omitted from

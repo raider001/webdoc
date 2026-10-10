@@ -63,13 +63,13 @@ interface PendingMount {
  * that simply did not scroll. tests/test_coverage_ui.py has the deep-link test
  * that catches it.
  */
-function mountBlocks(mod: IslandModule, pending: PendingMount[]): void {
+function mountBlocks(mod: IslandModule, pending: PendingMount[], detached = false): void {
   for (const { host, block } of pending) {
     // The article was replaced before the bundle arrived (only reachable on the
     // asynchronous path below). Mounting into a detached host would start
     // effects nothing will ever stop: the teardown for THIS article has already
     // run, so registering now would only add a leak to the registry.
-    if (!host.isConnected) continue;
+    if (!detached && !host.isConnected) continue;
     const instance = block.kind === 'test'
       ? mod.mountTestCase(host, block)
       : mod.mountReqTable(host, block);
@@ -123,6 +123,6 @@ export function renderRequirements(article: Element, docId: string): void {
   // for the cold case only, and accepts that a deep link into that one render
   // may not scroll; the tables themselves still appear.
   const mod = loadedIslands();
-  if (mod) { mountBlocks(mod, pending); return; }
+  if (mod) { mountBlocks(mod, pending, true); return; }
   loadIslands().then(m => mountBlocks(m, pending));
 }

@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import { listUsers, adminUser } from '/js/auth.js';
+  import { uniqueBy } from '/js/lists.js';
   import type { AuthReply, GroupSpec } from '/js/auth.js';
   import type { AdminUser } from './stores/auth.svelte.js';
   import Modal from './Modal.svelte';
@@ -83,7 +84,7 @@
         {:else if users === null}
           <p class="auth-muted">Loading…</p>
         {:else}
-          {#each users as user (user.username)}
+          {#each uniqueBy(users, user => user.username) as user (user.username)}
             <UserRow
               {user}
               groups={allGroups}

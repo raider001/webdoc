@@ -89,7 +89,7 @@ function langOf(code: Element): string | null {
  * Defence-in-depth over renderer output: strip scripts, inline event handlers
  * and script-y URLs, while leaving SVG shapes intact. Never allowed to throw.
  */
-function scrubRendered(container: HTMLElement): void {
+export function scrubRendered(container: HTMLElement): void {
   try {
     container.querySelectorAll('script').forEach(s => s.remove());
     container.querySelectorAll('*').forEach(el => {

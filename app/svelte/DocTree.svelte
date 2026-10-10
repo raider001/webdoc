@@ -9,7 +9,8 @@
   mounted into, and the drawer's focus management is correct as it stands.
 -->
 <script lang="ts">
-  import { fetchChildren, type TreeLevel } from '/js/tree.js';
+  import { untrack } from 'svelte';
+  import { fetchChildren, normalizeTree, type TreeLevel } from '/js/tree.js';
   import { treeState } from './stores/tree.svelte.js';
   import DocLink from './DocLink.svelte';
   import TreeFolder from './TreeFolder.svelte';
@@ -22,18 +23,21 @@
 
   let root: TreeLevel = $state({ folders: [], docs: [] });
   let loaded = $state(false);
+  let applied: TreeLevel | undefined;
 
   $effect(() => {
     const gen = treeState.generation;
     let cancelled = false;
-    fetchChildren('').then(data => {
+    untrack(() => fetchChildren('', gen)).then(data => {
       if (cancelled) return;
-      root = data;
+      if (applied === data) return;
+      applied = data;
+      root = normalizeTree(data);
       loaded = true;
       // Open the first source by default, matching the old renderTree(). Only on
       // the very first load: doing it on every generation bump would re-open a
       // source the reader had deliberately collapsed.
-      const first = data.folders[0];
+      const first = root.folders[0];
       if (first && treeState.expanded[first] === undefined) treeState.expanded[first] = true;
     });
     void gen;

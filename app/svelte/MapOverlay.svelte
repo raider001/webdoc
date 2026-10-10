@@ -50,6 +50,9 @@
   import MapEmpty from './MapEmpty.svelte';
   import type { GraphViewSnapshot } from './actions/graph.js';
   import type { GraphController, GraphChangeEvent, GraphOptions } from '/js/graph.js';
+  import type { GraphModel } from '/js/graph-model.js';
+  import { selectedTreeModelAsync, selectedTreePreferenceKey, readSelectedTreePreference, writeSelectedTreePreference } from '/js/graph/selected-tree.js';
+  import type { MapTransform } from './stores/map.svelte.js';
 
   /**
    * `onRebuild` is map-view.js's buildDocGraph. Edit-connections writes change
@@ -111,6 +114,38 @@
    * controller that is on screen.
    */
   let apiOwner: object | null = null;
+  const treePreferenceKey = selectedTreePreferenceKey(appState.site, location.origin);
+  mapState.selectedTreeOnly = readSelectedTreePreference(treePreferenceKey);
+  mapState.selectedId = appState.current?.id || null;
+  let shownModel = $state.raw<GraphModel | null>(mapState.model);
+  let treeBusy = $state(false);
+  let subsetInScene = false;
+  let fullTransform: MapTransform | null = null;
+  let restoreTransform: MapTransform | null = null;
+  const hasSelection = $derived(!!mapState.selectedId && !!mapState.model?.docs.some(doc => doc.id === mapState.selectedId));
+
+  // Track only the source model and filter inputs. Layout/version and controller
+  // reports are deliberately not dependencies, avoiding rebuild/fetch cycles.
+  $effect(() => {
+    const model = mapState.model;
+    const selected = mapState.selectedTreeOnly && hasSelection ? mapState.selectedId : null;
+    const abort = new AbortController();
+    if (!model) return;
+    treeBusy = !!selected;
+    selectedTreeModelAsync(model, selected, abort.signal).then(subset => {
+      if (abort.signal.aborted) return;
+      treeBusy = false;
+      if (!selected && !subsetInScene && shownModel === model) return;
+      if (selected && !subsetInScene) fullTransform = api?.getTransform() || null;
+      if (!selected && subsetInScene) restoreTransform = fullTransform;
+      subsetInScene = !!selected;
+      shownModel = subset;
+      nextLayout(true, !!selected);
+    }).catch(error => {
+      if (!abort.signal.aborted) { treeBusy = false; console.error('Selected tree could not be built', error); }
+    });
+    return () => abort.abort();
+  });
 
   /**
    * The controller's last report. Seeded with the state a freshly built graph
@@ -128,7 +163,7 @@
   });
 
   /** The documents to lay out; empty until map-view.js has pushed a model in. */
-  const docs = $derived(mapState.model ? mapState.model.docs : []);
+  const docs = $derived(shownModel ? shownModel.docs : []);
 
   /**
    * Which categories the legend offers. Trace and page-link entries appear only
@@ -161,13 +196,15 @@
   function graphOptions(): GraphOptions {
     if (api) rememberMapView(api.getTransform(), api.getNodePositions(), api.getEditState());
     const seeds = mapBuildSeeds();
-    const focused = !!(mapState.focusMode && mapState.focusId);
+    const focused = !!(mapState.focusMode && mapState.focusId && !mapState.selectedTreeOnly);
+    const initialTransform = restoreTransform || seeds.initialTransform;
+    restoreTransform = null;
     return {
-      currentId: focused ? mapState.focusId : (appState.current && appState.current.id),
-      traceEdges: mapState.model ? mapState.model.traceEdges : [],
-      pageLinks: mapState.model ? mapState.model.pageLinks : [],
-      externalNodes: mapState.model ? mapState.model.externalNodes : [],
-      initialTransform: seeds.initialTransform,
+      currentId: focused ? mapState.focusId : mapState.selectedId,
+      traceEdges: shownModel ? shownModel.traceEdges : [],
+      pageLinks: shownModel ? shownModel.pageLinks : [],
+      externalNodes: shownModel ? shownModel.externalNodes : [],
+      initialTransform,
       animateFrom: seeds.animateFrom,
       minimapCanvas: minimapCanvas,
       // "Map by" picks which connection TYPE shapes the tree layout. It never
@@ -181,7 +218,8 @@
       hiddenGroups: new Set(seeds.hiddenGroups),
       focusId: focused ? mapState.focusId : null,
       onSelect: (id) => {
-        if (mapState.focusMode) {
+        mapState.selectedId = id;
+        if (mapState.focusMode && !mapState.selectedTreeOnly) {
           // Re-clicking the centre returns to the hierarchy.
           mapState.focusId = (mapState.focusId === id) ? null : id;
           nextLayout(true, true);                 // re-fit to the new frame
@@ -189,6 +227,7 @@
           app.navigate(id);                       // normal mode: select it, stay on the map
         }
       },
+      onClearSelection: clearSelection,
       onActivate: (id) => { onClose(); if (app.navigate) app.navigate(id); },   // dbl-click: open + leave
       onConnect: (sourceId, targetId, type) => {  // A then B: prereq edge A->B means B assumes A
         void relate(
@@ -237,6 +276,7 @@
       // it is a mode the reader turned on, not a property of the layout, so it
       // is restored rather than passed in.
       const seeds = mapBuildSeeds();
+      for (const [kind, visible] of Object.entries(seeds.visibility)) next.setVisibility(kind, visible);
       if (seeds.editMode) { next.setEditMode(true); next.setConnector(seeds.connector); }
     } else if (owner === apiOwner) {
       api = null;
@@ -276,9 +316,24 @@
 
   /** Toggle radial focus mode; leaving it returns to the hierarchy. */
   function toggleFocus(): void {
+    if (mapState.selectedTreeOnly) return;
     mapState.focusMode = !mapState.focusMode;
     if (!mapState.focusMode) mapState.focusId = null;
     nextLayout(true, true);
+  }
+
+  function toggleSelectedTree(): void {
+    mapState.selectedTreeOnly = !mapState.selectedTreeOnly;
+    writeSelectedTreePreference(treePreferenceKey, mapState.selectedTreeOnly);
+    if (mapState.selectedTreeOnly) {
+      const wasFocused = mapState.focusMode;
+      mapState.focusMode = false; mapState.focusId = null;
+      if (wasFocused && !hasSelection) nextLayout(true, true);
+    }
+  }
+  function clearSelection(): void {
+    mapState.selectedId = null;
+    if (api) api.setCurrent(null);
   }
 
   // Escape: leave the focused node first, and only close the map once there is
@@ -289,6 +344,9 @@
   $effect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
+      if (mapState.selectedTreeOnly && mapState.selectedId && !change.editMode) {
+        ev.preventDefault(); clearSelection(); return;
+      }
       if (mapState.focusMode && mapState.focusId) {
         mapState.focusId = null;
         nextLayout(true, true);
@@ -317,6 +375,7 @@
 
   <MapToolbar
     focusMode={mapState.focusMode}
+    focusDisabled={mapState.selectedTreeOnly}
     onZoom={(factor) => { if (api) api.zoomBy(factor); }}
     onFit={() => { if (api) api.fit(); }}
     onFocusToggle={toggleFocus}
@@ -337,6 +396,14 @@
       connector={change.connector}
       onToggle={toggleKind}
     />
+    <button type="button" class="graph-legend-item graph-selected-tree"
+      class:is-on={mapState.selectedTreeOnly} aria-pressed={mapState.selectedTreeOnly}
+      onclick={toggleSelectedTree}>Display selected tree only</button>
+    {#if treeBusy}
+      <span class="graph-tree-hint" role="status">Building selected tree…</span>
+    {:else if mapState.selectedTreeOnly && !hasSelection}
+      <span class="graph-tree-hint" role="status">Select a page to show its tree</span>
+    {/if}
   </div>
 
   {#if accessGroups.length}

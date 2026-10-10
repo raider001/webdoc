@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Doc } from './catalog.js';
+import { stripMetaBlocks } from './meta-blocks.js';
 
 /**
  * A doc->doc (or doc->external-node) edge reference: just the id pair, matching
@@ -139,7 +140,7 @@ export function documentLinks(docs: Doc[], traceEdges: DocEdgeRef[]): DocLinksRe
     let body = String(d.body || '');
     body = body.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, ''); // fenced code
     body = body.replace(/`[^`]*`/g, '');                                                // inline code
-    body = body.replace(/<!--\s*meta\s+start[\s\S]*?<!--\s*meta\s+end\b[\s\S]*?-->/gi, ''); // req groups
+    body = stripMetaBlocks(body);
 
     linkRe.lastIndex = 0;
     let m: RegExpExecArray | null;

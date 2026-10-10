@@ -13,16 +13,17 @@
 // ---------------------------------------------------------------------------
 import { elem, append } from './dom.js';
 import { arrowUpIcon, arrowDownIcon, plusIcon, closeIcon } from './icons.js';
-import { serializeDoc, htmlToMd, newBlock } from './editor/serialize.js';
+import { serializeDoc, newBlock, toMarkdownBlocks } from './editor/serialize.js';
 import { editable, listItem, attachInlineToolbar, setLinkDocs, setLinkSearch, setImageResolver } from './editor/richtext.js';
 import { tableEditor, requirementWidget, testCaseWidget, accessMarker } from './editor/widgets.js';
 import { metadataPanel } from './editor/panels.js';
 import { iconBtn, labeledInput, openBlockMenu } from './editor/ui.js';
 import { resolveResourceUrl } from './doclinks.js';
+import { widgetEditor } from './editor/widget-editor.js';
 
 import type { SourceConfig } from './catalog.js';
 import type { DocAccess } from './auth.js';
-import type { DocMeta, MdSourceBlock } from './editor/serialize.js';
+import type { DocMeta } from './editor/serialize.js';
 import type { TableBlock, ReqBlock, TestCaseBlock, ReqRef } from './editor/widgets.js';
 
 // Public API re-exported so existing importers (main.js, runner.ts) stay unchanged.
@@ -76,6 +77,15 @@ export interface AccessEndBlock {
   type: 'access-end';
 }
 
+export interface WidgetEditorBlock {
+  type: 'widget';
+  options: Record<string, unknown>;
+  blocks: Block[];
+  /** Malformed wrappers are preserved verbatim until repaired in source. */
+  raw?: string;
+  error?: string;
+}
+
 /**
  * A single visual block in the editor canvas. Every widget / serialize.ts /
  * blockField branch switches on `type`.
@@ -91,6 +101,7 @@ export type Block =
   | HrBlock
   | ReqBlock
   | TestCaseBlock
+  | WidgetEditorBlock
   | AccessStartBlock
   | AccessEndBlock;
 
@@ -117,9 +128,24 @@ export function openEditor(opts: EditorOpts): HTMLElement {
   setLinkDocs(opts.allDocs || []);   // static fallback; server-backed suggestions win (setLinkSearch)
   setImageResolver(src => resolveResourceUrl(opts.docId, src));   // inserted relative images show + round-trip
 
-  const blocks: Block[] = opts.blocks.map(b => ({ ...b }));
+  const blocks: Block[] = structuredClone(opts.blocks);
   const list = elem('div', 'editor-blocks');
   const canvas = elem('div', 'editor-canvas', list);
+  const editor = elem('div', 'editor');
+  const widgetEditors = new Set<ReturnType<typeof widgetEditor>>();
+  const teardownWidgets = (root?: Element) => {
+    for (const handle of widgetEditors) if (!root || root.contains(handle.element)) { handle.destroy(); widgetEditors.delete(handle); }
+  };
+  let wasConnected = false;
+  const observer = new MutationObserver(records => {
+    if (editor.isConnected) {
+      wasConnected = true;
+      for (const handle of widgetEditors) if (!editor.contains(handle.element)) { handle.destroy(); widgetEditors.delete(handle); }
+    } else if (wasConnected || records.some(record => [...record.removedNodes].some(node => node.contains(editor)))) {
+      teardownWidgets(); observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
   // The trace-to picker's options, computed LIVE each time it opens: the saved
   // requirements from every other document PLUS the ones being edited right now
@@ -149,6 +175,7 @@ export function openEditor(opts: EditorOpts): HTMLElement {
 
   /** Redraw the block list from scratch. */
   function repaint() {
+    teardownWidgets(list);
     list.textContent = '';
     blocks.forEach((b, i) => list.appendChild(renderBlockEditor(b, i)));
     const add = elem('button', { class: 'blk-add-end', onClick: () => openBlockMenu(add, t => { blocks.push(...blocksFor(t)); repaint(); }) }, '+ Add block');
@@ -170,17 +197,35 @@ export function openEditor(opts: EditorOpts): HTMLElement {
   }
 
   // One block row: the reorder/insert/delete gutter plus the block's editable body.
-  function renderBlockEditor(b: Block, i: number): HTMLElement {
+  function renderBlockEditor(b: Block, i: number, collection = blocks, redraw = repaint): HTMLElement {
     const gutter = elem('div', 'blk-gutter',
-      iconBtn(arrowUpIcon(), 'Move up', () => { if (i > 0) { [blocks[i - 1], blocks[i]] = [blocks[i], blocks[i - 1]]; repaint(); } }),
-      iconBtn(arrowDownIcon(), 'Move down', () => { if (i < blocks.length - 1) { [blocks[i + 1], blocks[i]] = [blocks[i], blocks[i + 1]]; repaint(); } }),
-      iconBtn(plusIcon(), 'Insert below', e => openBlockMenu(e.target as Element, t => { blocks.splice(i + 1, 0, ...blocksFor(t)); repaint(); })),
-      iconBtn(closeIcon(), 'Delete', () => { blocks.splice(i, 1); if (!blocks.length) blocks.push(newBlock('paragraph')); repaint(); }));
+      iconBtn(arrowUpIcon(), 'Move up', () => { if (i > 0) { [collection[i - 1], collection[i]] = [collection[i], collection[i - 1]]; redraw(); } }),
+      iconBtn(arrowDownIcon(), 'Move down', () => { if (i < collection.length - 1) { [collection[i + 1], collection[i]] = [collection[i], collection[i + 1]]; redraw(); } }),
+      iconBtn(plusIcon(), 'Insert below', e => openBlockMenu(e.target as Element, t => { collection.splice(i + 1, 0, ...blocksFor(t)); redraw(); })),
+      iconBtn(closeIcon(), 'Delete', () => { collection.splice(i, 1); if (!collection.length) collection.push(newBlock('paragraph')); redraw(); }));
     return elem('div', 'blk blk-' + b.type, gutter, elem('div', 'blk-body', blockField(b)));
   }
 
   // Build the editable field(s) for a block, writing edits back into `b`.
   function blockField(b: Block): HTMLElement {
+    if (b.type === 'widget') {
+      const widget = b;
+      if (b.error) return elem('div', 'blk-widget-error', b.error + ' — original Markdown is preserved. Repair the markers in the source file.');
+      const children = elem('div', 'blk-widget-children');
+      function drawChildren() {
+        teardownWidgets(children);
+        children.replaceChildren();
+        widget.blocks.forEach((child, i) => children.append(renderBlockEditor(child, i, widget.blocks, drawChildren)));
+        const add = elem('button', { type: 'button', class: 'blk-add-end' }, '+ Add block inside section');
+        add.addEventListener('click', () => openBlockMenu(add, type => { widget.blocks.push(...blocksFor(type)); drawChildren(); }));
+        children.append(add);
+        resolveDisplayImages(children);
+      }
+      drawChildren();
+      const handle = widgetEditor(widget, opts.docId, children);
+      widgetEditors.add(handle);
+      return handle.element;
+    }
     if (b.type === 'heading') {
       const select = elem('select', { onChange: () => { b.level = +select.value; } });
       for (let l = 1; l <= 6; l++) append(select, elem('option', { value: l, selected: b.level === l }, 'H' + l));
@@ -225,27 +270,30 @@ export function openEditor(opts: EditorOpts): HTMLElement {
   const status = elem('span', 'editor-status');
   /** Serialize every block back to Markdown and hand it to opts.onSave. */
   function onSave() {
+    let widgetsValid = true;
+    for (const handle of widgetEditors) if (editor.contains(handle.element) && !handle.validate()) widgetsValid = false;
+    if (!widgetsValid) { status.textContent = 'Check the highlighted widget settings.'; return; }
+    const invalid = canvas.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input:invalid, textarea:invalid, select:invalid');
+    if (invalid) { invalid.reportValidity(); return; }
     // pull inline HTML -> markdown for text blocks; other block types pass through.
     // The MdSourceBlock return annotation pins each branch's literal `type` to the
     // member it stands for; without it the object literals widen `type` to string
     // and serializeDoc can no longer tell the block kinds apart.
-    const out = blocks.map((b): MdSourceBlock => {
-      if (b.type === 'heading') return { type: 'heading', level: b.level || 2, text: htmlToMd(b.html) };
-      if (b.type === 'paragraph') return { type: 'paragraph', text: htmlToMd(b.html) };
-      if (b.type === 'quote') return { type: 'quote', text: htmlToMd(b.html) };
-      if (b.type === 'list') return { type: 'list', ordered: b.ordered, items: (b.itemsHtml || []).map(htmlToMd).filter(x => x !== '') };
-      return b;
-    });
+    const out = toMarkdownBlocks(blocks);
     meta.title = meta.title || opts.meta.title || 'Untitled';
     status.textContent = 'Saving…';
     opts.onSave(serializeDoc(meta, out), meta, status);
   }
   const bar = elem('div', 'editor-bar',
     elem('span', 'editor-bar-title', (opts.isNew ? 'New document · ' : 'Editing · ') + opts.docId),
+    elem('button', { type: 'button', class: 'btn', onClick: (e: Event) => openBlockMenu(e.currentTarget as Element, t => { blocks.push(...blocksFor(t)); repaint(); }) }, '+ Add block'),
     elem('span', { style: 'flex:1' }),
     status,
-    elem('button', { class: 'btn', onClick: () => opts.onClose() }, 'Cancel'),
+    elem('button', { class: 'btn', onClick: () => { teardownWidgets(); observer.disconnect(); opts.onClose(); } }, 'Cancel'),
     elem('button', { class: 'btn btn-primary', onClick: onSave }, 'Save'));
 
-  return elem('div', 'editor', bar, elem('div', 'editor-cols', canvas, panel));
+  const addWidget = elem('button', { type: 'button', class: 'btn', onClick: () => openBlockMenu(addWidget, type => { blocks.push(...blocksFor(type)); repaint(); }, true) }, '+ Add widget');
+  bar.insertBefore(addWidget, bar.querySelector('button'));
+  editor.append(bar, elem('div', 'editor-cols', canvas, panel));
+  return editor;
 }

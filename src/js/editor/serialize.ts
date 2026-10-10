@@ -6,9 +6,11 @@
 // Zero UI here - pure data transforms (plus the shared renderer/sanitizer).
 import { renderMarkdown } from '../commonmark.js';
 import { sanitizeToFragment } from '../sanitize.js';
+import { scanMetaBlocks, replaceMetaBlocks } from '../meta-blocks.js';
+import { widgetDefinition, widgetFields } from '../widgets.js';
 
 import type {
-  Block, ImageBlock, HrBlock, CodeBlock, AccessStartBlock, AccessEndBlock
+  Block, ImageBlock, HrBlock, CodeBlock, AccessStartBlock, AccessEndBlock, WidgetEditorBlock
 } from '../editor.js';
 import type {
   TableBlock, ReqBlock, RequirementRow, TestCaseBlock, TestStep
@@ -121,6 +123,14 @@ export interface ListMdBlock {
   /** Markdown source, one entry per list item */
   items: string[];
 }
+
+export interface WidgetMdBlock {
+  type: 'widget';
+  options: Record<string, unknown>;
+  blocks: MdSourceBlock[];
+  raw?: string;
+  error?: string;
+}
 /**
  * What blockToMd()/serializeDoc() actually consume: editor.ts's onSave already
  * converts the four inline-HTML block types (heading/paragraph/quote/list) from
@@ -140,6 +150,7 @@ export type MdSourceBlock =
   | HrBlock
   | ReqBlock
   | TestCaseBlock
+  | WidgetMdBlock
   | AccessStartBlock
   | AccessEndBlock;
 
@@ -194,8 +205,15 @@ export function htmlToMd(html: string): string {
  */
 function unhandledBlock(_block: never): string { return ''; }
 
-function blockToMd(b: MdSourceBlock): string {
+export function blockToMd(b: MdSourceBlock): string {
   switch (b.type) {
+    case 'widget': {
+      if (b.raw !== undefined) return b.raw;
+      // Escape comment terminators inside JSON string values, preserving JSON semantics.
+      const json = (value: unknown) => JSON.stringify(value).replace(/-->/g, '--\\u003e');
+      return '<!--meta start ' + json(b.options) + '-->\n' + b.blocks.map(blockToMd).join('\n\n') +
+        '\n<!--meta end ' + json({ widget: b.options.widget }) + '-->';
+    }
     case 'heading': return '#'.repeat(b.level) + ' ' + b.text;
     case 'paragraph': return b.text;
     case 'quote': return b.text.split('\n').map(l => '> ' + l).join('\n');
@@ -323,11 +341,20 @@ export interface ParsedDoc {
  *   keys sit at the top level - collecting them into _extra is exactly what the
  *   loop at the end does.
  */
-export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<string, unknown>): ParsedDoc {
+export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<string, unknown>, depth = 0): ParsedDoc {
+  const widgets: WidgetEditorBlock[] = [];
+  let nestedLostMarkers = 0;
+  rawBody = replaceMetaBlocks(rawBody, scanMetaBlocks(rawBody).filter(b => b.widget), block => {
+    const error = block.error || (depth >= 16 ? 'Widget nesting limit (16) reached' : undefined);
+    const inner = error ? null : parseDoc(rawBody.slice(block.innerStart, block.innerEnd), {}, depth + 1);
+    nestedLostMarkers += inner?.lostMarkers || 0;
+    widgets.push({ type: 'widget', options: block.options, blocks: inner?.blocks || [],
+      ...(error ? { raw: rawBody.slice(block.start, block.end), error } : {}) });
+    return '\n\n@@WIDGETBLOCK' + (widgets.length - 1) + '@@\n\n';
+  });
   // Pull requirement groups out first (they are meta-wrapped tables) and leave
   // placeholders, so their positions survive; everything else renders to HTML.
   const groups: (ReqBlock | TestCaseBlock)[] = [];
-  const RE = /<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->([\s\S]*?)<!--\s*meta\s+end[\s\S]*?-->/gi;
   /** @param line one row of a pipe table */
   const cellsOf = (line: string): string[] => {
     const cells = line.split('|').map(c => c.trim());
@@ -364,9 +391,9 @@ export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<st
     return '\n\n@@ACCESSMARK' + (markers.length - 1) + '@@\n\n';
   });
 
-  let body = source.replace(RE, (_m: string, json: string, inner: string) => {
-    let meta: BlockMetaJson = {};
-    try { meta = JSON.parse(json); } catch (e) {}
+  const body = replaceMetaBlocks(source, scanMetaBlocks(source), block => {
+    const meta: BlockMetaJson = block.options;
+    const inner = source.slice(block.innerStart, block.innerEnd);
     if (meta.test || meta['test-case']) {   // test-case block
       let steps: TestStep[];
       if (Array.isArray(meta.steps)) {      // structured steps (current format)
@@ -408,7 +435,9 @@ export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<st
   /**
    * Resolve a placeholder's text back to the block it stands for.
    */
-  const placeholder = (text: string): ReqBlock | TestCaseBlock | AccessStartBlock | AccessEndBlock | null => {
+  const placeholder = (text: string): ReqBlock | TestCaseBlock | AccessStartBlock | AccessEndBlock | WidgetEditorBlock | null => {
+    const widget = /^@@WIDGETBLOCK(\d+)@@$/.exec(text);
+    if (widget) return widgets[+widget[1]];
     let mm = /^@@REQGROUP(\d+)@@$/.exec(text);
     if (mm) return groups[+mm[1]];
     mm = /^@@ACCESSMARK(\d+)@@$/.exec(text);
@@ -443,7 +472,7 @@ export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<st
   // represent), report it: the caller refuses to open the editor rather than
   // saving a document with a permission boundary silently deleted.
   const recovered = blocks.filter(b => b && (b.type === 'access-start' || b.type === 'access-end')).length;
-  const lostMarkers = markers.length - recovered;
+  const lostMarkers = markers.length - recovered + nestedLostMarkers;
 
   // Unknown header keys ride through in _extra. Collected before the literal
   // below so the header is read through one local that is definitely there,
@@ -487,7 +516,24 @@ function tableBlock(table: HTMLTableElement): TableBlock {
 /**
  * @param type a BLOCK_MENU entry's `type` (editor/ui.ts), or 'list-ordered'
  */
+export function toMarkdownBlocks(blocks: Block[]): MdSourceBlock[] {
+  return blocks.map(b => {
+    if (b.type === 'heading') return { type: b.type, level: b.level || 2, text: htmlToMd(b.html) };
+    if (b.type === 'paragraph' || b.type === 'quote') return { type: b.type, text: htmlToMd(b.html) };
+    if (b.type === 'list') return { type: b.type, ordered: b.ordered, items: b.itemsHtml.map(htmlToMd).filter(text => text !== '') };
+    if (b.type === 'widget') return { ...b, blocks: toMarkdownBlocks(b.blocks) };
+    return b;
+  });
+}
+
 export function newBlock(type: string): Block {
+  if (type === 'widget' || type.startsWith('widget:')) {
+    const name = type === 'widget' ? 'panel' : type.slice(7);
+    const definition = widgetDefinition(name);
+    const options: Record<string, unknown> = { widget: name };
+    widgetFields(definition).forEach(field => { if (field.default !== undefined) options[field.name] = structuredClone(field.default); });
+    return { type: 'widget', options, blocks: [{ type: 'paragraph', html: '' }] };
+  }
   if (type === 'list-ordered') return { type: 'list', ordered: true, itemsHtml: [''] };
   if (type === 'list') return { type: 'list', ordered: false, itemsHtml: [''] };
   if (type === 'heading') return { type: 'heading', level: 2, html: '' };

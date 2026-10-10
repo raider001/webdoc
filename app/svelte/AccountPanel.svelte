@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
   import { changePassword } from '/js/auth.js';
+  import { uniqueStrings } from '/js/lists.js';
   import { authView } from './stores/auth.svelte.js';
   import Modal from './Modal.svelte';
   import GroupChip from './GroupChip.svelte';
@@ -75,7 +76,7 @@
       </div>
       <p class="auth-label">Your access groups</p>
       <div class="group-chips">
-        {#each groups as group (group)}<GroupChip name={group} />{:else}<span class="auth-muted">No groups</span>{/each}
+        {#each uniqueStrings(groups) as group (group)}<GroupChip name={group} />{:else}<span class="auth-muted">No groups</span>{/each}
       </div>
       {#if isAdmin}<button class="btn" onclick={onManage}>Manage accounts…</button>{/if}
       <hr class="auth-rule" />

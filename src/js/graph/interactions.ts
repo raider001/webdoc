@@ -133,6 +133,8 @@ export function wireInteractions(g: GraphContext): void {
         g.setCurrent(id);
         g.onSelect(id);             // single click -> select it, stay on the map
       }
+    } else if (!moved && g.opts.onClearSelection) {
+      g.setCurrent(null); g.opts.onClearSelection();
     }
     downNodeId = null; downExtUrl = null; downEdge = null;
   });

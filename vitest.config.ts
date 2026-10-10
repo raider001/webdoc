@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 // that passed against src/ but failed against app/ would be testing a file
 // nobody runs.
 export default defineConfig({
+  cacheDir: '.cache/vitest',
   plugins: [svelte()],
   resolve: {
     alias: [{ find: /^\/js\//, replacement: fileURLToPath(new URL('./app/js/', import.meta.url)) }],
@@ -23,7 +24,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['app/svelte/**/*.test.ts'],
+    include: ['app/svelte/**/*.test.ts', 'tests/unit/**/*.test.ts'],
+    maxWorkers: 1,
+    fileParallelism: false,
     globals: true,
   },
 });
