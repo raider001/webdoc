@@ -188,7 +188,7 @@ const CAT_DASH: Record<string, number[]> = { prereq: [], recnext: [6, 5], trace:
 function catColor(colors: GraphColors, cat: string): string { return cat === 'recnext' ? colors.recnext : cat === 'trace' ? colors.trace : cat === 'pagelink' ? colors.pagelink : colors.prereq; }
 
 // Point on node n's border in the direction of (tx,ty) - for straight overlay edges.
-function borderPoint(n: GraphBox, tx: number, ty: number): { x: number, y: number } {
+export function borderPoint(n: GraphBox, tx: number, ty: number): { x: number, y: number } {
   const cx = n.x + n.w / 2, cy = n.y + n.h / 2;
   const dx = tx - cx, dy = ty - cy;
   if (dx === 0 && dy === 0) return { x: cx, y: cy };
@@ -273,7 +273,7 @@ export function renderScene(g: GraphContext): void {
       g.rafPending = false;
       if (g.tween) stepTween(g);
       draw(g);
-      if (g.tween || (g.flashUntil && performance.now() < g.flashUntil)) g.requestDraw();
+      if (g.tween || g.removedNodes?.length || (g.flashUntil && performance.now() < g.flashUntil)) g.requestDraw();
       else if (g.flashUntil && performance.now() >= g.flashUntil) { g.flashId = null; g.flashUntil = 0; draw(g); }
     });
   };
@@ -332,6 +332,8 @@ function firstNode(g: GraphContext): LayoutNode | { w: number, h: number } { for
  * widths) mapping cell key -> node ids overlapping that cell, for O(visible)
  * hit-testing and culling instead of scanning every node.
  */
+export function refreshScene(g: GraphContext): void { buildGrid(g); buildEdges(g); }
+
 function buildGrid(g: GraphContext): void {
   const nodeW = (g.layout.nodes.size ? firstNode(g).w : LO.nodeW);
   const cell = Math.max(256, Math.round(nodeW * 1.5));
@@ -478,7 +480,7 @@ function draw(g: GraphContext): void {
   const cw = g.cssW, ch = g.cssH;
   ctx.setTransform(g.dpr, 0, 0, g.dpr, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
-  if (!g.layout.nodes.size && !(g.extPos && g.extPos.size)) return;
+  if (!g.layout.nodes.size && !(g.extPos && g.extPos.size) && !g.removedNodes?.length) return;
 
   const off = g.tweenOffset;
   const nodeW = firstNode(g).w;
@@ -558,6 +560,17 @@ function draw(g: GraphContext): void {
 
   // ---- Pass C: draw the visible nodes on top of their edges ----
   ctx.textBaseline = 'middle';
+  if (g.removedNodes?.length) {
+    const alpha = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : Math.max(0, 1 - (performance.now() - (g.removalStart || 0)) / 240);
+    ctx.save(); ctx.globalAlpha = alpha;
+    for (const n of g.removedNodes) {
+      const sx = px(n.box.x), sy = py(n.box.y), sw = n.box.w * k, sh = n.box.h * k;
+      if (sx > cw || sy > ch || sx + sw < 0 || sy + sh < 0) continue;
+      drawNode(g, ctx, n.id, n.meta, !n.meta, null, sx, sy, sw, sh, tier);
+    }
+    ctx.restore();
+    if (!alpha) g.removedNodes = [];
+  }
   for (const vn of viz) drawNode(g, ctx, vn.id, vn.meta, vn.isExt, vn.st, vn.sx, vn.sy, vn.sw, vn.sh, tier);
 }
 /**
@@ -608,7 +621,8 @@ function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, me
   const missing = meta && meta.missing;
   const near = tier === 2;
   const fade = dimmed(g, meta);
-  if (fade) ctx.globalAlpha = 0.32;
+  const opacity = ctx.globalAlpha;
+  if (fade) ctx.globalAlpha = opacity * 0.32;
   const r = near ? Math.min(10 * g.k, Math.min(sw, sh) / 2) : 0;
 
   // ---- FAR: a tiny filled square, no box/text. fillRect is much cheaper than an
@@ -617,10 +631,10 @@ function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, me
     const farGroup = groupTint(g, meta);
     ctx.fillStyle = isCurrent ? C.currentRing : st ? statusColor(C, st.status)
       : missing ? C.missingBorder : isExt ? C.pagelink : (farGroup || C.muted);
-    ctx.globalAlpha = missing ? 0.55 : (dimmed(g, meta) ? 0.35 : 0.9);
+    ctx.globalAlpha = opacity * (missing ? 0.55 : (dimmed(g, meta) ? 0.35 : 0.9));
     const s = Math.max(1.5, Math.min(sw, sh) * 0.9);
     ctx.fillRect(sx + sw / 2 - s / 2, sy + sh / 2 - s / 2, s, s);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = opacity;
     return;
   }
 
@@ -644,9 +658,9 @@ function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, me
   drawAccess(g, ctx, meta, sx, sy, sw, sh, tier);
 
   // ---- text (near only; mid draws title only if wide enough) ----
-  if (tier === 1 && sw < 66) { if (fade) ctx.globalAlpha = 1; return; }
+  if (tier === 1 && sw < 66) { if (fade) ctx.globalAlpha = opacity; return; }
   const pad = 10, innerW = sw - pad * 2;
-  if (innerW < 24) { if (fade) ctx.globalAlpha = 1; return; }
+  if (innerW < 24) { if (fade) ctx.globalAlpha = opacity; return; }
   const title = isExt ? g.externalNodes.find(e => e.id === id)?.url || id : (meta ? meta.title : id);
   ctx.fillStyle = missing ? C.missingText : C.text;
   ctx.font = '600 ' + fmt(13.5 * g.k) + 'px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -670,7 +684,7 @@ function drawNode(g: GraphContext, ctx: CanvasRenderingContext2D, id: string, me
     const dLines = wrapLines(ctx, dtxt, innerW, 2);
     for (const ln of dLines) { ctx.fillText(ln, sx + pad, cy + 6 * g.k); cy += 13 * g.k; }
   }
-  if (fade) ctx.globalAlpha = 1;
+  if (fade) ctx.globalAlpha = opacity;
 }
 
 // ---------------------------------------------------------------------------

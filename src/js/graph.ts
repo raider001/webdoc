@@ -28,6 +28,7 @@ import { attachEditState } from './graph/edit-state.js';
 import { mountGraphChrome } from './graph/chrome-view.js';
 import { wireInteractions } from './graph/interactions.js';
 import { groupColor } from './auth.js';
+import { updateGraphData } from './graph/update.js';
 
 import type { DocEdgeRef } from './requirements.js';
 import type { ExternalLinkNode } from './doclinks.js';
@@ -101,6 +102,7 @@ export interface GraphOptions {
   autoSize?: boolean;
   maxNodeW?: number;
   maxNodeH?: number;
+  compactLayout?: boolean;
   /**
    * The surface to paint the minimap on. The engine draws it and handles clicks
    * on it, but never creates it: the frame around it is chrome.
@@ -223,6 +225,8 @@ export interface GraphCoreCtx {
  * indexes the loop and hit-testing read.
  */
 export interface GraphRenderCtx {
+  removedNodes?: { id: string; box: GraphBox; meta?: ModelGraphNode }[];
+  removalStart?: number;
   canvas: HTMLCanvasElement;
   /** the same canvas; view.js/interactions.js address the surface under this name */
   svgEl: HTMLCanvasElement;
@@ -341,6 +345,8 @@ export interface GraphTestBox {
  * are CLIENT (viewport) pixels, not world units.
  */
 export interface GraphTestApi {
+  bounds: () => { width: number; height: number };
+  state: () => { currentId: string | null; hoverId: string | null; focusId: string | null; mapMode: string | null };
   nodeAt: (clientX: number, clientY: number) => (string | null);
   /** alias of nodeAt */
   hitTest: (clientX: number, clientY: number) => (string | null);
@@ -390,6 +396,8 @@ export interface GraphChangeEvent {
  * which is what a re-layout has always been.
  */
 export interface GraphController {
+  /** Refresh server data in place; returns whether nodes or edges changed. */
+  updateData: (docs: GraphInputDoc[], data: Pick<GraphOptions, 'traceEdges' | 'pageLinks' | 'externalNodes'>) => boolean;
   destroy: () => void;
   fit: () => void;
   focus: (id: string) => boolean;
@@ -514,7 +522,9 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
   g.nodeList = Array.from(g.model.nodes.values());
   g.sortedIds = Array.from(g.model.nodes.keys()).sort();  // deterministic search order
   const sizeOverride = opts.autoSize ? computeNodeSize(g) : null;
-  const layoutOpts = Object.assign({}, sizeOverride || {}, { layoutMode: g.mapMode || 'all' });
+  const rect = canvasEl.getBoundingClientRect();
+  const layoutOpts = Object.assign({}, sizeOverride || {}, { layoutMode: g.mapMode || 'all', compact: !!opts.compactLayout,
+    aspectRatio: Math.round((rect.height > 0 ? rect.width / rect.height : 1.4) * 10) / 10 });
   if (g.focusId && g.model.nodes.has(g.focusId)) {
     // The ring = every DOC node directly linked to the focus by ANY edge type:
     // prereq/recnext + requirement-trace + doc page links. In focus view only the
@@ -553,6 +563,8 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
   // go through one alias that says so.
   const testWindow = window as unknown as (typeof window & { __graph: GraphTestApi | null });
   const hook: GraphTestApi = {
+    bounds: () => ({ width: g.layout.width, height: g.layout.height }),
+    state: () => ({ currentId: g.currentId, hoverId: g.hoverId, focusId: g.focusId, mapMode: g.mapMode }),
     nodeAt: function (clientX, clientY) { const r = g.svgEl.getBoundingClientRect(); return g.nodeAtWorld((clientX - r.left - g.tx) / g.k, (clientY - r.top - g.ty) / g.k); },
     hitTest: function (clientX, clientY) { return hook.nodeAt(clientX, clientY); },
     nodePositions: function () {
@@ -571,6 +583,7 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
   testWindow.__graph = hook;
 
   return {
+    updateData: (docs, data) => updateGraphData(g, docs, data),
     destroy: function () {
       g.destroy();                       // listeners, observers, rAF loop, and the <canvas>
       g.listeners.change.length = 0;
@@ -664,6 +677,7 @@ export function createGraph(container: HTMLElement, docs: GraphInputDoc[], optio
     // can render from a controller that is halfway through being destroyed.
     destroy: function () { chrome.destroy(); ctl.destroy(); },
     fit: ctl.fit,
+    updateData: ctl.updateData,
     focus: ctl.focus,
     search: ctl.search,
     setCurrent: ctl.setCurrent,

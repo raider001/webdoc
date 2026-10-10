@@ -75,6 +75,30 @@ your own pages.
 
 ## Interacting with the canvas
 
+**Compact layout** in the bottom bar is on by default and remembered per site.
+It wraps long, ordered runs of leaf pages into additional columns when the area
+to their right is clear, then closes the vertical gap. Node sizes and spacing
+stay the same. Column count accounts for the viewport's aspect ratio, and reading
+order runs top to bottom in each column, then left to right. Parent links use
+the column gutters. Short runs, shared children and blocked subtrees stay in
+their original arrangement; non-leaf pages never move sideways.
+
+Turn the option off to compare with the original layered layout, and use **Fit**
+to frame either arrangement. It also applies to selected-tree subsets. Radial
+Focus uses its own layout and disables this toggle. Compaction runs only when a
+layout is requested: background updates keep the compacted nodes in place.
+
+Background index updates keep the open map's zoom, pan, selection, selected-tree
+filter and legend settings. Title and metadata changes update labels without
+rearranging the map. Added pages appear near their neighbours, surviving pages
+stay in place, and removed pages fade out. The selected tree is recomputed from
+the fresh relationships while keeping its camera and existing positions.
+
+Use **Re-layout** in the bottom display bar to deliberately rearrange the
+displayed nodes. **Fit** changes the camera to frame the current arrangement;
+it does not rearrange it. Changing Map by, Focus or the selected-tree selection
+still requests a new layout.
+
 The map is meant to be roamed:
 
 - **Pan** by dragging the background.

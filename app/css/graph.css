@@ -114,7 +114,7 @@
 .graph-legend-item.is-off { opacity:.42; text-decoration:line-through; }
 .graph-legend-item:focus-visible { outline:2px solid var(--focus-ring); outline-offset:1px; }
 .graph-selected-tree { border-inline-start:1px solid var(--graph-overlay-border); padding-inline-start:12px; }
-.graph-selected-tree.is-on { color:var(--accent); background:var(--accent-soft); }
+.graph-selected-tree.is-on, .graph-compact-layout.is-on { color:var(--accent); background:var(--accent-soft); }
 .graph-tree-hint { font-size:.85em; color:var(--muted); }
 .graph-focus-toggle:disabled { opacity:.5; cursor:default; }
 

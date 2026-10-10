@@ -29,7 +29,7 @@
 // nothing else.
 import { mustEl, app } from './app-shell.js';
 import { mapOverlay } from './overlays.js';
-import { ensureGraphModel } from './graph-model.js';
+import { ensureGraphModel, isCurrentGraphModel } from './graph-model.js';
 import { loadIslands } from './islands.js';
 import { announce } from './announce.js';
 
@@ -39,6 +39,7 @@ import { announce } from './announce.js';
  * window.__graph - detaching the DOM would not.
  */
 let island: { destroy: () => void } | null = null;
+let refresh: { controller: AbortController; promise: Promise<void> } | null = null;
 
 // (Re)build the document map. Restoring the current pan/zoom is the DEFAULT (so
 // the view doesn't jump on an edit-connections change) and `refit` is the opt-out.
@@ -51,13 +52,23 @@ let island: { destroy: () => void } | null = null;
  * @param animate - animate nodes from their prior positions (tween) into the new layout
  * @param refit - fit fresh to the new layout frame instead of restoring the saved pan/zoom (used on a focus change)
  */
-export async function buildDocGraph(animate?: boolean, refit?: boolean): Promise<void> {
+export function buildDocGraph(animate?: boolean, refit?: boolean): Promise<void> {
   // Fetch the (cached) model BEFORE touching the live graph, so the current map
   // stays on-screen during the await. Destroying first and THEN awaiting left
   // the map blank for a frame -> the "flash" on create/delete/edit rebuilds.
-  const model = await ensureGraphModel();
-  const islands = await loadIslands();
-  islands.setMapModel(model, { animate: !!animate, refit: !!refit });
+  if (refresh) return refresh.promise;
+  const request = { controller: new AbortController(), promise: null! as Promise<void> };
+  refresh = request;
+  request.promise = (async () => {
+    try {
+      let model = await ensureGraphModel(request.controller.signal);
+      const islands = await loadIslands();
+      while (!request.controller.signal.aborted && !isCurrentGraphModel(model)) model = await ensureGraphModel(request.controller.signal);
+      if (!request.controller.signal.aborted) islands.setMapModel(model, { animate: !!animate, refit: !!refit });
+    } catch (error) { if (!request.controller.signal.aborted) throw error; }
+    finally { if (refresh === request) refresh = null; }
+  })();
+  return request.promise;
 }
 
 /**
@@ -90,11 +101,14 @@ export function setupGraphButton(): OverlayHandle {
   // height to measure.
   const { host: overlay, stage } = mapOverlay();
   stage.classList.add('map-stage');
+  let openSequence = 0;
 
   /** Close the map overlay. */
   const close = (): void => {
     if (overlay.hidden) return;
     overlay.hidden = true;
+    openSequence++;
+    refresh?.controller.abort(); refresh = null;
     btn.setAttribute('aria-pressed', 'false');
     if (island) { island.destroy(); island = null; }   // stops the rAF loop and releases window.__graph
     mustEl('content').focus({ preventScroll: true });
@@ -102,6 +116,8 @@ export function setupGraphButton(): OverlayHandle {
 
   /** Open the map overlay, loading the graph model before it mounts. */
   const open = async (): Promise<void> => {
+    if (!overlay.hidden && island) return;
+    const sequence = ++openSequence;
     if (app.closeCoverageView) app.closeCoverageView();   // only one overlay view at a time
     overlay.hidden = false;
     btn.setAttribute('aria-pressed', 'true');
@@ -112,7 +128,7 @@ export function setupGraphButton(): OverlayHandle {
     await buildDocGraph();
     const islands = await loadIslands();
     // Two awaits is two chances for the reader to have closed it again.
-    if (overlay.hidden) return;
+    if (overlay.hidden || sequence !== openSequence) return;
     if (island) island.destroy();
     island = islands.mountMapOverlay(stage, {
       onClose: close,

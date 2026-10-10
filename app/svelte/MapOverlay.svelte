@@ -22,10 +22,9 @@
     `mapState` - what survives a rebuild and a reopen (the model, the layout
                  token, the "Map by" mode, focus). See stores/map.svelte.ts.
 
-  A REBUILD IS A NEW CONTROLLER, NEVER A PATCHED ONE. Anything that changes the
-  LAYOUT - a different model, a different "Map by" mode, entering or leaving
+  USER LAYOUT REQUESTS CREATE A NEW CONTROLLER. A different "Map by" mode, entering or leaving
   focus - bumps mapState.version, and the {#key} around GraphCanvas replaces the
-  canvas and its controller. Everything else is a method call on the live one.
+  canvas and its controller. Background model changes patch the live controller.
   Putting docs or the layout in an $effect would relayout on unrelated changes
   and lose the tween between layouts, which is the difference between a smooth
   rearrange and a jump.
@@ -51,7 +50,7 @@
   import type { GraphViewSnapshot } from './actions/graph.js';
   import type { GraphController, GraphChangeEvent, GraphOptions } from '/js/graph.js';
   import type { GraphModel } from '/js/graph-model.js';
-  import { selectedTreeModelAsync, selectedTreePreferenceKey, readSelectedTreePreference, writeSelectedTreePreference } from '/js/graph/selected-tree.js';
+  import { selectedTreeModelAsync, selectedTreePreferenceKey, readSelectedTreePreference, writeSelectedTreePreference, compactLayoutPreferenceKey, readCompactLayoutPreference } from '/js/graph/selected-tree.js';
   import type { MapTransform } from './stores/map.svelte.js';
 
   /**
@@ -116,10 +115,14 @@
   let apiOwner: object | null = null;
   const treePreferenceKey = selectedTreePreferenceKey(appState.site, location.origin);
   mapState.selectedTreeOnly = readSelectedTreePreference(treePreferenceKey);
+  const compactPreferenceKey = compactLayoutPreferenceKey(appState.site, location.origin);
+  mapState.compactLayout = readCompactLayoutPreference(compactPreferenceKey);
   mapState.selectedId = appState.current?.id || null;
   let shownModel = $state.raw<GraphModel | null>(mapState.model);
   let treeBusy = $state(false);
   let subsetInScene = false;
+  let sceneSelection: string | null = null;
+  let sceneSource = mapState.model;
   let fullTransform: MapTransform | null = null;
   let restoreTransform: MapTransform | null = null;
   const hasSelection = $derived(!!mapState.selectedId && !!mapState.model?.docs.some(doc => doc.id === mapState.selectedId));
@@ -136,11 +139,20 @@
       if (abort.signal.aborted) return;
       treeBusy = false;
       if (!selected && !subsetInScene && shownModel === model) return;
+      const filterChanged = selected !== sceneSelection;
+      const backgroundChange = model !== sceneSource;
+      sceneSource = model;
       if (selected && !subsetInScene) fullTransform = api?.getTransform() || null;
       if (!selected && subsetInScene) restoreTransform = fullTransform;
       subsetInScene = !!selected;
+      sceneSelection = selected;
       shownModel = subset;
-      nextLayout(true, !!selected);
+      if (filterChanged && !backgroundChange) nextLayout(true, !!selected);
+      else api?.updateData(subset.docs, subset);
+      if (mapState.selectedId && !model.docs.some(doc => doc.id === mapState.selectedId)) {
+        mapState.selectedId = null; mapState.focusId = null;
+        api?.setCurrent(null);
+      }
     }).catch(error => {
       if (!abort.signal.aborted) { treeBusy = false; console.error('Selected tree could not be built', error); }
     });
@@ -210,6 +222,7 @@
       // "Map by" picks which connection TYPE shapes the tree layout. It never
       // hides edges - every connection is still drawn; the legend owns visibility.
       mapMode: mapState.mapMode,
+      compactLayout: mapState.compactLayout,
       onMapMode: (m) => { mapState.mapMode = m; nextLayout(true); },   // relayout + animate the rearrange
       // Access groups: the map is where a reader is meant to SEE the shape of
       // what is restricted, so every node carries its read groups and the map
@@ -272,6 +285,8 @@
     if (next) {
       api = next;
       apiOwner = owner;
+      // A refresh can arrive while the lazy engine import is still in flight.
+      if (shownModel) next.updateData(shownModel.docs, shownModel);
       // Edit mode is re-armed AFTER the build, exactly as the vanilla map did:
       // it is a mode the reader turned on, not a property of the layout, so it
       // is restored rather than passed in.
@@ -384,6 +399,12 @@
   <MapSearch onSearch={(query) => { if (api) api.search(query); }} />
 
   <div class="graph-legend">
+    <button type="button" class="graph-legend-item graph-relayout" title="Rearrange the displayed nodes" onclick={() => nextLayout(true, false)}>Re-layout</button>
+    <button type="button" class="graph-legend-item graph-compact-layout"
+      class:is-on={mapState.compactLayout} aria-pressed={mapState.compactLayout}
+      disabled={mapState.focusMode && !mapState.selectedTreeOnly}
+      title="Wrap long leaf runs into free columns in the layered map; use Fit to reframe"
+      onclick={() => { mapState.compactLayout = !mapState.compactLayout; writeSelectedTreePreference(compactPreferenceKey, mapState.compactLayout); nextLayout(true, false); }}>Compact layout</button>
     <MapModeSelect
       modes={MAP_MODES}
       current={mapState.mapMode}

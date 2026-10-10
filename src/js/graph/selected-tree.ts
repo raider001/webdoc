@@ -80,3 +80,11 @@ export function readSelectedTreePreference(key: string): boolean {
 export function writeSelectedTreePreference(key: string, enabled: boolean): void {
   try { localStorage.setItem(key, String(enabled)); } catch { /* optional persistence */ }
 }
+
+export function compactLayoutPreferenceKey(site: Parameters<typeof selectedTreePreferenceKey>[0], origin: string): string {
+  return selectedTreePreferenceKey(site, origin).replace('wd-map-selected-tree:', 'wd-map-compact-layout:');
+}
+/** Opt out explicitly; absent or unavailable storage keeps compaction enabled. */
+export function readCompactLayoutPreference(key: string): boolean {
+  try { return localStorage.getItem(key) !== 'false'; } catch { return true; }
+}

@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MapOverlay from './MapOverlay.svelte';
-import { mapState, nextLayout, rememberMapView } from './stores/map.svelte.js';
+import { mapState, nextLayout, rememberMapView, setMapModel } from './stores/map.svelte.js';
 import { app, state } from '/js/app-shell.js';
 import type { GraphChangeEvent, GraphController, GraphInputDoc, GraphOptions } from '/js/graph.js';
-import { selectedTreePreferenceKey } from '/js/graph/selected-tree.js';
+import { selectedTreePreferenceKey, compactLayoutPreferenceKey } from '/js/graph/selected-tree.js';
+import { createIndexWatcher } from '/js/index-watch.js';
 
 const factory = vi.hoisted(() => vi.fn());
 vi.mock('/js/graph.js', () => ({ createGraphController: factory }));
@@ -22,6 +23,7 @@ beforeEach(() => {
     let change = initialState(); const listeners = new Set<(event: GraphChangeEvent) => void>();
     const transform = { ...(options.initialTransform || { tx: 0, ty: 0, k: 1 }) };
     const controller = {
+      updateData: vi.fn((updated: GraphInputDoc[]) => { const record = records.find(r => r.controller === controller); if (record) record.docs = updated; return false; }),
       getTransform: () => ({ ...transform }), getNodePositions: () => new Map(docs.map(d => [d.id, { x: 1, y: 2 }])), getEditState: () => change,
       on: (_name: string, fn: (event: GraphChangeEvent) => void) => { listeners.add(fn); return () => listeners.delete(fn); },
       setVisibility: (kind: string, visible: boolean) => { change = { ...change, visibility: { ...change.visibility, [kind]: visible } }; listeners.forEach(fn => fn(change)); },
@@ -35,6 +37,32 @@ const last = () => records[records.length - 1];
 const ids = () => last().docs.map(d => d.id);
 const open = () => render(MapOverlay, { onClose: vi.fn(), onRebuild: vi.fn().mockResolvedValue(undefined) });
 describe('selected tree display control', () => {
+  it('defaults compact layout on, preserves the camera on toggle, and remembers the opt-out', async () => {
+    const view = open(); await waitFor(() => expect(records).toHaveLength(1));
+    const toggle = view.getByRole('button', { name: 'Compact layout' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('true'); expect(last().options.compactLayout).toBe(true);
+    const transform = { tx: 25, ty: 50, k: 0.65 }; Object.assign(last().transform, transform);
+    await fireEvent.click(toggle); await waitFor(() => expect(last().options.compactLayout).toBe(false));
+    expect(last().transform).toEqual(transform); expect(localStorage.getItem(compactLayoutPreferenceKey(null, location.origin))).toBe('false');
+    cleanup(); const reopened = open(); expect(reopened.getByRole('button', { name: 'Compact layout' }).getAttribute('aria-pressed')).toBe('false');
+  });
+  it.each(['metadata', 'addition', 'rewrite'])('preserves the active controller and selected tree during a background %s update', async kind => {
+    const view = open(); await waitFor(() => expect(records).toHaveLength(1)); last().options.onSelect?.('s');
+    await fireEvent.click(view.getByRole('button', { name: 'Display selected tree only' })); await waitFor(() => expect(ids()).toHaveLength(3));
+    const record = last(), count = records.length; Object.assign(record.transform, { tx: 315, ty: -120, k: 1.75 });
+    const model = JSON.parse(JSON.stringify(mapState.model));
+    if (kind === 'metadata') model.docs[0].title = 'Updated title';
+    if (kind === 'addition') { model.docs.push(node('new')); model.docs[0].next.push('new'); }
+    const version = mapState.version;
+    const watcher = createIndexWatcher(async () => { setMapModel(model, { animate: true }); });
+    await watcher.observe({ state: 'ready', generation: 1 });
+    await Promise.all(Array.from({ length: 30 }, () => watcher.observe({ state: 'ready', generation: 2 })));
+    expect(mapState.version).toBe(version);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(records).toHaveLength(count); expect(last().transform).toEqual({ tx: 315, ty: -120, k: 1.75 });
+    expect(mapState.selectedId).toBe('s'); expect(view.getByRole('button', { name: 'Display selected tree only' }).getAttribute('aria-pressed')).toBe('true');
+    expect(ids()).toEqual(kind === 'addition' ? ['s', 'a', 'b', 'new'] : ['s', 'a', 'b']);
+  });
   it('defaults off, shows the full-view hint without a selection, and remembers the toggle on reopen', async () => {
     const view = open(); await waitFor(() => expect(records).toHaveLength(1));
     const toggle = view.getByRole('button', { name: 'Display selected tree only' }); expect(toggle.getAttribute('aria-pressed')).toBe('false');
@@ -42,6 +70,26 @@ describe('selected tree display control', () => {
     expect(view.getByText('Select a page to show its tree')).toBeTruthy(); expect(ids()).toEqual(['s', 'a', 'b', 'other']);
     expect(localStorage.getItem(selectedTreePreferenceKey(null, location.origin))).toBe('true');
     cleanup(); const reopened = open(); expect(reopened.getByRole('button', { name: 'Display selected tree only' }).getAttribute('aria-pressed')).toBe('true');
+  });
+  it('updates the full view in place and only relayouts when explicitly requested', async () => {
+    const view = open(); await waitFor(() => expect(records).toHaveLength(1));
+    const record = last(), version = mapState.version;
+    Object.assign(record.transform, { tx: 110, ty: 220, k: 0.65 });
+    const model = JSON.parse(JSON.stringify(mapState.model)); model.docs[0].title = 'Renamed';
+    setMapModel(model); await waitFor(() => expect(last().docs[0].title).toBe('Renamed'));
+    expect(last()).toBe(record); expect(mapState.version).toBe(version);
+    await fireEvent.click(view.getByRole('button', { name: 'Re-layout' }));
+    await waitFor(() => expect(records).toHaveLength(2)); expect(last().transform).toEqual(record.transform);
+  });
+  it('clears a removed selection without rebuilding the controller or switching off its toggle', async () => {
+    const view = open(); await waitFor(() => expect(records).toHaveLength(1)); last().options.onSelect?.('s');
+    await fireEvent.click(view.getByRole('button', { name: 'Display selected tree only' })); await waitFor(() => expect(ids()).toHaveLength(3));
+    const record = last(), count = records.length;
+    const model = JSON.parse(JSON.stringify(mapState.model)); model.docs = model.docs.filter((doc: GraphInputDoc) => doc.id !== 's');
+    setMapModel(model); await waitFor(() => expect(mapState.selectedId).toBeNull());
+    expect(records).toHaveLength(count); expect(last()).toBe(record);
+    expect(view.getByRole('button', { name: 'Display selected tree only' }).getAttribute('aria-pressed')).toBe('true');
+    expect(view.getByText('Select a page to show its tree')).toBeTruthy(); expect(ids()).toEqual(['a', 'b', 'other']);
   });
   it('recomputes for another node from the full model without requesting a server rebuild', async () => {
     const onRebuild = vi.fn().mockResolvedValue(undefined), view = render(MapOverlay, { onClose: vi.fn(), onRebuild });

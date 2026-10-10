@@ -17,6 +17,9 @@ export interface LayoutOptions {
   iters: number;
   layoutMode?: string;
   relocateMax?: number;
+  compact?: boolean;
+  aspectRatio?: number;
+  obstacleEdges?: { from: string; to: string }[];
 }
 
 // Layout tuning. All in world units (pre-transform).

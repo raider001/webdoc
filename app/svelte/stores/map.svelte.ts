@@ -48,8 +48,8 @@ export interface MapState {
   /** the server graph, fetched by map-view.js; null until the first open */
   model: GraphModel | null;
   /**
-   * the LAYOUT token: bumped for anything the live instance cannot become (a new
-   * model, a new "Map by" mode, a focus change), and read by nothing except the
+   * the LAYOUT token: bumped for user layout requests (a new "Map by" mode or a
+   * focus/filter change), and read by nothing except the
    * {#key} that rebuilds the canvas
    */
   version: number;
@@ -61,6 +61,7 @@ export interface MapState {
   focusId: string | null;
   selectedTreeOnly: boolean;
   selectedId: string | null;
+  compactLayout: boolean;
 }
 
 export const mapState: MapState = $state({
@@ -71,6 +72,7 @@ export const mapState: MapState = $state({
   focusId: null,
   selectedTreeOnly: false,
   selectedId: null,
+  compactLayout: true,
 });
 
 /**
@@ -165,14 +167,15 @@ export function nextLayout(withTween?: boolean, reframe?: boolean): void {
 }
 
 /**
- * Replace the server graph model and relayout. The vanilla shell's only way in:
+ * Replace the server graph model without moving the live camera or nodes.
+ * Explicit user layout requests still use nextLayout(). The shell's only way in:
  * app/js/map-view.js fetches (and app/js/overlays.js's requestMapRebuild
  * re-fetches) the model, because a module that is not loaded cannot be asked to
  * fetch anything.
  */
 export function setMapModel(model: GraphModel, opts?: { animate?: boolean; refit?: boolean }): void {
   mapState.model = model;
-  nextLayout(opts && opts.animate, opts && opts.refit);
+  if (opts?.refit) nextLayout(opts.animate, true);
 }
 
 /**

@@ -51,8 +51,15 @@ export interface GraphModel {
 }
 
 let graphModel: GraphModel | null = null;
+let revision = 0;
+let pending: { revision: number; controller: AbortController; promise: Promise<GraphModel>; users: number } | null = null;
 /** Drop the cached graph model so the next ensureGraphModel() call refetches it. */
-export function invalidateGraphModel(): void { graphModel = null; }
+export function invalidateGraphModel(): void {
+  graphModel = null; revision++;
+  pending?.controller.abort(); pending = null;
+}
+/** Guard a delayed consumer (such as a lazy overlay import) against stale publication. */
+export function isCurrentGraphModel(model: GraphModel): boolean { return graphModel === model; }
 /**
  * The wire shape GET /api/index/graph answers with: positional tuples rather
  * than objects, because this is one row per node and per edge for the WHOLE
@@ -77,13 +84,13 @@ export interface GraphIndexPayload {
 
 /**
  * Fetch the server's compact graph index (GET /api/index/graph) and reshape it
- * into a {@link GraphModel}; falls back to an empty model on a network/parse error.
+ * into a {@link GraphModel}. Errors leave the displayed model untouched.
  */
-async function fetchGraphModel(): Promise<GraphModel> {
-  const empty: GraphModel = { docs: [], traceEdges: [], pageLinks: [], externalNodes: [], groups: [] };
-  let g: GraphIndexPayload;
-  try { const res = await fetch('/api/index/graph', { cache: 'no-cache' }); if (!res.ok) return empty; g = await res.json(); }
-  catch (e) { return empty; }
+async function fetchGraphModel(signal: AbortSignal): Promise<GraphModel> {
+  const res = await fetch('/api/index/graph', { cache: 'no-cache', credentials: 'same-origin', signal });
+  if (!res.ok) throw new Error('Could not refresh the document map (' + res.status + ')');
+  const g: GraphIndexPayload = await res.json();
+  signal.throwIfAborted();
   const nodes = g.nodes || [];
   // Node tuples are [id, title, description, flags, groupIndexes]; fields 3 and 4
   // were appended for access control, so a payload without them still reads.
@@ -99,18 +106,18 @@ async function fetchGraphModel(): Promise<GraphModel> {
   }));
   for (const e of g.edges || []) {
     const f = e[0], t = e[1];
-    if (f < 0 || t < 0) continue;
+    if (!docs[f] || !docs[t]) continue;
     if (e[2] === 0) docs[t].assumes.push(docs[f].id);   // prereq [P,D,0]: D assumes P
     else docs[f].next.push(docs[t].id);                 // recnext [D,S,1]: D.next = S
   }
   const externals = g.externals || [];
   const externalNodes = externals.map(u => ({ id: 'ext:' + u, url: u }));
-  const traceEdges = (g.traces || []).filter(e => e[0] >= 0 && e[1] >= 0).map(e => ({ from: nodes[e[0]][0], to: nodes[e[1]][0] }));
+  const traceEdges = (g.traces || []).filter(e => nodes[e[0]] && nodes[e[1]]).map(e => ({ from: nodes[e[0]][0], to: nodes[e[1]][0] }));
   const pageLinks: { from: string, to: string }[] = [];
   for (const e of g.pageLinks || []) {
-    const f = e[0]; if (f < 0) continue;
-    if (e[2] >= 0) pageLinks.push({ from: nodes[f][0], to: 'ext:' + externals[e[2]] });
-    else if (e[1] >= 0) pageLinks.push({ from: nodes[f][0], to: nodes[e[1]][0] });
+    const f = e[0]; if (!nodes[f]) continue;
+    if (externals[e[2]]) pageLinks.push({ from: nodes[f][0], to: 'ext:' + externals[e[2]] });
+    else if (nodes[e[1]]) pageLinks.push({ from: nodes[f][0], to: nodes[e[1]][0] });
   }
   return { docs: docs, traceEdges: traceEdges, pageLinks: pageLinks, externalNodes: externalNodes,
            groups: groupNames };
@@ -120,4 +127,35 @@ async function fetchGraphModel(): Promise<GraphModel> {
  * invalidateGraphModel() clears it (after an edit/create/delete updates the
  * server index).
  */
-export async function ensureGraphModel(): Promise<GraphModel> { if (!graphModel) graphModel = await fetchGraphModel(); return graphModel; }
+export async function ensureGraphModel(signal?: AbortSignal): Promise<GraphModel> {
+  while (true) {
+    signal?.throwIfAborted();
+    if (graphModel) return graphModel;
+    if (pending?.controller.signal.aborted) pending = null;
+    if (!pending) {
+      const request = { revision, controller: new AbortController(), users: 0, promise: null! as Promise<GraphModel> };
+      pending = request;
+      request.promise = fetchGraphModel(request.controller.signal).then(model => {
+        if (request.revision === revision) graphModel = model;
+        return model;
+      }).finally(() => { if (pending === request) pending = null; });
+    }
+    const request = pending;
+    request.users++;
+    let abort: (() => void) | undefined;
+    let released = false;
+    const release = () => { if (released) return; released = true; if (--request.users === 0 && pending === request) request.controller.abort(); };
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => { release(); reject(signal?.reason || new DOMException('Map closed', 'AbortError')); };
+      signal?.addEventListener('abort', abort, { once: true });
+    });
+    try {
+      const model = await Promise.race([request.promise, cancelled]);
+      signal?.throwIfAborted();
+      if (request.revision === revision) return model;
+    } catch (error) {
+      if (signal?.aborted || request.revision === revision) throw error;
+      // An index change superseded this request. All callers share its successor.
+    } finally { if (abort) signal?.removeEventListener('abort', abort); release(); }
+  }
+}
