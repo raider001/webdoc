@@ -1,3 +1,4 @@
+import { projectFetch } from './project.js';
 // auth.ts - the browser's half of accounts and access groups.
 // ---------------------------------------------------------------------------
 // This module holds WHO is signed in, WHAT they may do, and the one fetch
@@ -268,7 +269,7 @@ export function apiFetch(url: string, opts?: Omit<RequestInit, 'headers'> & { he
     const token = auth.csrf || readCookie('wd_csrf');
     if (token) headers['X-WebDoc-CSRF'] = token;
   }
-  return fetch(url, options);
+  return url.startsWith('/api/') ? projectFetch(url, options) : fetch(url, options);
 }
 
 function readCookie(name: string): string | null {
@@ -398,7 +399,7 @@ export async function docAccess(docId: string): Promise<DocAccess | null> {
   if (accessCache.has(docId)) return accessCache.get(docId)!;   // has() on the same line is the guarantee; a cached null is a real answer
   let info: DocAccess | null = null;
   try {
-    const res = await fetch('/api/index/access?id=' + encodeURIComponent(docId),
+    const res = await projectFetch('/api/index/access?id=' + encodeURIComponent(docId),
       { cache: 'no-store', credentials: 'same-origin' });
     if (res.ok) info = await res.json();
   } catch (e) { info = null; }

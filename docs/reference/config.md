@@ -58,6 +58,68 @@ when nothing is stored, the OS `prefers-color-scheme` — applied as the
 `data-theme` attribute on `<html>` before the page renders so there is no flash.
 See [Theming](Docs/design/theming) for how the full palette is resolved.
 
+## Projects
+
+A server can host independent projects. Each project has a unique `name`, a
+human-readable `title`, its own `sources`, `defaultDoc` and `indexDir`:
+
+```json
+{
+  "siteTitle": "Documentation",
+  "projects": [
+    {
+      "name": "LM",
+      "title": "LM programme",
+      "defaultDoc": "LM/overview",
+      "indexDir": ".webdoc-index/LM",
+      "sources": [{"name":"LM", "path":"E:/documents/lm", "component":"LM"}]
+    },
+    {
+      "name": "FAF-CLONE",
+      "title": "FAF Clone",
+      "defaultDoc": "FAF-CLONE/overview",
+      "indexDir": ".webdoc-index/FAF-CLONE",
+      "sources": [{"name":"FAF-CLONE", "path":"E:/documents/faf", "component":"FAF"}]
+    }
+  ]
+}
+```
+
+Project and source names allow ASCII letters, digits, hyphens and underscores.
+Source names must be unique across the entire server; project names must also
+be unique. Component ids allow letters and digits only. A project may contain
+several sources, and those sources can reference one another. References to
+another project's documents or requirements remain unresolved.
+
+The header's Project selector navigates to `/?project=LM#/LM/overview`. Each
+project has a separate navigation tree, search index, requirement and test
+catalog, coverage and map. Index APIs take `?project=LM` (append with `&` when
+there are other parameters). `/site.json?project=LM` returns that project's
+sources and default document, plus the project selector's names and titles.
+Omitting the project parameter selects the first project.
+
+Document ids and source mounts remain unchanged: `LM/overview` and
+`/docs/LM/overview.md` still resolve. Direct source URLs infer their project;
+an explicit, conflicting project parameter returns 404. Old hash links without
+a project parameter select the project owning their source when the app boots.
+Legacy configs with top-level `sources` retain their hash-only page URLs; the
+app does not add a `project` query to those URLs. Their API calls still use the
+server's single default project.
+The write and per-source result APIs retain their existing paths and ACL checks.
+
+Each project uses a separate SQLite directory. If `indexDir` is omitted, it
+defaults to `.webdoc-index/<project-name>`. Relative paths remain relative to
+the server directory. `WEBDOC_INDEX_DIR`, when set, overrides the index root
+and places multi-project indexes in a separate child directory per project.
+The old configuration with top-level `sources` and no `projects` still works
+as a single project and retains its original index location.
+
+Sources can additionally set `readOnly: true` to refuse document PUT/DELETE,
+result writes and test runs for that source, even when accounts are disabled.
+`excludeDirectories` is an optional list of case-insensitive directory-name glob
+patterns excluded from indexing. It does not change file-serving access policy;
+use ACLs or source mounts for access control.
+
 ## Sources and components
 
 Each entry in `sources` maps a **name** and a **component** onto a folder on

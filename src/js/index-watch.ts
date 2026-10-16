@@ -1,3 +1,4 @@
+import { projectFetch } from './project.js';
 export interface IndexVersion { state?: string; generation?: number; version?: string; }
 
 /** One shared status check for navigation/timer, and at most one refresh in flight. */
@@ -15,7 +16,7 @@ export function createIndexWatcher(onChange: () => Promise<void>) {
   function check(): Promise<void> {
     if (pending) return pending;
     pending = (async () => {
-      const response = await fetch('/api/index/status', { cache: 'no-cache', credentials: 'same-origin' });
+      const response = await projectFetch('/api/index/status', { cache: 'no-cache', credentials: 'same-origin' });
       if (response.ok) await observe(await response.json());
     })().finally(() => { pending = null; });
     return pending;

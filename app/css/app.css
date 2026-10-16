@@ -137,6 +137,16 @@ a:hover { text-decoration:underline; }
   grid-row:2; display:grid; grid-template-columns:var(--toc-w) 1fr;
   min-height:0; overflow:hidden;
 }
+
+/* The reader keeps its scroll pane while the map occupies the right pane. */
+#projectSelect { max-width:180px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px; }
+body.is-map-split .app-body { width:var(--split-reader, 50vw); grid-template-columns:minmax(0, 1fr); }
+body.is-map-split .toc-pane { display:none; }
+body.is-map-split .content-pane { min-width:0; }
+body.is-map-split .app-footer { width:var(--split-reader, 50vw); }
+body.is-map-split #graphOverlay { left:calc(var(--split-reader, 50vw) + 8px); }
+#mapDivider { position:fixed; z-index:25; top:var(--header-h); bottom:0; left:var(--split-reader, 50vw); width:8px; background:var(--border-strong); cursor:col-resize; touch-action:none; }
+#mapDivider[hidden] { display:none; }
 .toc-pane {
   border-right:1px solid var(--border); background:var(--surface);
   overflow:auto; padding:20px 12px 40px 18px; scrollbar-gutter:stable;

@@ -88,8 +88,13 @@ def _require_build():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def static_server(base_url):
+def static_server(base_url, request):
     """Serve the fixture corpus with the real serve.py for the whole session."""
+    # API/unit tests own their own servers (or need none). Starting an unused
+    # browser server holds a port for the entire session unnecessarily.
+    if not any('page' in item.fixturenames for item in request.session.items):
+        yield base_url
+        return
     _require_build()
     base = base_url.rstrip("/")
 
@@ -109,7 +114,7 @@ def static_server(base_url):
     log_path = os.path.join(HERE, ".serve-e2e.log")
     log = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
-        [sys.executable, SERVE_PY, "--config", FIXTURE_CONFIG,
+        [sys.executable, "-B", SERVE_PY, "--config", FIXTURE_CONFIG,
          "--host", "127.0.0.1", "--port", str(port)],
         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, text=True,
     )

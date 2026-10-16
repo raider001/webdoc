@@ -29,14 +29,19 @@ export function attachView(g: GraphContext): void {
 
   g.fit = function () {
     const vs = g.viewSize();
-    const cw = g.layout.width, ch = g.layout.height;
+    const boxes = g.focusId ? [g.focusId, ...[...g.model.edges, ...g.traceEdges, ...g.pageLinks].filter(e => e.from === g.focusId || e.to === g.focusId).map(e => e.from === g.focusId ? e.to : e.from)]
+      .map(id => g.layout.nodes.get(id)).filter((box): box is NonNullable<typeof box> => !!box) : [];
+    const x = boxes.length ? Math.min(...boxes.map(b => b.x)) - 35 : 0;
+    const y = boxes.length ? Math.min(...boxes.map(b => b.y)) - 35 : 0;
+    const cw = boxes.length ? Math.max(...boxes.map(b => b.x + b.w)) + 35 - x : g.layout.width;
+    const ch = boxes.length ? Math.max(...boxes.map(b => b.y + b.h)) + 35 - y : g.layout.height;
     if (cw <= 0 || ch <= 0 || vs.w <= 0 || vs.h <= 0) {
       g.k = 1; g.tx = vs.w / 2; g.ty = vs.h / 2; g.applyTransform(); return;
     }
     g.k = clamp(Math.min(vs.w / cw, vs.h / ch) * 0.9, FIT_MIN_K, MAX_K);
     g.minK = Math.min(MIN_K, g.k);   // allow zooming back out to the fitted whole-graph overview
-    g.tx = (vs.w - cw * g.k) / 2;
-    g.ty = (vs.h - ch * g.k) / 2;
+    g.tx = (vs.w - cw * g.k) / 2 - x * g.k;
+    g.ty = (vs.h - ch * g.k) / 2 - y * g.k;
     g.applyTransform();
   };
 
@@ -74,6 +79,7 @@ export function attachView(g: GraphContext): void {
     const n = g.layout.nodes.get(id);
     if (!n) return false;
     const vs = g.viewSize();
+    g.k = Math.min(1.25, Math.max(g.k, Math.min(vs.w / (n.w + 120), vs.h / (n.h + 120))));
     g.tx = vs.w / 2 - n.cx * g.k;
     g.ty = vs.h / 2 - n.cy * g.k;
     g.applyTransform();

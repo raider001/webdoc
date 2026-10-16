@@ -142,6 +142,52 @@ def test_escape_closes_the_map(page):
     expect(page.locator("#graphBtn")).to_have_attribute("aria-pressed", "false")
 
 
+@pytest.mark.e2e
+def test_map_opens_centred_and_zoomed_on_the_open_page(page):
+    boot(page)
+    page.goto('/#/Guides/concepts/metadata-tags')
+    expect(page.locator('#content .doc h1')).to_contain_text(PROBE_TITLE)
+    page.click('#graphBtn')
+    page.wait_for_function('() => !!window.__graph')
+    frame = page.evaluate('''() => {
+      const r = document.querySelector('#graphOverlay canvas.graph-svg').getBoundingClientRect();
+      const c = window.__graph.center('Guides/concepts/metadata-tags');
+      return {dx:c.x-r.left-r.width/2, dy:c.y-r.top-r.height/2, k:window.__graph.transform().k};
+    }''')
+    assert abs(frame['dx']) < 2 and abs(frame['dy']) < 2
+    assert frame['k'] >= 1
+
+
+@pytest.mark.e2e
+def test_split_view_resizes_follows_the_page_and_remembers_its_toggle(page):
+    boot(page)
+    page.click('#splitBtn')
+    expect(page.locator('body')).to_have_class(re.compile(r'\bis-map-split\b'))
+    expect(page.locator('#content .doc h1')).to_be_visible()
+    expect(page.locator('#graphOverlay')).to_be_visible()
+    page.wait_for_function('() => !!window.__graph')
+    divider = page.locator('#mapDivider')
+    divider.focus()
+    page.keyboard.press('ArrowRight')
+    expect(divider).to_have_attribute('aria-valuenow', '52')
+    box = divider.bounding_box()
+    page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+    page.mouse.down()
+    page.mouse.move(800, box['y'] + box['height'] / 2)
+    page.mouse.up()
+    assert int(divider.get_attribute('aria-valuenow')) > 52
+    page.evaluate("location.hash = '#/Guides/concepts/metadata-tags'")
+    expect(page.locator('#content .doc h1')).to_contain_text(PROBE_TITLE)
+    page.wait_for_function("() => window.__graph.state().currentId === 'Guides/concepts/metadata-tags'")
+    page.reload()
+    expect(page.locator('body')).to_have_attribute('data-app-ready', '1')
+    page.click('#graphBtn')
+    expect(page.locator('body')).to_have_class(re.compile(r'\bis-map-split\b'))
+    page.click('#splitBtn')
+    expect(page.locator('#mapDivider')).to_be_hidden()
+    assert page.evaluate("localStorage.getItem('wd-map-split')") == 'false'
+
+
 # --------------------------------------------------------------------------- #
 # the window.__graph hit-test hook
 # --------------------------------------------------------------------------- #

@@ -1,3 +1,4 @@
+import { projectFetch } from './project.js';
 // graph-model.ts - the server-backed document graph MODEL: fetch it, reshape it,
 // cache it, invalidate it. No DOM, no canvas, no renderer.
 //
@@ -87,7 +88,7 @@ export interface GraphIndexPayload {
  * into a {@link GraphModel}. Errors leave the displayed model untouched.
  */
 async function fetchGraphModel(signal: AbortSignal): Promise<GraphModel> {
-  const res = await fetch('/api/index/graph', { cache: 'no-cache', credentials: 'same-origin', signal });
+  const res = await projectFetch('/api/index/graph', { cache: 'no-cache', credentials: 'same-origin', signal });
   if (!res.ok) throw new Error('Could not refresh the document map (' + res.status + ')');
   const g: GraphIndexPayload = await res.json();
   signal.throwIfAborted();

@@ -20,20 +20,29 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUNDLE_REL = "app/build/islands.js"
 
 pytestmark = pytest.mark.skipif(
-    shutil.which("npm") is None or not os.path.isdir(os.path.join(ROOT, "node_modules")),
+    not (os.environ.get('WEBDOC_NODE') or shutil.which('node')) or not os.path.isdir(os.path.join(ROOT, "node_modules")),
     reason="no Node toolchain here; the committed bundle is what this machine uses",
 )
 
 
-def _run(*args):
-    return subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=300)
+def _run_build():
+    node = os.environ.get('WEBDOC_NODE') or shutil.which('node')
+    output = ''
+    for script, tail in [('typescript/bin/tsc', ['-p', 'tsconfig.app.json']),
+                         ('vite/bin/vite.js', ['build', '--configLoader', 'runner', '--emptyOutDir', 'false'])]:
+        result = subprocess.run([node, '--v8-pool-size=2', 'node_modules/' + script, *tail],
+                                cwd=ROOT, capture_output=True, text=True, timeout=300)
+        output += result.stdout
+        if result.returncode: return result
+    result.stdout = output
+    return result
 
 
 def test_rebuild_reproduces_the_committed_bundle():
     """`npm run build` must be byte-identical to what is committed."""
     before = open(os.path.join(ROOT, BUNDLE_REL), "rb").read()
 
-    built = _run(shutil.which("npm"), "run", "build")
+    built = _run_build()
     assert built.returncode == 0, "npm run build failed:" + built.stdout + built.stderr
 
     after = open(os.path.join(ROOT, BUNDLE_REL), "rb").read()
@@ -57,7 +66,7 @@ def test_the_build_is_reproducible():
     and CI rebuilds twice and compares for exactly this reason.
     """
     first = _fingerprint()
-    built = _run(shutil.which("npm"), "run", "build")
+    built = _run_build()
     assert built.returncode == 0, "npm run build failed:\n" + built.stdout + built.stderr
     assert _fingerprint() == first, (
         "Rebuilding produced different output from the same sources. A release "

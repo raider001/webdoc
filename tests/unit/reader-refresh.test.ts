@@ -19,6 +19,22 @@ beforeEach(() => {
 });
 afterEach(() => { teardownMounted(document.body); document.body.replaceChildren(); state.current = null; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it('tears down an article host exactly once across two navigations and leaves an outside host alive', () => {
+  const inside = document.createElement('span'), outside = document.createElement('span');
+  document.querySelector('#content .doc')!.appendChild(inside);
+  document.body.appendChild(outside);
+  const torn: string[] = [];
+  registerMounted(inside, () => torn.push('inside'));
+  registerMounted(outside, () => torn.push('outside'));
+  for (const title of ['Verification', 'Requirements']) {
+    const next = { ...doc, id: 'LM/' + title, body: '# ' + title };
+    state.current = next;
+    renderDoc(next);
+  }
+  expect(torn).toEqual(['inside']);
+  expect(outside.isConnected).toBe(true);
+});
+
 it('preserves the reading offset and widget identity through a generated timestamp rewrite', () => {
   const pane = document.getElementById('content')!, widget = pane.querySelector('.wd-live-table'), details = pane.querySelector('details')!;
   details.open = true; pane.scrollTop = 480;

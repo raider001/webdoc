@@ -35,6 +35,7 @@
   the incoming controller had already asked for it.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { state as appState, app } from '/js/app-shell.js';
   import {
     mapState, mapBuildSeeds, rememberMapView, nextLayout,
@@ -113,6 +114,18 @@
    * controller that is on screen.
    */
   let apiOwner: object | null = null;
+  let opening = true;
+  onMount(() => {
+    const follow = () => {
+      const id = appState.current?.id || null;
+      mapState.selectedId = id;
+      api?.setCurrent(id);
+      if (mapState.focusMode) { mapState.focusId = id; nextLayout(false, true); }
+      else if (id) api?.focus(id);
+    };
+    document.addEventListener('webdoc:current', follow);
+    return () => document.removeEventListener('webdoc:current', follow);
+  });
   const treePreferenceKey = selectedTreePreferenceKey(appState.site, location.origin);
   mapState.selectedTreeOnly = readSelectedTreePreference(treePreferenceKey);
   const compactPreferenceKey = compactLayoutPreferenceKey(appState.site, location.origin);
@@ -293,6 +306,11 @@
       const seeds = mapBuildSeeds();
       for (const [kind, visible] of Object.entries(seeds.visibility)) next.setVisibility(kind, visible);
       if (seeds.editMode) { next.setEditMode(true); next.setConnector(seeds.connector); }
+      if (opening && appState.current?.id) {
+        opening = false;
+        if (mapState.focusMode) { mapState.focusId = appState.current.id; nextLayout(false, true); }
+        else next.focus(appState.current.id);
+      }
     } else if (owner === apiOwner) {
       api = null;
       apiOwner = null;
@@ -333,7 +351,7 @@
   function toggleFocus(): void {
     if (mapState.selectedTreeOnly) return;
     mapState.focusMode = !mapState.focusMode;
-    if (!mapState.focusMode) mapState.focusId = null;
+    mapState.focusId = mapState.focusMode ? mapState.selectedId : null;
     nextLayout(true, true);
   }
 

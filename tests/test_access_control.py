@@ -131,6 +131,8 @@ class Response:
 # server fixture
 # --------------------------------------------------------------------------- #
 def _free_port():
+    if os.environ.get('WEBDOC_TEST_PORT'):
+        return int(os.environ['WEBDOC_TEST_PORT'])
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -244,7 +246,7 @@ class Server:
         self.log_path = os.path.join(self.dir, "server.log")
         self.log = open(self.log_path, "w", encoding="utf-8")
         self.proc = subprocess.Popen(
-            [sys.executable, os.path.join(ROOT, "serve.py"),
+            [sys.executable, "-B", os.path.join(ROOT, "serve.py"),
              "--config", self.config_path, "--host", "127.0.0.1", "--port", str(self.port)],
             cwd=ROOT, stdout=self.log, stderr=subprocess.STDOUT, text=True)
         deadline = time.time() + 30

@@ -1,3 +1,4 @@
+import { projectFetch } from './project.js';
 // tree.ts - the SERVER CONTRACT for the drawer's lazy document tree.
 //
 // Reduced to one fetch in Phase 3. Everything that built DOM - renderTree,
@@ -53,7 +54,7 @@ export function fetchChildren(path: string, generation = 0): Promise<TreeLevel> 
 
 async function readChildren(path: string): Promise<TreeLevel> {
   try {
-    const res = await fetch('/api/index/tree?path=' + encodeURIComponent(path || ''), { cache: 'no-cache' });
+    const res = await projectFetch('/api/index/tree?path=' + encodeURIComponent(path || ''), { cache: 'no-cache' });
     if (!res.ok) return { folders: [], docs: [] };
     return normalizeTree(await res.json());
   } catch (e) { return { folders: [], docs: [] }; }

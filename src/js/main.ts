@@ -1,3 +1,5 @@
+import { setupSplitView } from './split-view.js';
+import { projectFetch } from './project.js';
 // main.ts - application entry point. Wires the shell together:
 // theme, discovery, hash routing, the render pipeline, the drawer and search.
 import { errorMessage } from './errors.js';
@@ -289,6 +291,10 @@ async function route(): Promise<void> {
   // configured defaultDoc nor a cached doc exists, which is the same "nothing to
   // fall back to" the !doc branch below already reports.
   const fallback = defaultId();
+  if (state.site?.sources && id.includes('/') && !state.site.sources.some(s => s.name === id.split('/')[0])) {
+    state.current = null;
+    return showError('Unresolved document in this project: ' + id);
+  }
   const doc = getDoc(id) || (fallback ? getDoc(fallback) : null);
   if (!doc) return showError('No documents found.');
   try {
@@ -299,6 +305,7 @@ async function route(): Promise<void> {
     await loadDoc(doc, true);
     if (sequence !== routeSequence) return;
     state.current = doc;
+    document.dispatchEvent(new CustomEvent('webdoc:current', { detail: doc.id }));
     renderDoc(doc);
     const { req, test } = routeParams(query);      // deep-link to a requirement or test
     if (req) requestAnimationFrame(() => revealRequirement(req));
@@ -443,7 +450,7 @@ async function waitForIndex(): Promise<void> {
   for (;;) {
     let s: IndexStatus;
     try {
-      const r = await fetch('/api/index/status', { cache: 'no-cache' });
+      const r = await projectFetch('/api/index/status', { cache: 'no-cache' });
       if (!r.ok) break;              // index disabled / unavailable -> proceed (app degrades gracefully)
       s = await r.json();
       await indexWatcher.observe(s);
@@ -553,6 +560,7 @@ async function boot(): Promise<void> {
   ensureOverlayHosts();
   assertOverlayIds();
   setupTheme();
+  setupSplitView();
   appDrawer = setupDrawer();
   setupDocSearch();
   lazyOverlayButton('graphBtn', async () => (await import('./map-view.js')).setupGraphButton());
@@ -566,6 +574,21 @@ async function boot(): Promise<void> {
     return showError('Could not reach the server config. Is serve.py running? (' + errorMessage(e) + ')');
   }
   mustEl('brand').textContent = state.site.siteTitle || 'Documentation';
+  const switcher = document.getElementById('projectSelect') as HTMLSelectElement | null;
+  if (switcher && state.site.projects?.length) {
+    switcher.hidden = state.site.projects.length < 2;
+    for (const project of state.site.projects) {
+      const option = document.createElement('option');
+      option.value = project.name; option.textContent = project.title;
+      switcher.appendChild(option);
+    }
+    switcher.value = state.site.project || '';
+    switcher.addEventListener('change', () => {
+      const url = new URL(location.href);
+      url.searchParams.set('project', switcher.value); url.hash = '';
+      location.assign(url.href);
+    });
+  }
 
   // Accounts. loadAuth() is also what mints this browser's CSRF token, so it has
   // to happen before anything can be saved - and before the index calls below,

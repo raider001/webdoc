@@ -108,9 +108,36 @@ def gzippable(ctype):
 def load_config(path):
     with open(path, encoding="utf-8") as fh:
         cfg = json.load(fh)
+    projects = cfg.get("projects")
+    legacy = projects is None
+    if legacy:
+        projects = [{"name": "default", "title": cfg.get("siteTitle", "Documentation"),
+                     "sources": cfg.get("sources", []), "defaultDoc": cfg.get("defaultDoc"),
+                     "indexDir": cfg.get("indexDir")}]
+    if not isinstance(projects, list) or not projects:
+        raise SystemExit("config error: projects must be a non-empty list")
+    projects = [dict(p) for p in projects]
+    names, source_names, index_dirs = set(), set(), set()
+    base_index = os.environ.get("WEBDOC_INDEX_DIR") or cfg.get("indexDir") or os.path.join(HERE, ".webdoc-index")
+    for project in projects:
+        name = project.get("name", "")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name) or name in names:
+            raise SystemExit("config error: invalid or duplicate project name: " + str(name))
+        names.add(name)
+        project["title"] = project.get("title") or name
+        index_dir = base_index if legacy else (os.path.join(base_index, name) if os.environ.get("WEBDOC_INDEX_DIR") else project.get("indexDir") or os.path.join(base_index, name))
+        project["indexDir"] = os.path.abspath(os.path.join(HERE, index_dir))
+        key = os.path.normcase(os.path.realpath(project["indexDir"]))
+        if key in index_dirs:
+            raise SystemExit("config error: projects must have separate index locations")
+        index_dirs.add(key)
+        project["sources"] = [dict(s, project=name) for s in project.get("sources", [])]
     sources = []
-    for src in cfg.get("sources", []):
-        name = str(src["name"]).strip("/")
+    for src in [s for p in projects for s in p["sources"]]:
+        name = src["name"]
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name) or name in source_names:
+            raise SystemExit("config error: invalid or duplicate source name: " + str(name))
+        source_names.add(name)
         folder = os.path.abspath(os.path.join(HERE, src["path"]))
         if not os.path.isdir(folder):
             print(f"  ! source '{name}' path not found: {folder}")
@@ -121,10 +148,19 @@ def load_config(path):
             raise SystemExit(
                 f"config error: source '{name}' is missing a required 'component' name"
             )
+        if not re.fullmatch(r"[A-Za-z0-9]+", str(component).strip()):
+            raise SystemExit("config error: component must contain letters and digits only")
         # Optional per-source automated results (xUnit/JUnit). A path relative to
         # the source folder (served under /docs/<name>/) or an absolute served URL.
         sources.append({"name": name, "path": folder, "component": str(component).strip(),
-                        "testResults": src.get("testResults"), "runTests": src.get("runTests")})
+                        "testResults": src.get("testResults"), "runTests": src.get("runTests"),
+                        "project": src["project"], "readOnly": bool(src.get("readOnly", False)),
+                        "excludeDirectories": src.get("excludeDirectories", [])})
+    for project in projects:
+        project["sources"] = [s for s in sources if s["project"] == project["name"]]
+        default = project.get("defaultDoc")
+        if default and default.split("/", 1)[0] not in {s["name"] for s in project["sources"]}:
+            raise SystemExit("config error: defaultDoc must belong to its project")
     # A runner config must never sit in a browser-writable document source.
     if any(src.get("runTests") for src in sources):
         from pathlib import Path
@@ -155,6 +191,8 @@ def load_config(path):
                 "config error: the auth folder %s overlaps the source '%s' (%s); "
                 "move usersFile outside every served source" % (auth.auth_dir, src["name"], src["path"]))
     return {
+        "projects": projects,
+        "legacy": legacy,
         "siteTitle": cfg.get("siteTitle", "Documentation"),
         "defaultDoc": cfg.get("defaultDoc"),
         "theme": cfg.get("theme", "auto"),
@@ -257,6 +295,7 @@ class DocHandler(BaseHTTPRequestHandler):
     server_version = "WebDocTool/0.1"
     protocol_version = "HTTP/1.0"   # one request per connection; no keep-alive framing to get wrong
     config = None  # attached to the class before serving
+    indexes = None  # project name -> isolated Index
     index = None   # webdoc_index.Index, attached before serving (None if disabled)
     runs = None
     users = None      # webdoc_auth.UserStore  (None when auth is disabled)
@@ -278,6 +317,7 @@ class DocHandler(BaseHTTPRequestHandler):
         Sets self.principal (never None), self.session (the live session record or
         None) and self.gate (the single object every access decision goes through).
         """
+        self._select_project()
         self._extra_cookies = []
         self._asset_cache = {}      # folder -> readable, memoised for this request
         cfg = self.config["auth"]
@@ -306,6 +346,28 @@ class DocHandler(BaseHTTPRequestHandler):
         ready = bool(self.index) and self.index.state == "ready"
         acl = self.index.access_map() if (cfg.enabled and ready) else {}
         self.gate = webdoc_access.Gate(cfg, self.principal, acl, ready=ready or not cfg.enabled)
+
+    def _select_project(self):
+        # Resolve from an explicit URL parameter, or the globally unique mount.
+        # Instance attributes only: concurrent tabs never change a shared index.
+        cfg = type(self).config
+        projects = cfg.get("projects")
+        if not projects:  # existing embedded/test handlers remain compatible
+            return
+        url = urllib.parse.urlsplit(self.path)
+        qs = urllib.parse.parse_qs(url.query)
+        requested = qs.get("project", [None])[0]
+        path = urllib.parse.unquote(url.path)
+        match = re.match(r"/(?:docs|api/(?:tests|auto|xml))/([^/]+)", path)
+        source = match.group(1) if match else qs.get("source", [None])[0]
+        owner = next((p for p in projects if any(s["name"] == source for s in p["sources"])), None)
+        project = next((p for p in projects if p["name"] == requested), None) if requested else owner or projects[0]
+        if not project or (owner and project is not owner):
+            raise _Refused("unknown project or source outside project")
+        self.project = project
+        self.config = dict(cfg, sources=project["sources"], defaultDoc=project.get("defaultDoc"))
+        if self.indexes is not None:
+            self.index = self.indexes.get(project["name"])
 
     def _client_ip(self):
         """The address to rate-limit against.
@@ -636,7 +698,7 @@ class DocHandler(BaseHTTPRequestHandler):
                 "inheritedFrom": list(eff.get("inheritedFrom") or ()),
             },
             "canRead": self.gate.can_read(doc_id),
-            "canWrite": self.gate.can_write(doc_id),
+            "canWrite": self.gate.can_write(doc_id) and not (self._source(doc_id.split('/', 1)[0]) or {}).get('readOnly'),
             "canEditAccess": webdoc_access.can_edit_acl(cfg, self.principal),
             "knownGroups": sorted(set(cfg.known_groups()) | set(self.index.access_groups() if self.index else [])),
         })
@@ -1055,6 +1117,10 @@ class DocHandler(BaseHTTPRequestHandler):
         self._json(200, {
             "siteTitle": cfg["siteTitle"],
             "defaultDoc": cfg["defaultDoc"],
+            "legacy": cfg.get("legacy", False),
+            "project": getattr(self, "project", {}).get("name"),
+            "projects": [{"name": p["name"], "title": p["title"],
+                          "sources": [s["name"] for s in p["sources"]]} for p in cfg.get("projects", [])],
             "theme": cfg["theme"],
             "plugins": cfg.get("plugins", []),
             # The auth block is published unauthenticated on purpose: the browser
@@ -1083,6 +1149,8 @@ class DocHandler(BaseHTTPRequestHandler):
         a policy refusal into a clean 400 instead of a stack trace."""
         try:
             self._begin()
+        except _Refused as e:
+            return self._json(404, {"error": str(e)})
         except Exception as e:
             return self._json(500, {"error": "auth unavailable: %s" % e})
         try:
@@ -1117,6 +1185,10 @@ class DocHandler(BaseHTTPRequestHandler):
         source = body["source"]
         if not isinstance(source, str) or not self._source(source):
             return self._json(400, {"error": "unknown source"})
+        if self.config.get("projects"):
+            owner = next((p for p in self.config["projects"] if any(s["name"] == source for s in p["sources"])), None)
+            if not owner or owner["name"] != self.project["name"]:
+                return self._not_found()
         if not self._can_write_source(source): return self._deny(what="test runs")
         try:
             if self.runs is None: raise ValueError("test running unavailable")
@@ -1142,6 +1214,7 @@ class DocHandler(BaseHTTPRequestHandler):
             rid = path[len("/api/runs/"):]
             if not re.fullmatch(r"[a-f0-9]{32}", rid): raise KeyError("unknown run")
             rec = self.runs.status(rid)
+            if not self._source(rec['source']): return self._not_found()
             described = self._run_described(rec["source"])
             # Output may mention any selected case: refuse the whole status if one is hidden.
             if any(tid not in described for tid in rec["ids"]): return self._not_found()
@@ -1492,6 +1565,9 @@ class DocHandler(BaseHTTPRequestHandler):
         """Whether this caller may write a source's shared sidecar. Modelled on an
         unrestricted document in that source: if they could not edit an ordinary
         page, they cannot record results either."""
+        src = self._source(str(name).strip("/"))
+        if not src or src.get("readOnly"):
+            return False
         cfg = self.config["auth"]
         if not cfg.enabled:
             return True
@@ -1540,6 +1616,9 @@ class DocHandler(BaseHTTPRequestHandler):
         Without (2) the whole model would be advisory: anyone able to edit a locked
         page could simply delete its `access` block and publish it.
         """
+        src = self._source(doc_id.split("/", 1)[0])
+        if src and src.get("readOnly"):
+            return self._json(403, {"error": "source is read-only"})
         cfg = self.config["auth"]
         if not cfg.enabled:
             return None
@@ -1662,6 +1741,9 @@ class DocHandler(BaseHTTPRequestHandler):
         """Authorise a delete. Write rights are necessary but not sufficient: a
         document holding sections you cannot read cannot be destroyed by you
         either, and removing a locked page is itself an access change."""
+        src = self._source(doc_id.split("/", 1)[0])
+        if src and src.get("readOnly"):
+            return self._json(403, {"error": "source is read-only"})
         cfg = self.config["auth"]
         if not cfg.enabled:
             return None
@@ -1839,24 +1921,28 @@ def main():
     DocHandler.runs = webdoc_runs.Runs(cfg["sources"], args.host, cfg["auth"].enabled)
     setup_auth(cfg, args.host)
 
-    # Build the SQLite index in the BACKGROUND so serving starts immediately; the
-    # client polls /api/index/status. Optional + fault-tolerant: if it can't start,
-    # the server still serves files (the client can fall back to client-side discovery).
-    try:
-        from webdoc_index import Index
-        idx = Index(HERE, cfg["sources"], index_body=cfg.get("indexBody", False),
-                    index_dir=cfg.get("indexDir"), propagate_via=cfg.get("propagateVia", ("next",)))
-        DocHandler.index = idx
-        threading.Thread(target=idx.reconcile, daemon=True).start()
-        print("  index: sqlite (.webdoc-index/), building in background"
-              + ("  [+full-text body]" if cfg.get("indexBody") else ""))
-        watch_interval = cfg.get("watchIntervalSec", 3)
-        if watch_interval:
-            threading.Thread(target=watch_loop, args=(idx, watch_interval), daemon=True).start()
-            print(f"  watch: rescanning source folders every {watch_interval}s for external changes")
-    except Exception as e:
-        DocHandler.index = None
-        print(f"  ! index disabled ({e})")
+    # Separate databases and resolvers make references project-local by construction.
+    from webdoc_index import Index
+    DocHandler.indexes = {
+        p["name"]: Index(HERE, p["sources"], index_body=cfg.get("indexBody", False),
+                         index_dir=p["indexDir"], propagate_via=cfg.get("propagateVia", ("next",)))
+        for p in cfg["projects"]
+    }
+    DocHandler.index = DocHandler.indexes[cfg["projects"][0]["name"]]
+    def reconcile_projects():
+        for idx in DocHandler.indexes.values():
+            try:
+                idx.reconcile()
+            except Exception as exc:
+                print("  ! project index reconcile failed:", exc)
+    threading.Thread(target=reconcile_projects, daemon=True).start()
+    interval = cfg.get("watchIntervalSec", 3)
+    if interval:
+        def watch_projects():
+            while True:
+                time.sleep(max(1, float(interval)))
+                reconcile_projects()
+        threading.Thread(target=watch_projects, daemon=True).start()
 
     httpd = ThreadingHTTPServer((args.host, args.port), DocHandler)
     print(f"Web Document Tool  -  http://{args.host}:{args.port}")

@@ -1,3 +1,4 @@
+import { projectFetch } from './project.js';
 // requirements.ts - requirement groups AND test cases, with cross-document
 // tracing. Two kinds of metadata-wrapped Markdown table are recognised:
 //
@@ -154,7 +155,7 @@ export async function buildRequirementIndex(_docs: Doc[] | null, sources: Source
 
   let data: CoverageIndexResponse | null = null;
   try {
-    const res = await fetch('/api/index/coverage', { cache: 'no-cache' });
+    const res = await projectFetch('/api/index/coverage', { cache: 'no-cache' });
     if (res.ok) data = await res.json();
   } catch (e) { /* index unavailable -> empty (badges/map stay neutral) */ }
   if (!data) return;

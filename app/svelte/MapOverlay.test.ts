@@ -27,7 +27,7 @@ beforeEach(() => {
       getTransform: () => ({ ...transform }), getNodePositions: () => new Map(docs.map(d => [d.id, { x: 1, y: 2 }])), getEditState: () => change,
       on: (_name: string, fn: (event: GraphChangeEvent) => void) => { listeners.add(fn); return () => listeners.delete(fn); },
       setVisibility: (kind: string, visible: boolean) => { change = { ...change, visibility: { ...change.visibility, [kind]: visible } }; listeners.forEach(fn => fn(change)); },
-      setCurrent: vi.fn(), destroy: vi.fn(), setEditMode: vi.fn(), setConnector: vi.fn(), zoomBy: vi.fn(), fit: vi.fn(), search: vi.fn(), setMapMode: vi.fn(), setHiddenGroups: vi.fn(),
+      focus: vi.fn(), setCurrent: vi.fn(), destroy: vi.fn(), setEditMode: vi.fn(), setConnector: vi.fn(), zoomBy: vi.fn(), fit: vi.fn(), search: vi.fn(), setMapMode: vi.fn(), setHiddenGroups: vi.fn(),
     } as unknown as GraphController;
     records.push({ docs, options, transform, controller }); return controller;
   });
@@ -36,6 +36,15 @@ afterEach(() => { cleanup(); Object.assign(app, { navigate: originalNavigate });
 const last = () => records[records.length - 1];
 const ids = () => last().docs.map(d => d.id);
 const open = () => render(MapOverlay, { onClose: vi.fn(), onRebuild: vi.fn().mockResolvedValue(undefined) });
+
+it('opens on the current document and follows the reader without fetching a new model', async () => {
+  state.current = { id: 's', source: 'Docs', rel: 's.md', url: '/docs/Docs/s.md', name: 's.md' };
+  open(); await waitFor(() => expect(last().controller.focus).toHaveBeenCalledWith('s'));
+  state.current = { ...state.current, id: 'a' };
+  document.dispatchEvent(new CustomEvent('webdoc:current'));
+  await waitFor(() => expect(last().controller.focus).toHaveBeenCalledWith('a'));
+  expect(last().controller.setCurrent).toHaveBeenCalledWith('a');
+});
 describe('selected tree display control', () => {
   it('defaults compact layout on, preserves the camera on toggle, and remembers the opt-out', async () => {
     const view = open(); await waitFor(() => expect(records).toHaveLength(1));

@@ -23,6 +23,7 @@ import sqlite3
 import threading
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from fnmatch import fnmatchcase
 
 import webdoc_access
 
@@ -719,7 +720,9 @@ class Index:
                     if not os.path.isdir(root):
                         continue
                     for dirpath, dirnames, filenames in os.walk(root):
-                        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+                        excluded = [str(pattern).lower() for pattern in s.get('excludeDirectories', [])]
+                        dirnames[:] = [d for d in dirnames if not d.startswith('.')
+                                       and not any(fnmatchcase(d.lower(), pattern) for pattern in excluded)]
                         for fn in filenames:
                             if not fn.lower().endswith('.md'):
                                 continue

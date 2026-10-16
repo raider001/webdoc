@@ -4,6 +4,7 @@
 // browser still makes for itself - /site.json at boot, and one document's text
 // on demand (whose <!--meta--> header is split off client-side).
 
+import { setActiveProject } from './project.js';
 import { errorMessage } from './errors.js';
 import { uniqueStrings } from './lists.js';
 
@@ -28,6 +29,10 @@ export interface SourceConfig {
  * referenced here rather than redeclared.
  */
 export interface SiteConfig {
+  /** Top-level sources config: preserve its existing hash-only page URLs. */
+  legacy?: boolean;
+  project?: string;
+  projects?: { name: string; title: string; sources: string[] }[];
   siteTitle: string;
   defaultDoc: string;
   theme?: string;
@@ -83,7 +88,22 @@ export interface Doc {
 export async function loadSite(): Promise<SiteConfig> {
   const res = await fetch('/site.json', { cache: 'no-cache' });
   if (!res.ok) throw new Error('Could not load /site.json (' + res.status + ')');
-  return res.json(); // { siteTitle, defaultDoc, theme, sources:[{name,url}] }
+  let site: SiteConfig = await res.json();
+  const requested = new URLSearchParams(location.search).get('project');
+  const source = decodeURIComponent(location.hash.slice(2).split('/')[0]);
+  const selected = requested || site.projects?.find(p => p.sources.includes(source))?.name || site.project;
+  if (selected && selected !== site.project) {
+    const scoped = await fetch('/site.json?project=' + encodeURIComponent(selected), { cache: 'no-cache' });
+    if (!scoped.ok) throw new Error('Unknown project: ' + selected);
+    site = await scoped.json();
+  }
+  setActiveProject(site.project || null);
+  if (site.project && !site.legacy) {
+    const url = new URL(location.href);
+    url.searchParams.set('project', site.project);
+    history.replaceState(null, '', url);
+  }
+  return site;
 }
 
 // Split a raw file into { meta, body }. The metadata is a JSON object wrapped

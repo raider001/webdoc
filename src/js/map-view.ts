@@ -1,3 +1,4 @@
+import { applySplitView } from './split-view.js';
 // map-view.ts - the document-relationship "Map" overlay's SHELL: open, close,
 // and the one fetch that feeds it.
 //
@@ -107,6 +108,7 @@ export function setupGraphButton(): OverlayHandle {
   const close = (): void => {
     if (overlay.hidden) return;
     overlay.hidden = true;
+    applySplitView(false);
     openSequence++;
     refresh?.controller.abort(); refresh = null;
     btn.setAttribute('aria-pressed', 'false');
@@ -120,6 +122,7 @@ export function setupGraphButton(): OverlayHandle {
     const sequence = ++openSequence;
     if (app.closeCoverageView) app.closeCoverageView();   // only one overlay view at a time
     overlay.hidden = false;
+    applySplitView(true);
     btn.setAttribute('aria-pressed', 'true');
     // Seeded HERE rather than inside the component so the first frame is the
     // real graph rather than an empty stage that fills in. The overlay is

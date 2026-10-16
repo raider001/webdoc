@@ -1,3 +1,4 @@
+import { projectFetch } from './project.js';
 // reader.ts - the reading-view render pipeline: turn a loaded document into the
 // rendered article (markdown -> sanitized DOM -> numbered headings + TOC ->
 // requirement/test tables -> resolved links/images -> diagrams -> highlighting),
@@ -260,7 +261,7 @@ async function resolveDocPaths(baseId: string, paths: string[]): Promise<Record<
   if (!paths.length) return {};
   const qs = 'base=' + encodeURIComponent(baseId || '') + paths.map(p => '&p=' + encodeURIComponent(p)).join('');
   try {
-    const r = await fetch('/api/index/resolve?' + qs, { cache: 'no-cache' });
+    const r = await projectFetch('/api/index/resolve?' + qs, { cache: 'no-cache' });
     if (!r.ok) return {};
     return (await r.json()).resolved || {};
   } catch (e) { return {}; }

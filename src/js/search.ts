@@ -1,3 +1,4 @@
+import { projectFetch } from './project.js';
 // search.ts - all-documents search, now a thin client over the server's SQLite
 // FTS5 index (GET /api/index/search). The old build-an-in-memory-index-from-every-
 // body approach couldn't scale past a few thousand docs (it required loading every
@@ -52,7 +53,7 @@ export async function searchDocs(query: string, limit?: number, signal?: AbortSi
   if (!q) return [];
   let res;
   try {
-    res = await fetch('/api/index/search?q=' + encodeURIComponent(q) + '&limit=' + (limit || 50),
+    res = await projectFetch('/api/index/search?q=' + encodeURIComponent(q) + '&limit=' + (limit || 50),
       { cache: 'no-cache', signal: signal });
   } catch (e) {
     return [];   // aborted or network error
