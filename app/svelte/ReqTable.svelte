@@ -135,8 +135,13 @@
   The comma-joined contents of one trace cell, or the em-dash placeholder. An
   empty cell and a cell with nothing to say look different on purpose: the
   placeholder is how a reader knows the column was considered.
+
+  The separator is the EXPRESSION {', '}, not the literal text `, `. Svelte trims
+  whitespace at a block's edge, so the literal rendered as a bare comma, and a
+  comma between two nowrap ids is not a line-break opportunity: a row with many
+  traces became one unbreakable line and pushed the table out of view.
 -->
-{#snippet trace(refs: TraceRef[])}{#if refs.length}{#each refs as ref, i (i)}{#if i}, {/if}{#if ref.id}<a class={ref.cls} href={ref.href}>{ref.id}</a>{:else}<span class="req-missing" title="Not found: {ref.raw}"><span class="wd-mounted" use:icon={warningIcon}></span> {ref.raw}</span>{/if}{/each}{:else}<span class="req-none">—</span>{/if}{/snippet}
+{#snippet trace(refs: TraceRef[])}{#if refs.length}{#each refs as ref, i (i)}{#if i}{', '}{/if}{#if ref.id}<a class={ref.cls} href={ref.href}>{ref.id}</a>{:else}<span class="req-missing" title="Not found: {ref.raw}"><span class="wd-mounted" use:icon={warningIcon}></span> {ref.raw}</span>{/if}{/each}{:else}<span class="req-none">—</span>{/if}{/snippet}
 
 <!--
   KEYED BY INDEX, deliberately. `block` is a parsed snapshot of one document and

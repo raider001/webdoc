@@ -18,6 +18,7 @@ import { announce } from './announce.js';
 import { preprocessWidgets, renderWidgets } from './widgets.js';
 import { documentFingerprint } from './reader-fingerprint.js';
 import { captureReadingPosition } from './reader-position.js';
+import { plainTables } from './widgets/plain-table.js';
 
 import type { Doc } from './catalog.js';
 import type { TocEntry } from './numbering.js';
@@ -80,6 +81,7 @@ export function renderContent(markdown: string, docId: string, path = 'page', de
     renderRestrictedSections(root);
     highlightWithin(root);
   }
+  plainTables(root, registerMounted);
   return root;
 }
 

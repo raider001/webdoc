@@ -24,6 +24,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    setupFiles: ['tests/unit/table-worker-shim.ts'],
     include: ['app/svelte/**/*.test.ts', 'tests/unit/**/*.test.ts'],
     maxWorkers: 1,
     fileParallelism: false,

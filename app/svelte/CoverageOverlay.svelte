@@ -36,6 +36,8 @@
 </script>
 
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import RunControls from './RunControls.svelte';
   import { state as appState } from '/js/app-shell.js';
   import { requirementList, testList, setCoverageStatus } from '/js/requirements.js';
   import { loadResults, combinedStatus } from '/js/coverage.js';
@@ -194,6 +196,11 @@
    * null. An empty list walks the same path to the same empty result; the null
    * was never the point.
    */
+  onMount(() => {
+    const changed = () => { void reloadResults(); };
+    document.addEventListener('webdoc:automated-finished', changed);
+    return () => document.removeEventListener('webdoc:automated-finished', changed);
+  });
   async function reloadResults(): Promise<void> {
     const r = await loadResults(appState.site?.sources ?? []);
     results = r;
@@ -202,6 +209,11 @@
   }
 </script>
 
+<div class="cov-run-sources">
+  {#each appState.site?.sources ?? [] as source (source.name)}
+    <RunControls source={source.name} scope="source" />
+  {/each}
+</div>
 {#if model.reqs.length}
   <!--
     The graph's container. {#key} is the rebuild: a link or unlink replaces the
@@ -228,3 +240,7 @@
   onChanged={() => { version++; }}
   onReload={reloadResults}
 />
+
+<style>
+  .cov-run-sources { position: absolute; left: 12px; top: 12px; z-index: 4; display: flex; flex-direction: column; gap: 6px; max-width: 60%; max-height: 25%; overflow: auto; background: var(--surface); border-radius: 6px; }
+</style>

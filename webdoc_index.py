@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import webdoc_access
 
-SCHEMA_VERSION = 8  # data-widget asset references inherit document access
+SCHEMA_VERSION = 10  # rebuild once: preserve missing authored test names for run validation
 
 # ---- extraction regexes (ported from the client) ---------------------------
 META_RE = re.compile(r'^﻿?\s*<!--\s*meta\b(?!\s+(?:start|end)\b)(.*?)-->\s*', re.I | re.S)
@@ -268,7 +268,7 @@ def extract_blocks(body, component):
                 else _split_refs(meta.get('verifies') or meta.get('verify') or '')
             tests.append({
                 'id': 'T_' + component + '_' + key, 'component': component, 'key': key,
-                'name': meta.get('name') or key, 'steps': steps, 'verifies_raw': verifies,
+                'name': meta.get('name') or '', 'steps': steps, 'verifies_raw': verifies,
             })
         else:
             group = meta and (meta.get('requirement-group') or meta.get('group'))
@@ -538,9 +538,16 @@ class Index:
             c.execute('DELETE FROM %s WHERE %s=?' % (tbl, col), (doc_id,))
         old_reqs = [r['id'] for r in c.execute('SELECT id FROM requirement WHERE doc_id=?', (doc_id,))]
         old_tests = [r['id'] for r in c.execute('SELECT id FROM test WHERE doc_id=?', (doc_id,))]
-        for rid in old_reqs:
+        # Raw trace/verifies rows are keyed by requirement/test id, NOT by document,
+        # so also clear the ids this document is ABOUT to define. One of them may
+        # still belong to another document: a requirement that moved between files
+        # is indexed from its new file before the old file's rows are dropped. The
+        # INSERT OR REPLACE below takes the row over, and from then on nothing
+        # would delete the previous owner's references - that document no longer
+        # owns the id - so they would be resolved alongside the new ones for good.
+        for rid in dict.fromkeys(old_reqs + [r['id'] for r in p['requirements']]):
             c.execute('DELETE FROM req_trace_to WHERE req_id=?', (rid,))
-        for tid in old_tests:
+        for tid in dict.fromkeys(old_tests + [t['id'] for t in p['tests']]):
             c.execute('DELETE FROM test_verifies WHERE test_id=?', (tid,))
         c.execute('DELETE FROM requirement WHERE doc_id=?', (doc_id,))
         c.execute('DELETE FROM test WHERE doc_id=?', (doc_id,))

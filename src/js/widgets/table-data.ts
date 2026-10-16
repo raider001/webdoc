@@ -2,12 +2,13 @@ import { extractSection, liveSourceUrl, LiveFetchError } from './live.js';
 import { renderMarkdown } from '../commonmark.js';
 import { sanitizeToFragment } from '../sanitize.js';
 import { joinDocPath } from '../doclinks.js';
+import { TableLogic, filters, sorts } from './table-logic.js';
 
 export interface TableSource { kind: 'markdown' | 'csv' | 'json'; src: string; section?: string; key?: string; }
-export interface TableData { columns: string[]; rows: Record<string, unknown>[]; }
-export interface TableColumn { key: string; label: string; format: 'text' | 'number' | 'percent' | 'datetime' | 'link' | 'status'; }
-export const COLUMN_FORMATS = ['text', 'number', 'percent', 'datetime', 'link', 'status'] as const;
-const MAX_ROWS = 10000;
+export interface TableData { columns: string[]; rows: Record<string, unknown>[]; manifest?: {webdocTable:number;database:string;dataset:string;columns:{key:string;format:string}[]}; }
+export interface TableColumn { key: string; label: string; format: 'text' | 'number' | 'percent' | 'datetime' | 'duration' | 'link' | 'status'; }
+export const COLUMN_FORMATS = ['text', 'number', 'percent', 'datetime', 'duration', 'link', 'status'] as const;
+const MAX_ROWS = 2000;
 
 export function tableSource(value: unknown): TableSource {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Choose a data source');
@@ -26,7 +27,7 @@ export function dataSourceUrl(source: TableSource): string {
 }
 
 function checked(data: TableData): TableData {
-  if (data.rows.length > MAX_ROWS || data.columns.length > 128) throw new Error('Data exceeds 10,000 rows or 128 columns');
+  if (data.rows.length > MAX_ROWS || data.columns.length > 128) throw new Error('Use an indexed descriptor above 2,000 rows; at most 128 columns');
   if (!data.columns.length || data.columns.some(c => !c.trim()) || new Set(data.columns).size !== data.columns.length) throw new Error('Columns need unique, non-empty names');
   return data;
 }
@@ -36,7 +37,7 @@ export function parseCsv(raw: string): TableData {
   const records: string[][] = [];
   let row: string[] = [], cell = '', quoted = false, closed = false;
   const finishCell = () => { row.push(cell); cell = ''; closed = false; };
-  const finishRow = () => { finishCell(); if (row.some(c => c !== '')) records.push(row); row = []; if (records.length > MAX_ROWS + 1) throw new Error('Data exceeds 10,000 rows'); };
+  const finishRow = () => { finishCell(); if (row.some(c => c !== '')) records.push(row); row = []; if (records.length > MAX_ROWS + 1) throw new Error('Use an indexed descriptor above 2,000 rows'); };
   for (let i = 0; i < raw.length; i++) {
     const char = raw[i];
     if (quoted) {
@@ -60,6 +61,11 @@ export function parseCsv(raw: string): TableData {
 
 export function parseJson(raw: string, key = ''): TableData {
   let value: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
+  if (value && typeof value === 'object' && 'webdocTable' in value) {
+    const manifest=value as NonNullable<TableData['manifest']>;
+    if(manifest.webdocTable!==1 || !manifest.database || !manifest.dataset || !Array.isArray(manifest.columns)) throw new Error('Invalid table descriptor');
+    return {columns:manifest.columns.map(c=>c.key),rows:[],manifest};
+  }
   for (const part of key ? key.split('.') : []) {
     if (!part || ['__proto__', 'prototype', 'constructor'].includes(part) || !value || typeof value !== 'object' || !Object.hasOwn(value, part)) throw new Error('JSON array key not found: ' + key);
     value = (value as Record<string, unknown>)[part];
@@ -124,26 +130,12 @@ export function cellText(value: unknown): string {
   return String(value);
 }
 
-function comparable(value: unknown, format: TableColumn['format']): string | number {
-  const text = cellText(value);
-  if (format === 'number' || format === 'percent') { const number = Number(text.replace(/[,%]/g, '')); return Number.isFinite(number) ? format === 'percent' && text.endsWith('%') ? number / 100 : number : -Infinity; }
-  if (format === 'datetime') { const time = Date.parse(text); return Number.isFinite(time) ? time : -Infinity; }
-  return text;
-}
-
 export function tableRows(data: TableData, columns: TableColumn[], options: Record<string, unknown>): Record<string, unknown>[] {
   const max = Number(options.maxRows ?? 100);
-  if (!Number.isInteger(max) || max < 1 || max > MAX_ROWS) throw new Error('Maximum rows must be 1–10,000');
-  const filter = String(options.filter || '').toLocaleLowerCase();
-  const rows = data.rows.filter(row => !filter || columns.some(c => cellText(Object.hasOwn(row, c.key) ? row[c.key] : null).toLocaleLowerCase().includes(filter)));
-  const sort = columns.find(c => c.key === options.sortBy);
-  if (options.sortBy && !sort) throw new Error('Choose a displayed column for sorting');
-  if (sort) rows.sort((a, b) => {
-    const x = comparable(Object.hasOwn(a, sort.key) ? a[sort.key] : null, sort.format), y = comparable(Object.hasOwn(b, sort.key) ? b[sort.key] : null, sort.format);
-    const order = typeof x === 'number' && typeof y === 'number' ? (x === y ? 0 : x < y ? -1 : 1) : String(x).localeCompare(String(y), undefined, { numeric: true });
-    return options.sortDirection === 'desc' ? -order : order;
-  });
-  return rows.slice(0, max);
+  if (!Number.isInteger(max) || max < 1 || max > MAX_ROWS) throw new Error('Maximum rows must be 1–2,000');
+  if(options.sortBy && !columns.some(c=>c.key===options.sortBy)) throw new Error('Choose a displayed column for sorting');
+  const logic=new TableLogic(); logic.set(data.rows.map(row=>Object.fromEntries(Object.keys(row).map(k=>[k,row[k]]))),columns);
+  return logic.query(filters(options.filtersJson || options.filters),sorts(options.sortJson || options.sort || (options.sortBy ? [{column:options.sortBy,direction:options.sortDirection || 'asc'}] : [])),String(options.filter || ''),0,max).rows;
 }
 
 export function formattedCell(value: unknown, format: TableColumn['format']): Node {

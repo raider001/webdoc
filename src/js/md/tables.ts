@@ -115,7 +115,7 @@ export function renderTable(b: MdTableBlock, refs: Record<string, RefDefinition>
   out += '</tr>\n</thead>\n';
   if (b.bodyRows.length) {
     out += '<tbody>\n';
-    for (const row of b.bodyRows) {
+    for (const row of b.bodyRows.slice(0, 2000)) {
       out += '<tr>\n';
       for (let i = 0; i < cols; i++) out += cell('td', row[i], b.aligns[i]);
       out += '</tr>\n';
@@ -123,5 +123,6 @@ export function renderTable(b: MdTableBlock, refs: Record<string, RefDefinition>
     out += '</tbody>\n';
   }
   out += '</table>\n';
+  if (b.bodyRows.length > 2000) out += '<p>Only the first 2,000 rows of this authored table are shown. Use an indexed live-table source for larger datasets.</p>\n';
   return out;
 }

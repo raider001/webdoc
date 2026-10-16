@@ -28,6 +28,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import webdoc_access
+import webdoc_runs
 import webdoc_auth
 
 try:
@@ -123,7 +124,13 @@ def load_config(path):
         # Optional per-source automated results (xUnit/JUnit). A path relative to
         # the source folder (served under /docs/<name>/) or an absolute served URL.
         sources.append({"name": name, "path": folder, "component": str(component).strip(),
-                        "testResults": src.get("testResults")})
+                        "testResults": src.get("testResults"), "runTests": src.get("runTests")})
+    # A runner config must never sit in a browser-writable document source.
+    if any(src.get("runTests") for src in sources):
+        from pathlib import Path
+        config_path = Path(path).resolve()
+        if any(config_path.is_relative_to(Path(src["path"]).resolve()) for src in sources):
+            raise SystemExit("runner configuration must be outside document sources")
     # Renderer plugins are bare file stems loaded from app/thirdpartyrenderer/.
     plugins = cfg.get("plugins", [])
     if not isinstance(plugins, list):
@@ -251,6 +258,7 @@ class DocHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"   # one request per connection; no keep-alive framing to get wrong
     config = None  # attached to the class before serving
     index = None   # webdoc_index.Index, attached before serving (None if disabled)
+    runs = None
     users = None      # webdoc_auth.UserStore  (None when auth is disabled)
     sessions = None   # webdoc_auth.SessionStore
     # Document writes are serialised. The window between "may they write this?"
@@ -1082,8 +1090,69 @@ class DocHandler(BaseHTTPRequestHandler):
         except _Refused as e:
             self._json(400, {"error": str(e)})
 
+    def _run_described(self, source, write=False):
+        if not self.index or self.index.state != "ready":
+            raise ValueError("test index is not ready")
+        tests = self.index.coverage(self.gate)["tests"]
+        return {t["id"]: t for t in tests if t["docId"].split("/", 1)[0] == source
+                and (not write or self.gate.can_write(t["docId"]))}
+
+    def _runs_post(self):
+        # Consume the bounded body before refusal so unread bytes cannot reset TCP.
+        body = self._read_json()
+        # Origin must be present, canonical and match the server's own origin.
+        origin = self.headers.get("Origin", "")
+        scheme = "https" if self.config["auth"].cookie_secure else "http"
+        if (origin != scheme + "://" + self.headers.get("Host", "")
+                or self.headers.get("X-WebDoc-Run") != "1"):
+            return self._json(403, {"error": "same Origin and X-WebDoc-Run: 1 required"})
+        if not self.config["auth"].enabled:
+            try: hostname = urllib.parse.urlsplit(origin).hostname
+            except ValueError: hostname = None
+            if hostname not in ("127.0.0.1", "localhost", "::1"):
+                return self._json(403, {"error": "local runner requires a local host origin"})
+        if not self._guard_mutation(): return
+        if not isinstance(body, dict) or set(body) != {"source", "ids"}:
+            return self._json(400, {"error": "only source and ids accepted"})
+        source = body["source"]
+        if not isinstance(source, str) or not self._source(source):
+            return self._json(400, {"error": "unknown source"})
+        if not self._can_write_source(source): return self._deny(what="test runs")
+        try:
+            if self.runs is None: raise ValueError("test running unavailable")
+            described = self._run_described(source, write=True)
+            rid = self.runs.submit(source, body["ids"], described)
+            return self._json(202, {"id": rid, "state": "waiting"})
+        except (ValueError, TypeError) as exc:
+            return self._json(400, {"error": str(exc)})
+
+    def _runs_get(self, path):
+        if not self._readable_site(): return self._deny(what="test runs")
+        try:
+            if self.runs is None: raise ValueError("test running unavailable")
+            if path == "/api/runs":
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                source = qs.get("source", [""])[0]
+                if not self._source(source): raise ValueError("unknown source")
+                described = self._run_described(source)
+                catalog = self.runs.catalog(source, described)
+                for tid, item in catalog.items():
+                    item["runnable"] = item["runnable"] and self._can_write_source(source) and self.gate.can_write(described[tid]["docId"])
+                return self._json(200, {"cases": catalog})
+            rid = path[len("/api/runs/"):]
+            if not re.fullmatch(r"[a-f0-9]{32}", rid): raise KeyError("unknown run")
+            rec = self.runs.status(rid)
+            described = self._run_described(rec["source"])
+            # Output may mention any selected case: refuse the whole status if one is hidden.
+            if any(tid not in described for tid in rec["ids"]): return self._not_found()
+            return self._json(200, rec)
+        except KeyError: return self._not_found()
+        except (ValueError, OSError) as exc: return self._json(400, {"error": str(exc)})
+
     def _post(self):
         path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
+        if path == "/api/runs":
+            return self._runs_post()
         if not path.startswith("/api/auth/"):
             return self._json(405, {"error": "unsupported"})
         # Sign-in and registration change server state, so they are CSRF-guarded
@@ -1094,6 +1163,8 @@ class DocHandler(BaseHTTPRequestHandler):
 
     def route(self):
         path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
+        if path == "/api/runs" or path.startswith("/api/runs/"):
+            return self._runs_get(path)
         if path == "/site.json":
             return self._site_json()
         if path.startswith("/api/auth/"):
@@ -1153,6 +1224,8 @@ class DocHandler(BaseHTTPRequestHandler):
         if self._acl_blocked():
             return self._not_ready()
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if action == 'page':
+            return self._table_page(qs)
         if action == 'tree':
             path = (qs.get('path') or [''])[0]
             kind = (qs.get('format') or [''])[0]
@@ -1207,6 +1280,55 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._send(304, b'', content_type(full), [('ETag', etag)])
         return self._send_static(200, data, 'text/csv; charset=utf-8' if rel.lower().endswith('.csv') else 'application/json; charset=utf-8', [('ETag', etag)])
 
+    def _table_page(self, qs):
+        # Same source resolution, traversal guard, sign-in/ACL wall and asset
+        # visibility as _data_get. The database itself is never sent to a client.
+        from webdoc_tables import Tables
+        identifier = (qs.get('src') or [''])[0]
+        name, _, rel = identifier.partition('/')
+        source = self._source(name)
+        full = safe_data_path(source['path'], rel) if source else None
+        if not full or not rel.lower().endswith('.json') or not self._asset_readable(name,rel):
+            return self._not_found()
+        tables = None
+        try:
+            with open(full, encoding='utf-8-sig') as stream:
+                raw = stream.read(65537)
+            if len(raw)>65536: raise ValueError('not a bounded table descriptor')
+            spec = json.loads(raw)
+            if spec.get('webdocTable') != 1: raise ValueError('not an indexed table descriptor')
+            database = spec['database']
+            if not isinstance(database,str) or not re.fullmatch(r'[A-Za-z0-9_.-]+\.sqlite',database) or database in ('.','..'):
+                raise ValueError('invalid table database')
+            db_rel = (rel.rsplit('/',1)[0]+'/' if '/' in rel else '')+database
+            db_path = safe_data_path(source['path'],db_rel)
+            if not db_path or not self._asset_readable(name,db_rel): return self._not_found()
+            filter_text=(qs.get('filters') or ['[]'])[0]; sort_text=(qs.get('sort') or ['[]'])[0]
+            if len(filter_text)+len(sort_text)>16384: raise ValueError('settings too large')
+            limit=int((qs.get('limit') or ['100'])[0])
+            tables=Tables(db_path,readonly=True)
+            # Do not return records belonging to restricted sections: generated
+            # assets cannot reproduce per-section redaction safely.
+            visible=lambda owner: self.gate.can_read(owner) and not self._redacted_count(owner)
+            result=tables.page(spec['dataset'],json.loads(filter_text),json.loads(sort_text),
+                (qs.get('cursor') or [None])[0],limit,(qs.get('search') or [''])[0],
+                None if self.gate.unrestricted else visible)
+            # The stored subsection string remains the filter key. Present its
+            # companion document link only after server-side filtering/paging.
+            if spec['dataset'] == 'questions':
+                for row in result['rows']:
+                    if isinstance(row.get('subsection'),str) and isinstance(row.get('link'),str):
+                        row['subsection']={'label':row['subsection'],'href':'#/'+row['link']}
+            return self._json(200,result)
+        except (ValueError,KeyError,TypeError,IndexError) as error:
+            return self._json(400,{'error':str(error)})
+        except OSError:
+            return self._not_found()
+        except Exception:
+            return self._json(503,{'error':'table unavailable; retry or refine the filter'})
+        finally:
+            if tables: tables.close()
+
     def route_docs(self, rest):
         rest = rest.strip("/")
         if not rest:
@@ -1226,6 +1348,8 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._listing(name, rel, fspath)
         if rel.lower().endswith(".md"):
             return self._doc_file(src, fspath)
+        if rel.lower().endswith(('.sqlite','.sqlite-wal','.sqlite-shm')):
+            return self._not_found()
         # The per-source results sidecars are served through this same mount.
         # They are index data, not documents, and have their own filtered API -
         # serving the raw file would hand over results for pages the caller
@@ -1712,6 +1836,7 @@ def main():
 
     cfg = load_config(args.config)
     DocHandler.config = cfg
+    DocHandler.runs = webdoc_runs.Runs(cfg["sources"], args.host, cfg["auth"].enabled)
     setup_auth(cfg, args.host)
 
     # Build the SQLite index in the BACKGROUND so serving starts immediately; the
@@ -1747,3 +1872,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

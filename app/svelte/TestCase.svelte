@@ -9,7 +9,7 @@
   tests/test_coverage_ui.py selects on every one of those, and
   requirements.js's revealTest() finds the figure by its id.
 
-  THE RUN BUTTON STAYS A CustomEvent. It dispatches `webdoc:run-test` on
+  Manual recording dispatches a CustomEvent from RunControls. It dispatches `webdoc:run-test` on
   `document` exactly as the hand-built button did, and main.js listens. That is
   not laziness about wiring a callback down: the article is not Svelte's, this
   block is mounted into it from a placeholder the Markdown pipeline left behind,
@@ -27,7 +27,9 @@
   run recolours it in place; see app/svelte/stores/coverage.svelte.ts.
 -->
 <script lang="ts">
-  import { warningIcon, playIcon } from '/js/icons.js';
+  import RunControls from './RunControls.svelte';
+  import { groupsByDoc } from '/js/requirements/store.js';
+  import { warningIcon } from '/js/icons.js';
   import { statusOf, index } from '/js/requirements/store.js';
   import { cssSafe } from '/js/requirements/parse.js';
   import { icon } from './actions/icon.js';
@@ -87,25 +89,15 @@
     return target ? '#/' + target.docId + '?req=' + encodeURIComponent(id) : '#';
   }
 
-  /**
-   * Ask the shell to open the runner for this test. `document` is the meeting
-   * point on purpose - see the file header.
-   *
-   * Reached through `window.CustomEvent` rather than the bare global, as
-   * Toc.svelte reaches window.CSS: the bundle's lint surface declares only the
-   * globals the components actually rely on, and adding one to that list for a
-   * constructor `window` already carries would be a shared-config change for no
-   * behavioural gain.
-   */
-  function run(): void {
-    document.dispatchEvent(new window.CustomEvent('webdoc:run-test', { detail: { testId: rec.id } }));
-  }
 </script>
 
 <!-- Keyed by index throughout; see ReqTable.svelte for why an authored id is the
      wrong key for a list that is a parsed snapshot and never reorders. -->
+{#if groupsByDoc.get(rec.docId)?.filter(b => b.kind === 'test')[0]?.rec.id === rec.id}
+  <RunControls source={rec.docId.split('/')[0]} ids={groupsByDoc.get(rec.docId)?.filter(b => b.kind === 'test').map(b => b.rec.id) || []} scope="page" />
+{/if}
 <figure class="req-group test-case" id={figId}>
-  <figcaption class="req-cap tc-cap">Test case — {rec.name} <span class="tc-id">{rec.id}</span><span class="tc-result tc-result-{st}">{resultLabel}</span>{#if addressable}<button type="button" class="tc-run" title="Run this test case" onclick={run}><span class="wd-mounted" use:icon={playIcon}></span>Run</button>{/if}</figcaption>
+  <figcaption class="req-cap tc-cap">Test case — {rec.name} <span class="tc-id">{rec.id}</span><span class="tc-result tc-result-{st}">{resultLabel}</span>{#if addressable}<RunControls source={rec.docId.split('/')[0]} caseId={rec.id} />{/if}</figcaption>
   {#if block.error}<p class="req-error"><span class="wd-mounted" use:icon={warningIcon}></span> {block.error}</p>{/if}
   <p class="tc-verifies">Verifies: {#if rec.verifies.length}{#each rec.verifies as id, i (i)}{#if i}, {/if}<a class="req-link" href={reqHref(id)}>{id}</a>{/each}{:else}<span class="req-none">—</span>{/if}</p>
   <div class="req-scroll">

@@ -101,9 +101,9 @@ describe('auto-update table lifecycle', () => {
   it('clears fetched rows on permission refusal and session changes', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(csv)).mockResolvedValueOnce(new Response('{}', { status: 403 })); vi.stubGlobal('fetch', fetch);
     const harness = mount('csv'); await vi.advanceTimersByTimeAsync(0); expect(harness.root.querySelector('table')).toBeTruthy();
-    harness.root.querySelector<HTMLButtonElement>('.wd-live-table button')!.click(); await vi.advanceTimersByTimeAsync(0); expect(harness.root.querySelector('table')).toBeNull();
+    harness.root.querySelector<HTMLButtonElement>('.wd-live-table button')!.click(); await vi.advanceTimersByTimeAsync(0); expect(harness.root.querySelectorAll('tbody tr')).toHaveLength(0);
     fetch.mockResolvedValueOnce(new Response(csv)); harness.root.querySelector<HTMLButtonElement>('.wd-live-table button')!.click(); await vi.advanceTimersByTimeAsync(0);
-    fetch.mockResolvedValueOnce(Response.json({ enabled: false })); await loadAuth(); expect(harness.root.querySelector('table')).toBeNull();
+    fetch.mockResolvedValueOnce(Response.json({ enabled: false })); await loadAuth(); expect(harness.root.querySelectorAll('tbody tr')).toHaveLength(0);
   });
   it('contains parse errors inline and stops requests after teardown', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('not-json')); vi.stubGlobal('fetch', fetch);
@@ -120,7 +120,7 @@ describe('auto-update table lifecycle', () => {
     const previous = harness.root.querySelector<HTMLElement>('.wd-table-data')!; previous.scrollTop = 45; previous.scrollLeft = 67;
     harness.root.querySelector<HTMLButtonElement>('.wd-live-table button')!.click(); await vi.advanceTimersByTimeAsync(0);
     const next = harness.root.querySelector<HTMLElement>('.wd-table-data')!;
-    expect(next).not.toBe(previous); expect([pane.scrollTop, pane.scrollLeft, next.scrollTop, next.scrollLeft]).toEqual([321, 12, 45, 67]);
+    expect(next).toBe(previous); expect([pane.scrollTop, pane.scrollLeft, next.scrollTop, next.scrollLeft]).toEqual([321, 12, 45, 67]);
   });
   it('aborts a hanging request at its deadline without breaking the widget', async () => {
     const fetch = vi.fn((_url, options: RequestInit) => new Promise<Response>((_resolve, reject) => options.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))))); vi.stubGlobal('fetch', fetch);
