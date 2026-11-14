@@ -155,5 +155,7 @@ export interface AppRegistry {
   setDocChrome?: (docId: string, toc: TocEntry[], assumes: string[], next: string[]) => void;
   /** record a component mounted inside the article so the next navigation destroys it */
   registerMounted?: (host: Element, destroy: () => void) => void;
+  /** save new inner Markdown for a widget on a page, from the reader (authoring.ts); rejects with a reason */
+  saveWidgetContent?: (docId: string, options: Record<string, unknown>, oldInner: string, newInner: string) => Promise<void>;
 }
 export const app: AppRegistry = {};

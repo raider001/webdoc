@@ -28,6 +28,8 @@ import { loadDoc } from './catalog.js';
 import { buildRequirementIndex, requirementList, testList, resolveRequirementRef } from './requirements.js';
 import { apiFetch, describeFailure, auth, docAccess, invalidateAccess } from './auth.js';
 import { newFolderPageId } from './folders.js';
+import { replaceWidgetContent } from './meta-blocks.js';
+import { renderDoc } from './reader.js';
 
 import type { Doc, SourceConfig } from './catalog.js';
 import type { Block } from './editor.js';
@@ -474,8 +476,35 @@ async function editDocRelation(fromId: string, toId: string, field: 'assumes' | 
   return true;
 }
 
+/**
+ * Save new inner Markdown for one widget on a page, from the reader - a widget
+ * that edits its own content in place (a diagram, say) without opening the page
+ * editor. The widget is found in the page's source by what it held when the page
+ * was rendered (meta-blocks.ts replaceWidgetContent), so nothing else on the
+ * page is touched. Rejects with a sentence for the reader when it cannot save.
+ */
+async function saveWidgetContent(docId: string, options: Record<string, unknown>, oldInner: string, newInner: string): Promise<void> {
+  if (newInner === oldInner) return;
+  const raw = await rawDoc(docId);
+  if (raw === null) throw new Error('The page could not be read. Reload it and try again.');
+  const updated = replaceWidgetContent(raw, options, oldInner, newInner);
+  if (updated === null) throw new Error('This part of the page was changed by someone else. Reload the page to see their change, then edit again.');
+  const slash = docId.indexOf('/');
+  const url = '/docs/' + encodeURIComponent(docId.slice(0, slash)) + '/'
+    + (docId.slice(slash + 1) + '.md').split('/').map(encodeURIComponent).join('/');
+  let res: Response;
+  try { res = await apiFetch(url, { method: 'PUT', body: updated }); }
+  catch (e) { throw new Error('Save failed: ' + errorMessage(e)); }
+  if (!res.ok) throw new Error('Save failed: ' + await describeFailure(res));
+  const cached = state.byId.get(docId); if (cached) cached._loaded = false;
+  await refreshCatalog();   // reloads the open page's source
+  // Show the saved page where the reader was, as a background update would
+  if (state.current && state.current.id === docId) renderDoc(state.current, { preserveReading: true });
+}
+
 // Map + coverage reach these through the shared registry (map: edit-connections +
 // Delete; coverage report panel: link / unlink a test from a requirement).
+app.saveWidgetContent = saveWidgetContent;
 app.editDocRelation = editDocRelation;
 app.deleteDocFlow = deleteDocFlow;
 app.linkTestToRequirement = linkTestToRequirement;

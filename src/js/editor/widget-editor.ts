@@ -1,12 +1,16 @@
 import { elem } from '../dom.js';
 import { widgetDefinition, widgetDisplayName } from '../widgets.js';
 import { createWidgetFields } from './widget-fields.js';
-import { blockToMd, toMarkdownBlocks } from './serialize.js';
+import { blockToMd, parseDoc, toMarkdownBlocks } from './serialize.js';
 import { renderContent, teardownMounted } from '../reader.js';
 import type { WidgetEditorBlock } from '../editor.js';
 
 let nextPreview = 0;
-export function widgetEditor(widget: WidgetEditorBlock, docId: string, children: HTMLElement) {
+/**
+ * @param redrawChildren re-renders the block editors under the widget, after its
+ *   custom editor replaced its content (WidgetEditorContext.content.set)
+ */
+export function widgetEditor(widget: WidgetEditorBlock, docId: string, children: HTMLElement, redrawChildren?: () => void) {
   const definition = widgetDefinition(String(widget.options.widget));
   const name = definition ? widgetDisplayName(definition) : String(widget.options.widget);
   const element = elem('div', { class: 'blk-widget', 'data-widget-type': String(widget.options.widget) });
@@ -42,7 +46,16 @@ export function widgetEditor(widget: WidgetEditorBlock, docId: string, children:
     if (pane && top !== undefined) pane.scrollTop = top;
   }
   const schedule = () => { clearTimeout(timer); timer = setTimeout(drawPreview, 180); };
-  const fields = createWidgetFields(definition, widget.options, docId, schedule);
+  const content = {
+    get: () => toMarkdownBlocks(widget.blocks).map(blockToMd).join('\n\n'),
+    set: (markdown: string) => {
+      const blocks = parseDoc(markdown, {}, 1).blocks;
+      widget.blocks.splice(0, widget.blocks.length, ...(blocks.length ? blocks : [{ type: 'paragraph' as const, html: '' }]));
+      redrawChildren?.();
+      schedule();
+    },
+  };
+  const fields = createWidgetFields(definition, widget.options, docId, schedule, content);
   const advanced = elem('details', 'widget-advanced');
   const raw = elem('textarea', { rows: 5, 'aria-label': 'Raw widget options', value: JSON.stringify(widget.options, null, 2) });
   raw.addEventListener('input', () => {

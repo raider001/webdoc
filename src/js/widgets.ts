@@ -26,6 +26,8 @@ export interface WidgetServices {
   register: (host: Element, destroy: () => void) => void;
   teardown: (root: Element) => void;
   reuse?: (key: string, fingerprint: string) => HTMLElement | undefined;
+  /** Saves a widget's new inner Markdown to the page (see WidgetContext.saveContent). */
+  save?: (options: Record<string, unknown>, oldInner: string, newInner: string) => Promise<void>;
 }
 
 export function preprocessWidgets(markdown: string): string {
@@ -87,6 +89,7 @@ export function renderWidgets(root: HTMLElement, services: WidgetServices): void
       if (!definition) throw new Error('Unknown widget: ' + String(spec.options?.widget || '(unnamed)'));
       host.dataset.widgetKey = key;
       const content = services.renderContent(spec.markdown || '', services.docId, key, services.depth + 1);
+      let savedInner = spec.markdown;
       context = {
         host, options: spec.options, innerMarkdown: spec.markdown, content, innerHTML: content.innerHTML,
         docId: services.docId, pageId: services.pageId || services.docId, key, depth: services.depth, signal: abort.signal,
@@ -96,6 +99,8 @@ export function renderWidgets(root: HTMLElement, services: WidgetServices): void
           if (destroyed || failed) return;
           try { Promise.resolve(fn(...args)).catch(reportError); } catch (error) { reportError(error); }
         },
+        // Each save is matched against what the previous one wrote, so a widget can save more than once
+        saveContent: services.save ? async (markdown: string) => { await services.save!(spec.options, savedInner, markdown); savedInner = markdown; } : undefined,
         update: async options => {
           if (destroyed || failed || !context) return;
           if (options) context.options = options;

@@ -34,6 +34,14 @@ Suggested (git-ignored) local drop-in for the reference facade:
 thirdpartyrenderer/mermaid.min.js
 ```
 
+The `software-design` facade (UML, sequence, activity and wireframe diagrams,
+viewed and edited in place) loads the Software Designer library the same way.
+Build it in that repository with `npm run build:embed` and copy the result here:
+
+```
+thirdpartyrenderer/softwaredesigner.js
+```
+
 ## Adding a renderer
 
 Copy `mermaid.js`, change the fenced language, the library it loads, and the

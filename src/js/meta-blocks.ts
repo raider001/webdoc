@@ -94,6 +94,28 @@ export function replaceMetaBlocks(source: string, blocks: MetaBlock[], replace: 
   return out + source.slice(from);
 }
 
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every(k => sameJson((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
+/**
+ * Replace what a widget holds in a document's source, leaving its markers and
+ * everything around it untouched. The widget is found by what it holds - the
+ * same options and the same inner Markdown the page was rendered from - so a
+ * widget that a reader saves from is the one they were looking at. Returns null
+ * when no widget matches: the page changed since it was rendered, and saving
+ * over it would lose someone else's edit.
+ */
+export function replaceWidgetContent(source: string, options: Record<string, unknown>, oldInner: string, newInner: string): string | null {
+  const match = scanMetaBlocks(source).find(b => b.widget && !b.error && sameJson(b.options, options) &&
+    source.slice(b.innerStart, b.innerEnd) === oldInner);
+  if (!match) return null;
+  return source.slice(0, match.innerStart) + newInner + source.slice(match.innerEnd);
+}
+
 /** Keep authored widget prose in the page-link index, omitting structured data. */
 export function stripMetaBlocks(source: string): string {
   return replaceMetaBlocks(source, scanMetaBlocks(source).filter(b => !b.widget), () => '')

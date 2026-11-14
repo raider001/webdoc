@@ -1,6 +1,6 @@
 import { elem } from '../dom.js';
 import { widgetFields } from '../widgets/registry.js';
-import type { WidgetDefinition, WidgetField, CustomWidgetEditor } from '../widgets/registry.js';
+import type { WidgetDefinition, WidgetField, CustomWidgetEditor, WidgetEditorContext } from '../widgets/registry.js';
 import { COLUMN_FORMATS, columnOptions, tableSource } from '../widgets/table-data.js';
 import type { TableColumn } from '../widgets/table-data.js';
 import { fetchLiveSource, extractSection, liveSourceUrl } from '../widgets/live.js';
@@ -95,7 +95,7 @@ function sectionPicker(getDocument: () => string, getValue: () => string, signal
   return { element: select, refresh, destroy: cleanup, invalid: () => loaded && getValue() && !titles.includes(getValue()) ? 'Section not found in the chosen document' : '' };
 }
 
-export function createWidgetFields(definition: WidgetDefinition | undefined, options: Record<string, unknown>, docId: string, onChange: () => void) {
+export function createWidgetFields(definition: WidgetDefinition | undefined, options: Record<string, unknown>, docId: string, onChange: () => void, content?: WidgetEditorContext['content']) {
   const abort = new AbortController();
   const element = elem('div', 'blk-widget-fields');
   const schema = widgetFields(definition);
@@ -241,7 +241,7 @@ export function createWidgetFields(definition: WidgetDefinition | undefined, opt
   }
   if (definition?.editor?.component) {
     try {
-      const result = definition.editor.component({ options, docId, signal: abort.signal, change: patch => { Object.assign(options, patch); refresh(); onChange(); }, setError });
+      const result = definition.editor.component({ options, docId, signal: abort.signal, change: patch => { Object.assign(options, patch); refresh(); onChange(); }, setError, content });
       custom = result instanceof HTMLElement ? { element: result } : result;
       element.append(custom.element);
     } catch (failure) { setError('editor', 'Editor could not be loaded: ' + message(failure)); }

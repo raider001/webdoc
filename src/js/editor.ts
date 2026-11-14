@@ -222,7 +222,7 @@ export function openEditor(opts: EditorOpts): HTMLElement {
         resolveDisplayImages(children);
       }
       drawChildren();
-      const handle = widgetEditor(widget, opts.docId, children);
+      const handle = widgetEditor(widget, opts.docId, children, drawChildren);
       widgetEditors.add(handle);
       return handle.element;
     }

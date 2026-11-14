@@ -10,6 +10,8 @@
 # unreviewed - the compiled bundle is built from sources in app/svelte/ that are
 # committed and reviewable. See SVELTE_UPLIFT_PLAN.md.
 app/thirdpartyrenderer/*.min.js
+# The Software Designer library (npm run build:embed in that repository)
+app/thirdpartyrenderer/softwaredesigner.js
 .webdoc-index/
 __pycache__/
 .claude/
@@ -49,3 +51,5 @@ app/thirdpartyrenderer/mermaid.js
 app/thirdpartyrenderer/mermaid.d.ts
 app/thirdpartyrenderer/widget-panel.js
 app/thirdpartyrenderer/widget-panel.d.ts
+app/thirdpartyrenderer/software-design.js
+app/thirdpartyrenderer/software-design.d.ts

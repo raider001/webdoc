@@ -20,6 +20,12 @@ export interface WidgetEditorContext {
   signal: AbortSignal;
   change: (patch: Record<string, unknown>) => void;
   setError: (field: string, message?: string) => void;
+  /**
+   * The widget's inner Markdown, for widgets whose content is data their own
+   * editor changes (a diagram, say): get() as it would be saved, set() to
+   * replace it (it is parsed back into the blocks shown under the widget).
+   */
+  content?: { get(): string; set(markdown: string): void };
 }
 
 export interface CustomWidgetEditor {
@@ -54,6 +60,14 @@ export interface WidgetContext {
   guard: <T extends unknown[]>(fn: (...args: T) => void | Promise<void>) => (...args: T) => void;
   /** Notify the registered update hook after changing local content/options. */
   update: (options?: Record<string, unknown>) => Promise<void>;
+  /**
+   * Save new inner Markdown for this widget into the page's source, for widgets
+   * that edit their own content in place (a diagram, say). Present only for a
+   * widget on the page being read, never in an editor preview. The page reloads
+   * afterwards; rejects with a sentence to show the reader when it cannot save
+   * (no permission, or the page changed meanwhile).
+   */
+  saveContent?: (markdown: string) => Promise<void>;
 }
 
 export interface WidgetDefinition {

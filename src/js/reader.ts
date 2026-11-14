@@ -67,7 +67,13 @@ export function renderContent(markdown: string, docId: string, path = 'page', de
   renderRequirements(root, docId);
   renderWidgets(root, { docId, pageId, path, depth,
     renderContent: (body, sourceId, key, level, decorate) => renderContent(body, sourceId, key, level, decorate, pageId, decorate ? undefined : reuse),
-    register: registerMounted, teardown: teardownMounted, reuse });
+    register: registerMounted, teardown: teardownMounted, reuse,
+    // Widgets on the page being read may save their own content; editor previews (another pageId) may not
+    save: pageId === docId
+      ? (options, oldInner, newInner) => app.saveWidgetContent
+        ? app.saveWidgetContent(docId, options, oldInner, newInner)
+        : Promise.reject(new Error('Editing is not available here.'))
+      : undefined });
   if (complete) {
     numberHeadings(root, h => !h.closest('.wd-live,.wd-mounted'));
     root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(h => {
@@ -266,7 +272,7 @@ function cssEsc(s: string): string { return (window.CSS && CSS.escape) ? CSS.esc
 // against the whole corpus. Returns { cleanPath: resolvedId | null } - a map of
 // input path -> resolved doc id, or null if unresolved (every requested path is
 // present as a key).
-async function resolveDocPaths(baseId: string, paths: string[]): Promise<Record<string, string | null>> {
+export async function resolveDocPaths(baseId: string, paths: string[]): Promise<Record<string, string | null>> {
   if (!paths.length) return {};
   const qs = 'base=' + encodeURIComponent(baseId || '') + paths.map(p => '&p=' + encodeURIComponent(p)).join('');
   try {
