@@ -23,6 +23,12 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # The components import app modules as /js/*.js, which resolve to the
+      # COMPILED app/js/ (jsconfig paths, and the vitest alias). A fresh clone has
+      # no app/js/, so compile it before type-checking or testing anything.
+      - name: Compile app/js
+        run: npm run build:js
+
       # tsc over src/** at strict, then svelte-check over the components.
       - name: Type-check
         run: npm run check
