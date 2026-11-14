@@ -67,6 +67,49 @@ describe('TreeFolder', () => {
     expect(container.querySelector('details[data-path="Guides/concepts/deeper"]')).toBeTruthy();
   });
 
+  it('labels the folder with a link to its own page, separate from the expand chevron', async () => {
+    const onSelect = vi.fn();
+    Element.prototype.scrollIntoView = vi.fn();
+    fetchChildren.mockResolvedValue({ folders: [], docs: [] });   // opening the folder fetches it
+    const { container } = render(TreeFolder, { props: { name: 'how-to', path: 'Guides/how-to', onSelect } });
+    await tick();
+    const link = container.querySelector<HTMLAnchorElement>('summary > a.folder-link')!;
+    expect(container.querySelector('summary > .tree-chevron')).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('#/Guides/how-to');
+    expect(link.textContent).toBe('How To');            // no page file: the prettified name
+
+    link.click();
+    await tick();
+    expect(onSelect).toHaveBeenCalledWith('Guides/how-to');
+    // Opening the page opens the folder, so its contents show alongside.
+    expect(treeState.expanded['Guides/how-to']).toBe(true);
+  });
+
+  it("is named after its page file, and active when that page is read by its own id", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    fetchChildren.mockResolvedValue({ folders: [], docs: [] });
+    const page = { id: 'Guides/kit/README', title: 'Kit Overview' };
+    const { container } = render(TreeFolder, { props: { name: 'kit', path: 'Guides/kit', page, onSelect: () => {} } });
+    await tick();
+    const link = container.querySelector('a.folder-link')!;
+    expect(link.textContent).toBe('Kit Overview');
+    expect(link.getAttribute('aria-current')).toBeNull();
+
+    treeState.activeId = 'Guides/kit/README';
+    await tick(); await wait(); await tick();
+    expect(link.getAttribute('aria-current')).toBe('page');
+    // Becoming the page being read opens the folder.
+    expect(treeState.expanded['Guides/kit']).toBe(true);
+  });
+
+  it('passes each child folder its page from the level it fetched', async () => {
+    fetchChildren.mockResolvedValue({ folders: ['kit'], docs: [], pages: { kit: { id: 'Guides/concepts/kit/README', title: 'Kit' } } });
+    treeState.expanded['Guides/concepts'] = true;
+    const { container } = render(TreeFolder, { props: { name: 'concepts', path: 'Guides/concepts', onSelect: () => {} } });
+    await tick(); await wait(); await tick();
+    expect(container.querySelector('details[data-path="Guides/concepts/kit"] a.folder-link')!.textContent).toBe('Kit');
+  });
+
   it('does not subscribe the loading effect to incidental synchronous dependency reads', async () => {
     fetchChildren.mockImplementation(() => {
       void treeState.activeId;

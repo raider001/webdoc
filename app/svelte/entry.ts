@@ -25,7 +25,7 @@ export { beginSearch, showHits } from './stores/search.svelte.js';
 // Phase 4 - the reading view's satellites: breadcrumb, TOC, footer link groups.
 // The three mounts run once at boot; the three setters are what a navigation
 // calls.
-export { mountToc, mountCrumbs, mountFooter } from './islands/reader.js';
+export { mountToc, mountCrumbs, mountFooter, mountFolderPage } from './islands/reader.js';
 export { setCrumbs, setToc, setFootLinks } from './stores/shell.svelte.js';
 
 // Phase 5 - the account screens. No store setter is exported: the session lives

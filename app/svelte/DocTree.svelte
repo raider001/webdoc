@@ -47,7 +47,7 @@
 
 {#if loaded}
   {#each root.folders as folder (folder)}
-    <TreeFolder name={folder} path={folder} {onSelect} />
+    <TreeFolder name={folder} path={folder} page={root.pages?.[folder]} {onSelect} />
   {/each}
   {#each root.docs as doc (doc.id)}
     <DocLink {doc} {onSelect} />

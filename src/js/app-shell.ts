@@ -21,10 +21,18 @@ export interface AppState {
   byId: Map<string, Doc>;
   /** the doc currently routed/displayed */
   current: Doc | null;
+  /**
+   * The folder path the reading view stands for, when the route is a folder
+   * (#/Docs/features). Set alongside `current` when the folder's page is a
+   * document (README.md / index.md inside it), and on its own - with `current`
+   * null - for a page generated from the folder's contents. Null for an
+   * ordinary document.
+   */
+  folder: string | null;
   /** reserved for a scroll-spy handle; not assigned anywhere in the current code (reader.ts keeps its own module-local IntersectionObserver instead) */
   spy: unknown;
 }
-export const state: AppState = { site: null, docs: [], byId: new Map(), current: null, spy: null };
+export const state: AppState = { site: null, docs: [], byId: new Map(), current: null, folder: null, spy: null };
 
 export const el = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -137,8 +145,10 @@ export interface AppRegistry {
   deleteDocFlow?: (id: string, opts?: { rebuildMap?: boolean }) => Promise<void>;
   /** show/hide Edit and Delete for what this account may do to this document */
   updateDocActions?: (docId: string) => Promise<void>;
-  /** highlight and reveal a document in the drawer tree */
+  /** highlight and reveal a document (or a folder's page, by the folder's path) in the drawer tree */
   setTreeActive?: (id: string | null) => void;
+  /** open the editor on a new page for this folder (authoring.ts) */
+  createFolderPage?: (folderPath: string) => Promise<void>;
   /** refetch the drawer tree's open levels, preserving expansion */
   invalidateTree?: () => void;
   /** push breadcrumb/TOC/footer into the island store and flush */

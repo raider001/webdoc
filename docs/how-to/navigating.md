@@ -16,7 +16,10 @@ of the header, labelled "Open document navigation". The drawer lists every
 document as a folder tree derived from the document ids: source folders sit at
 the top and open by default, sub-folders start collapsed. Click a document
 title to go there, and the drawer closes behind you; Ctrl-, Cmd-, or
-Shift-click opens it in a new tab instead. The document you are reading is
+Shift-click opens it in a new tab instead. A folder works the same way: click
+its chevron to open or close it, or click its name to open the folder's own
+page — its `README.md`, `index.md` or same-named sibling file if it has one,
+otherwise a generated listing of what is inside. The document you are reading is
 marked as the current page and scrolled into view, so re-opening the drawer
 always shows where you are. Close the drawer with its ✕ button, by clicking the
 dimmed backdrop, or by pressing Escape.
@@ -37,8 +40,8 @@ you can range around a long document freely.
 
 The breadcrumb trail in the header shows where the current document sits, as its
 id path with " › " separators — a document with id `Docs/features/map` reads as
-Docs › features › map. It is a location indicator, not a set of links: there is
-nothing to click. To move up or across, use the tree drawer.
+Docs › features › map. Every folder in the trail is a link: click "features" to
+open that folder's page, or "Docs" for the whole source.
 
 ## Deep-link to a document, heading, or requirement
 

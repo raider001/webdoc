@@ -651,6 +651,10 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._json(200, {"results": idx.search(q, limit, offset, gate)})
         if first == "tree":
             return self._json(200, idx.tree((qs.get("path") or [""])[0], gate))
+        if first == "folder":    # a folder's page: its own document, sub-folders, documents
+            info = idx.folder((qs.get("path") or [""])[0], gate)
+            # A folder of hidden pages answers exactly like one that does not exist.
+            return self._json(200, info) if info else self._not_found()
         if first == "resolve":   # batch-resolve in-body link targets -> doc ids
             paths = (qs.get("p") or [])[:100]
             return self._json(200, {"resolved": idx.resolve((qs.get("base") or [""])[0], paths, gate)})

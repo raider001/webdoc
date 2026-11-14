@@ -142,8 +142,10 @@ def test_drawer_opens_lists_docs_and_closes_by_escape_and_scrim(page):
     # Expanding the folder fetches its children, and only then do they exist.
     # Target the nested folder by data-path: the FIRST summary is the source
     # folder "Guides", which renderTree already auto-opened, so clicking that
-    # would collapse the tree rather than expand anything.
-    page.click('#treeList details[data-path="Guides/concepts"] > summary')
+    # would collapse the tree rather than expand anything. Click the CHEVRON:
+    # the folder's label is a link to the folder's own page.
+    page.click('#treeList details[data-path="Guides/concepts"] > summary > .tree-chevron')
+    expect(page).to_have_url(re.compile(re.escape(f"#/{DEFAULT_DOC}") + r"$"))   # expanding is not navigating
     expect(links).to_have_count(len(DOC_IDS))
     for doc_id in NESTED_DOCS:
         expect(page.locator(f"#treeList a.doc-link[data-id='{doc_id}']")).to_have_count(1)
@@ -167,7 +169,7 @@ def test_tree_item_navigates(page):
     expect(page.locator("#doc-tree")).to_be_visible()
 
     target = "Guides/concepts/metadata-tags"
-    page.click('#treeList details[data-path="Guides/concepts"] > summary')  # lazy tree
+    page.click('#treeList details[data-path="Guides/concepts"] > summary > .tree-chevron')  # lazy tree
     page.click(f"#treeList a.doc-link[data-id='{target}']")
 
     # URL hash, main content and document title all update; drawer closes.
@@ -175,6 +177,65 @@ def test_tree_item_navigates(page):
     expect(page.locator("#content .doc h1")).to_contain_text("Metadata Tags")
     expect(page).to_have_title(re.compile(r"^Metadata Tags\b"))
     expect(page.locator("#doc-tree")).to_be_hidden()
+
+
+# --------------------------------------------------------------------------- #
+# folder pages  (every folder is a page at its own path)
+# --------------------------------------------------------------------------- #
+@pytest.mark.e2e
+def test_folder_label_opens_the_folders_page(page):
+    boot(page)
+    page.click("#hamburger")
+    page.click('#treeList details[data-path="Guides/concepts"] > summary > a.folder-link')
+
+    # "concepts" has no page file, so its page is generated from its contents.
+    expect(page).to_have_url(re.compile(re.escape("#/Guides/concepts") + r"$"))
+    expect(page.locator("#doc-tree")).to_be_hidden()
+    expect(page.locator("#content .folder-page h1")).to_have_text("Concepts")
+    expect(page).to_have_title(re.compile(r"^Concepts\b"))
+    for doc_id in NESTED_DOCS:
+        expect(page.locator(f"#content a.folder-entry[data-id='{doc_id}']")).to_have_count(1)
+    # Not a file: nothing to edit or delete, and no "On this page" pane.
+    expect(page.locator("#editBtn")).to_be_hidden()
+    expect(page.locator("#deleteBtn")).to_be_hidden()
+    expect(page.locator("#toc")).to_be_hidden()
+
+    # The tree marks the folder as the page being read, and opened it.
+    page.click("#hamburger")
+    folder = page.locator('#treeList details[data-path="Guides/concepts"]')
+    expect(folder.locator("> summary > a.folder-link")).to_have_attribute("aria-current", "page")
+    expect(folder).to_have_attribute("open", "")
+
+
+@pytest.mark.e2e
+def test_folder_page_entries_navigate(page):
+    open_doc(page, "Guides/concepts")
+    page.click("#content a.folder-entry[data-id='Guides/concepts/metadata-tags']")
+    expect(page).to_have_url(re.compile(re.escape("#/Guides/concepts/metadata-tags") + r"$"))
+    expect(page.locator("#content .doc h1")).to_contain_text("Metadata Tags")
+
+
+@pytest.mark.e2e
+def test_source_root_is_a_folder_page(page):
+    open_doc(page, "Guides")
+    expect(page.locator("#content .folder-page h1")).to_have_text("Guides")
+    expect(page.locator("#content a.folder-entry.is-folder[data-path='Guides/concepts']")).to_have_count(1)
+    expect(page.locator("#content a.folder-entry:not(.is-folder)")).to_have_count(len(TOP_LEVEL_DOCS))
+
+
+@pytest.mark.e2e
+def test_breadcrumb_folders_link_to_their_pages(page):
+    open_doc(page, "Guides/concepts/graph-model")
+    crumbs = page.locator("#crumbs a")
+    expect(crumbs).to_have_count(2)
+    page.click("#crumbs a[href='#/Guides/concepts']")
+    expect(page.locator("#content .folder-page h1")).to_have_text("Concepts")
+
+
+@pytest.mark.e2e
+def test_unknown_path_is_still_an_error(page):
+    open_doc(page, "Guides/no-such-thing")
+    expect(page.locator("#content .doc-error")).to_contain_text("Guides/no-such-thing")
 
 
 # --------------------------------------------------------------------------- #

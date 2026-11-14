@@ -23,8 +23,10 @@ import { auth, loadAuth, signInRequired, invalidateAccess } from './auth.js';
 import { setupAccountButton, mountSignInWall, restrictedPanel } from './auth-ui.js';
 import { announce } from './announce.js';
 import { createIndexWatcher } from './index-watch.js';
+import { fetchFolder } from './folders.js';
+import { showFolderPage } from './folder-view.js';
 
-import type { RestrictedDetail, SourceConfig } from './catalog.js';
+import type { Doc, RestrictedDetail, SourceConfig } from './catalog.js';
 import type { CoverageResults } from './coverage.js';
 import type { TestCaseEntry } from './requirements.js';
 import type { SearchResult } from './search.js';
@@ -293,38 +295,101 @@ async function route(): Promise<void> {
   const fallback = defaultId();
   if (state.site?.sources && id.includes('/') && !state.site.sources.some(s => s.name === id.split('/')[0])) {
     state.current = null;
+    state.folder = null;
     return showError('Unresolved document in this project: ' + id);
   }
-  const doc = getDoc(id) || (fallback ? getDoc(fallback) : null);
-  if (!doc) return showError('No documents found.');
+  // A source's own name is its root FOLDER (#/Docs). It has no file of its own,
+  // so there is no document stub to try - only the folder.
+  const sourceRoot = !!state.site?.sources?.some(s => s.name === id);
+  const doc = sourceRoot ? null : (getDoc(id) || (fallback ? getDoc(fallback) : null));
+  if (!doc && !sourceRoot) return showError('No documents found.');
   try {
     // Navigation also checks the index; disk edits need no full-page reload.
     // Raw-document ETags catch an edit even before the ten-second rescan.
     try { await indexWatcher.check(); } catch (e) { /* document fetch can still succeed */ }
     if (sequence !== routeSequence) return;
-    await loadDoc(doc, true);
+    if (!doc) {
+      if (await routeFolder(id, query, sequence)) return;
+      throw new Error('Document not found: ' + id);
+    }
+    try {
+      await loadDoc(doc, true);
+    } catch (e) {
+      // Not a document - but every folder is a page too (#/Docs/features).
+      // A refusal is an answer about a real document, so it is never retried as
+      // a folder, and neither is the default document standing in for an id.
+      if (!isRestrictedError(e) && doc.id === id && await routeFolder(id, query, sequence)) return;
+      throw e;
+    }
     if (sequence !== routeSequence) return;
-    state.current = doc;
-    document.dispatchEvent(new CustomEvent('webdoc:current', { detail: doc.id }));
-    renderDoc(doc);
-    const { req, test } = routeParams(query);      // deep-link to a requirement or test
-    if (req) requestAnimationFrame(() => revealRequirement(req));
-    if (test) requestAnimationFrame(() => revealTest(test));
+    showDocument(doc, null, query);
   } catch (e) {
     if (sequence !== routeSequence) return;
-    doc._loaded = false;
+    if (doc) doc._loaded = false;
     // A restricted page is not an error - it is a page with a different body.
     // loadDoc attaches the server's refusal so the reader is told which groups
     // would open it rather than being shown "could not load".
-    if (isRestrictedError(e)) return showRestricted(doc.id, e.detail || {});
+    if (doc && isRestrictedError(e)) return showRestricted(doc.id, e.detail || {});
     state.current = null;
+    state.folder = null;
     mustEl('editBtn').hidden = true;
     mustEl('deleteBtn').hidden = true;
     // Clear the failed render's pending chrome too, so resolving tree promises
     // cannot keep retrying it in the shell's shared Svelte flush.
-    if (app.setDocChrome) app.setDocChrome(doc.id, [], [], []);
+    if (app.setDocChrome) app.setDocChrome(doc ? doc.id : id, [], [], []);
     showError('Could not load "' + id + '": ' + errorMessage(e));
   }
+}
+
+/**
+ * Make a loaded document the page on screen. `folder` is the folder path it is
+ * being shown AS (its README.md / index.md, at #/Docs/kit), or null for a
+ * document at its own address.
+ */
+function showDocument(doc: Doc, folder: string | null, query: string): void {
+  state.current = doc;
+  state.folder = folder;
+  document.dispatchEvent(new CustomEvent('webdoc:current', { detail: doc.id }));
+  renderDoc(doc);
+  const { req, test } = routeParams(query);      // deep-link to a requirement or test
+  if (req) requestAnimationFrame(() => revealRequirement(req));
+  if (test) requestAnimationFrame(() => revealTest(test));
+}
+
+/**
+ * Show the folder at `path` as a page, if there is such a folder. Its page is a
+ * document inside it (README.md / index.md) when it has one - shown at the
+ * folder's own address - and otherwise a page generated from its contents. (A
+ * sibling page file, how-to.md beside how-to/, has the folder's path as its id
+ * and was already rendered as an ordinary document before this was reached.)
+ *
+ * Resolves false only when there is no such folder for this reader, so the
+ * caller reports the original "not found". A superseded route resolves true: it
+ * has nothing left to do, and must not report an error over the newer page.
+ */
+async function routeFolder(path: string, query: string, sequence: number): Promise<boolean> {
+  let info = await fetchFolder(path).catch(() => null);
+  if (sequence !== routeSequence) return true;
+  if (!info) return false;
+  if (info.page && info.page.id !== path) {
+    const page = getDoc(info.page.id);
+    if (page) {
+      try {
+        await loadDoc(page, true);
+        if (sequence !== routeSequence) return true;
+        showDocument(page, path, query);
+        return true;
+      } catch (e) {
+        if (sequence !== routeSequence) return true;
+        page._loaded = false;
+        if (isRestrictedError(e)) { showRestricted(page.id, e.detail || {}); return true; }
+        // The page file went away between the two requests; list the folder instead.
+        info = { ...info, page: null };
+      }
+    }
+  }
+  await showFolderPage(info, () => sequence === routeSequence);
+  return true;
 }
 /**
  * Render the "this page is restricted" screen in place of the document, and
@@ -335,6 +400,7 @@ function showRestricted(docId: string, detail: RestrictedDetail): void {
   // armed for the page the reader was on BEFORE hitting the restricted one - the
   // buttons acted on a document that is no longer what they are looking at.
   state.current = null;
+  state.folder = null;
   mustEl('editBtn').hidden = true;
   mustEl('deleteBtn').hidden = true;
   const content = mustEl('content');
@@ -496,7 +562,23 @@ async function onExternalChange(): Promise<void> {
     try {
       await refreshReadingDocument(current, () => current === state.current && sequence === routeSequence);
     }
-    catch (e) { if (current === state.current && sequence === routeSequence) showError('This document is no longer available.'); }
+    catch (e) {
+      if (current !== state.current || sequence !== routeSequence) { /* moved on */ }
+      // A folder's page file that was removed leaves the folder behind, and the
+      // folder is still a page: re-route so the reader lands on its listing.
+      else if (await fetchFolder(state.folder || current.id).catch(() => null)) void route();
+      else showError('This document is no longer available.');
+    }
+  } else if (!current && state.folder && sequence === routeSequence) {
+    // A generated folder page lists the folder's contents, which is exactly what
+    // just changed. Redraw it in place; if a page file has appeared for the
+    // folder, or the folder is gone, route again so the reader sees that instead.
+    const folder = state.folder;
+    const info = await fetchFolder(folder).catch(() => undefined);
+    const still = () => sequence === routeSequence && !state.current && state.folder === folder;
+    if (info === undefined || !still()) { /* unreachable, or the reader moved on: leave it */ }
+    else if (info && !info.page) await showFolderPage(info, still, { preserveScroll: true });
+    else void route();
   }
   await requestMapRebuild();
 }

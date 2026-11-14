@@ -21,6 +21,10 @@ folders like `requirements/functional` become nested branches. Selecting a leaf
 loads that document into the content pane. The tree is the primary way to browse
 the set from end to end.
 
+Every folder is a page too. A folder's row has two targets: the chevron opens and
+closes it, and its name opens the folder's own page (see
+[folder pages](#folder-pages) below).
+
 ### The contents — moving within a document
 
 Within a document, the contents pane lists every heading in order. This list is
@@ -50,12 +54,39 @@ Two consequences worth knowing when authoring:
 - Renaming or reordering sections needs no renumbering work — save the file and
   the numbers recompute.
 
+## Folder pages
+
+A folder is addressed like a document, by its path: `#/Docs/features` is the
+page for the `features` folder, and `#/Docs` is the page for the whole source.
+What that page shows is decided by the files in and beside the folder, first
+match wins:
+
+1. A document beside the folder with the folder's own name — `features.md` next
+   to `features/`. Its id is the folder path itself.
+2. An `index.md` inside the folder.
+3. A `README.md` inside the folder.
+4. Otherwise WebDocs generates the page: the folder's sub-folders and documents
+   as cards, each with its title, its description, and for a sub-folder how many
+   pages it holds.
+
+A document that is a folder's page is not listed a second time inside the folder
+in the tree; the folder's row is how you reach it, and the row is labelled with
+that document's title. An `index.md` or `README.md` without a `title` of its own
+is labelled after the folder instead. A generated page offers people who can
+edit a **Write a page for this folder** button, which opens the editor on the
+sibling file from rule 1 (`index.md` for a source root, which has no sibling).
+
+Folder pages follow the same [access rules](Docs/features/access-control) as
+everything else: a folder whose every document is hidden from you does not
+exist for you, and a locked page in the listing shows its title but not its
+description.
+
 ## Breadcrumbs and location
 
 A document's position in the tree is shown as a breadcrumb trail, so a deeply
 nested page such as `Docs/requirements/functional/navigation` still tells you
 where you are at a glance. The breadcrumb mirrors the folder path that produced
-the document id.
+the document id, and every folder in it is a link to that folder's page.
 
 ## Deep links
 

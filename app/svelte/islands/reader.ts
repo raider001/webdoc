@@ -16,8 +16,10 @@
 // getter inside its own tracking context, so a write to shellState re-renders
 // it. Passing shellState.toc by value would freeze the first document's TOC on
 // screen for the rest of the session.
-import { mount } from 'svelte';
+import { mount, unmount } from 'svelte';
 import Toc from '../Toc.svelte';
+import FolderPage from '../FolderPage.svelte';
+import type { FolderInfo } from '/js/folders.js';
 import Crumbs from '../Crumbs.svelte';
 import FootGroup from '../FootGroup.svelte';
 import { shellState } from '../stores/shell.svelte.js';
@@ -65,4 +67,23 @@ export function mountFooter(prevTarget: Element, nextTarget: Element): void {
     target: nextTarget,
     props: { caption: NEXT_CAPTION, get ids() { return shellState.next; } },
   });
+}
+
+/**
+ * The generated page for a folder with no page file of its own. Unlike the
+ * satellites above this one IS per-navigation - it replaces the article - so it
+ * returns a teardown handle, and the caller registers it with the article's
+ * mount registry so the next navigation destroys it.
+ * @param target - a .wd-mounted host inside #content
+ */
+export function mountFolderPage(
+  target: Element,
+  info: FolderInfo,
+  opts: { canWrite?: boolean; onCreatePage?: () => void } = {},
+): { destroy: () => void } {
+  const instance = mount(FolderPage, {
+    target: target,
+    props: { info: info, canWrite: !!opts.canWrite, onCreatePage: opts.onCreatePage },
+  });
+  return { destroy: () => unmount(instance) };
 }

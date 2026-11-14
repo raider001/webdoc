@@ -30,6 +30,22 @@ system — links, `assumes`/`next` edges, deep-links and requirement traces all
 address documents by id. See [Configuration](Docs/reference/config) for how a
 source name maps to a folder.
 
+### Giving a folder a page
+
+Every folder is a page at its own path (`#/Docs/reference`). To write that page
+yourself, add one of these — the first that exists wins:
+
+| File | Id | Notes |
+| --- | --- | --- |
+| `reference.md` beside `reference/` | `Docs/reference` | The id is the folder path itself. |
+| `reference/index.md` | `Docs/reference/index` | Moves with the folder. |
+| `reference/README.md` | `Docs/reference/README` | Also what GitHub shows for the folder. |
+
+A source root has no sibling, so its page is its `index.md` or `README.md`.
+Without any of them WebDocs generates a page listing the folder's contents, so a
+folder never needs a placeholder file just to be reachable. See
+[Navigation](Docs/features/navigation#folder-pages) for how folder pages appear.
+
 ## The metadata header
 
 Every document begins with a metadata block: an HTML comment whose body is a
