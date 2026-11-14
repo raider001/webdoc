@@ -75,6 +75,11 @@ def test_index_inline_script_is_hashed_in_the_policy(base_url):
     inline = INLINE_SCRIPT_RE.findall(body)
     assert inline, "app/index.html no longer has an inline script; update this test"
     for block in inline:
+        # Hash what the BROWSER hashes: the script element's text after the HTML
+        # parser's newline normalisation (CRLF and lone CR become LF). Hashing
+        # the raw response instead fails on a Windows checkout, where git writes
+        # index.html with CRLF, although the browser runs the script fine there.
+        block = block.replace("\r\n", "\n").replace("\r", "\n")
         digest = hashlib.sha256(block.encode("utf-8")).digest()
         expected = "'sha256-%s'" % base64.b64encode(digest).decode("ascii")
         assert expected in csp, (

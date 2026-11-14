@@ -113,7 +113,16 @@ function numberLiveHeadings(root: HTMLElement): void {
  */
 function setDocChrome(doc: Doc, toc: TocEntry[]): void {
   if (!app.setDocChrome) return;   // island not mounted (a test harness, or a failed boot)
-  app.setDocChrome(doc.id, toc, doc.assumes || [], doc.next || []);
+  app.setDocChrome(shownAs(doc), toc, doc.assumes || [], doc.next || []);
+}
+
+/**
+ * The address this document is being read at. Usually its own id; but a folder's
+ * page file inside the folder (Docs/kit/README.md) is shown at the FOLDER's
+ * address (#/Docs/kit), and the breadcrumb and tree should say so.
+ */
+function shownAs(doc: Doc): string {
+  return state.folder && state.current === doc ? state.folder : doc.id;
 }
 
 /**
@@ -210,7 +219,7 @@ export function renderDoc(doc: Doc, options: { preserveReading?: boolean } = {})
   // "On this page" is meaningless for a document with no headings.
   const tocPane = el('toc');
   if (tocPane) tocPane.hidden = !toc.length;
-  if (app.setTreeActive) app.setTreeActive(doc.id);   // highlight + reveal in the drawer tree
+  if (app.setTreeActive) app.setTreeActive(shownAs(doc));   // highlight + reveal in the drawer tree
   // Offer edit/delete only where this account could actually use them (authoring.ts
   // registers this; the server still re-checks every write).
   if (app.updateDocActions) app.updateDocActions(doc.id);

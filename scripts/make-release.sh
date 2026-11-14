@@ -27,8 +27,10 @@ done
 rm -rf "$DEST"
 mkdir -p "$DEST"
 
-# The server and its modules: Python standard library only.
-cp "$HERE"/serve.py "$HERE"/webdoc_index.py "$HERE"/webdoc_auth.py "$HERE"/webdoc_access.py "$DEST"/
+# The server and its modules: Python standard library only. Every webdoc_*.py,
+# not a list: a hand-kept list went stale when webdoc_runs, webdoc_result_store
+# and webdoc_tables were added, and serve.py then failed on import.
+cp "$HERE"/serve.py "$HERE"/webdoc_*.py "$DEST"/
 cp "$HERE"/config.json "$HERE"/LICENSE "$DEST"/ 2>/dev/null || true
 
 # The browser app: markup, styles, icons, assets, and the COMPILED output.
@@ -38,10 +40,14 @@ cp -r "$HERE"/app/css "$HERE"/app/icons "$HERE"/app/js "$HERE"/app/build "$DEST/
 [ -d "$HERE/app/assets" ] && cp -r "$HERE"/app/assets "$DEST/app/"
 [ -d "$HERE/app/data" ] && cp -r "$HERE"/app/data "$DEST/app/"
 
-# The renderer-plugin facade, but never a vendored library: mermaid.min.js is
-# bring-your-own and is not ours to redistribute.
+# The renderer-plugin facades (compiled, one per plugin config.json may name),
+# but never a vendored library: mermaid.min.js is bring-your-own and is not
+# ours to redistribute.
 mkdir -p "$DEST/app/thirdpartyrenderer"
-cp "$HERE"/app/thirdpartyrenderer/mermaid.js "$DEST/app/thirdpartyrenderer/" 2>/dev/null || true
+for facade in "$HERE"/app/thirdpartyrenderer/*.js; do
+  case "$facade" in *.min.js) continue ;; esac
+  if [ -f "$facade" ]; then cp "$facade" "$DEST/app/thirdpartyrenderer/"; fi
+done
 
 # The documentation set, which is also the demo corpus.
 cp -r "$HERE"/docs "$DEST/"

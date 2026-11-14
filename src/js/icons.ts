@@ -49,3 +49,7 @@ export const mapIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="non
 export const lockIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7A4 4 0 0 1 16 7V10"/><circle cx="12" cy="15.5" r="1.2" fill="currentColor" stroke="none"/></svg>`.firstElementChild;
 
 export const userIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21C4 17.13 7.58 14 12 14C16.42 14 20 17.13 20 21"/></svg>`.firstElementChild;
+
+export const folderIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7A2 2 0 0 1 5 5H9L11 7H19A2 2 0 0 1 21 9V18A2 2 0 0 1 19 20H5A2 2 0 0 1 3 18Z"/></svg>`.firstElementChild;
+
+export const pageIcon = () => html`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6A2 2 0 0 0 4 5V19A2 2 0 0 0 6 21H18A2 2 0 0 0 20 19V9Z"/><path d="M14 3V9H20"/></svg>`.firstElementChild;

@@ -288,6 +288,11 @@ def extract_blocks(body, component):
     return reqs, tests
 
 
+# A folder's own page, after a sibling `<folder>.md`: the first of these files found
+# INSIDE the folder (lower-cased; see Index._level). Order is precedence.
+FOLDER_PAGE_NAMES = ('index', 'readme')
+
+
 def fallback_title(doc_id):
     base = doc_id.rsplit('/', 1)[-1]
     base = re.sub(r'[-_]+', ' ', base)
@@ -1005,31 +1010,136 @@ class Index:
             out.append({'id': r['id'], 'title': r['title'], 'snippet': r['snip']})
         return out[offset:offset + limit] if filtering else out
 
-    def tree(self, path, gate=None):
-        """Children of one folder path ('' or 'Source' or 'Source/sub'): immediate
-        sub-folders + docs. Lets the client render the tree lazily, one level at a time.
-        Hidden documents are omitted entirely, and a folder that contains nothing but
-        hidden documents does not appear either."""
+    def _level(self, path, gate=None):
+        """One folder level, with every folder's own PAGE worked out. Shared by
+        tree() and folder() so the drawer and the folder page can never disagree
+        about which document stands for a folder.
+
+        A folder's page is the first of these that exists and that this reader can
+        see: a sibling document with the folder's own path (`how-to.md` beside
+        `how-to/`, so the page id IS the folder path), then `index.md` inside the
+        folder, then `README.md` inside it (both matched case-insensitively). That
+        document stops being listed as an ordinary child: the folder is the way to
+        reach it.
+
+        Returns None when the folder holds no document this reader may see - a
+        folder of hidden pages does not exist for them, exactly as in the tree.
+        """
         c = self._conn()
         filtering = bool(gate) and not gate.unrestricted
-        prefix = (path.rstrip('/') + '/') if path else ''
-        folders, docs = set(), []
-        for r in c.execute('SELECT id, title FROM doc WHERE id LIKE ? ORDER BY id_lc', (prefix + '%',)):
+        path = (path or '').strip('/')
+        prefix = (path + '/') if path else ''
+        folders, docs = {}, []
+        # LIKE treats _ and % as wildcards; the startswith() test below is the real
+        # filter, the LIKE only narrows the scan.
+        for r in c.execute('SELECT id, title, description FROM doc WHERE id LIKE ? ORDER BY id_lc', (prefix + '%',)):
+            if not r['id'].startswith(prefix):
+                continue
             locked = False
             if filtering:
                 vis = gate.visibility(r['id'])
                 if vis == webdoc_access.HIDDEN:
                     continue
                 locked = vis == webdoc_access.LOCKED
+            entry = {'id': r['id'], 'title': r['title'],
+                     # A locked page shows its title and nothing else, as on the map.
+                     'description': '' if locked else (r['description'] or '')}
+            if locked:
+                entry['locked'] = True
             rest = r['id'][len(prefix):]
             if '/' in rest:
-                folders.add(rest.split('/', 1)[0])
+                head, tail = rest.split('/', 1)
+                f = folders.setdefault(head, {'name': head, 'path': prefix + head, 'docs': 0, 'inner': {}})
+                f['docs'] += 1
+                low = tail.lower()
+                if low in FOLDER_PAGE_NAMES and low not in f['inner']:
+                    f['inner'][low] = entry
             else:
-                entry = {'id': r['id'], 'title': r['title']}
-                if locked:
-                    entry['locked'] = True
                 docs.append(entry)
-        return {'folders': sorted(folders, key=str.lower), 'docs': docs}
+        if path and not folders and not docs:
+            return None
+        def named(page, folder_name):
+            # An index.md / README.md with no `title` of its own would be called
+            # "Index" or "README" - its file name - which says nothing about the
+            # folder. Name it after the folder instead.
+            if page is not None and page['title'] == fallback_title(page['id']):
+                page = dict(page, title=fallback_title(folder_name))
+            return page
+        by_name = {d['id'][len(prefix):]: d for d in docs}
+        claimed = set()
+        out_folders = []
+        for name in sorted(folders, key=str.lower):
+            f = folders[name]
+            page = by_name.get(name) or next((f['inner'][n] for n in FOLDER_PAGE_NAMES if n in f['inner']), None)
+            if page is not None and page['id'] == f['path']:
+                claimed.add(page['id'])       # the sibling file now lives in the folder's row
+            out_folders.append({'name': name, 'path': f['path'], 'docs': f['docs'], 'page': named(page, name)})
+        # This folder's OWN page, when it is an index/README inside it - unless a
+        # sibling file outranks it, in which case that inner file is just a page.
+        own = None
+        if path:
+            sib = c.execute('SELECT id, title, description FROM doc WHERE id=?', (path,)).fetchone()
+            sib_vis = sib is not None and not (filtering and gate.visibility(sib['id']) == webdoc_access.HIDDEN)
+            if sib_vis:
+                locked = filtering and gate.visibility(sib['id']) == webdoc_access.LOCKED
+                own = {'id': sib['id'], 'title': sib['title'], 'description': '' if locked else (sib['description'] or '')}
+                if locked:
+                    own['locked'] = True
+            else:
+                lows = {d['id'][len(prefix):].lower(): d for d in docs}
+                own = next((lows[n] for n in FOLDER_PAGE_NAMES if n in lows), None)
+                if own is not None:
+                    claimed.add(own['id'])
+                    own = named(own, path.rsplit('/', 1)[-1])
+        return {'path': path, 'page': own, 'folders': out_folders,
+                'docs': [d for d in docs if d['id'] not in claimed]}
+
+    def tree(self, path, gate=None):
+        """Children of one folder path ('' or 'Source' or 'Source/sub'): immediate
+        sub-folders + docs. Lets the client render the tree lazily, one level at a time.
+        Hidden documents are omitted entirely, and a folder that contains nothing but
+        hidden documents does not appear either.
+
+        `pages` maps a child folder's name to the document that is its page (see
+        _level); that document is not repeated in `docs`."""
+        level = self._level(path, gate) or {'folders': [], 'docs': []}
+        pages = {}
+        for f in level['folders']:
+            if f['page']:
+                p = {'id': f['page']['id'], 'title': f['page']['title']}
+                if f['page'].get('locked'):
+                    p['locked'] = True
+                pages[f['name']] = p
+        docs = [{k: v for k, v in d.items() if k != 'description'} for d in level['docs']]
+        return {'folders': [f['name'] for f in level['folders']], 'docs': docs, 'pages': pages}
+
+    def folder(self, path, gate=None):
+        """Everything a folder's page needs: its own page document (or None, for a
+        folder WebDocs generates a page for), its sub-folders with their page and
+        document count, and its documents with their descriptions. None when the
+        folder does not exist for this reader - the caller answers 404, the same as
+        for a missing document, so a folder of hidden pages cannot be detected."""
+        path = (path or '').strip('/')
+        if not path:
+            return None
+        level = self._level(path, gate)
+        if level is None:
+            return None
+        name = path.rsplit('/', 1)[-1]
+        own = level['page']
+        return {
+            'path': path,
+            'name': name,
+            # A locked page's title is public (it is on the map), so it still names the folder.
+            'title': own['title'] if own else fallback_title(name),
+            'page': own,
+            'folders': [{'name': f['name'], 'path': f['path'], 'docs': f['docs'],
+                         'title': f['page']['title'] if f['page'] else fallback_title(f['name']),
+                         'description': f['page']['description'] if f['page'] else '',
+                         'page': f['page']['id'] if f['page'] else None}
+                        for f in level['folders']],
+            'docs': level['docs'],
+        }
 
     def resolve(self, base, paths, gate=None):
         """Resolve in-body link targets to doc ids against the FULL index (the client

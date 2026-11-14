@@ -515,6 +515,22 @@ class TestLockedAndHidden:
         entry = next(d for d in docs if d["id"] == "Lib/chapter/intro")
         assert entry.get("locked") is True
 
+    def test_folder_page_lists_locked_pages_by_title_only(self, accounts):
+        folder = accounts["plain"].get("/api/index/folder?path=Lib/chapter").json()
+        intro = next(d for d in folder["docs"] if d["id"] == "Lib/chapter/intro")
+        assert intro["locked"] is True and intro["description"] == ""
+
+    def test_folder_page_omits_hidden_pages(self, accounts):
+        folder = accounts["plain"].get("/api/index/folder?path=Lib").json()
+        assert not any(d["id"] == "Lib/secret" for d in folder["docs"])
+        assert any(d["id"] == "Lib/public" for d in folder["docs"])
+
+    def test_missing_folder_answers_like_a_missing_document(self, accounts):
+        """No oracle: a folder that does not exist answers exactly as the rest do."""
+        missing = accounts["plain"].get("/api/index/folder?path=Lib/no-such-folder")
+        assert missing.status == 404
+        assert missing.json() == accounts["plain"].get("/docs/Lib/no-such-file.md").json()
+
     def test_hidden_page_is_absent_from_the_map(self, accounts):
         ids = [n[0] for n in accounts["plain"].get("/api/index/graph").json()["nodes"]]
         assert "Lib/secret" not in ids

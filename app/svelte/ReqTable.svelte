@@ -141,6 +141,7 @@
   comma between two nowrap ids is not a line-break opportunity: a row with many
   traces became one unbreakable line and pushed the table out of view.
 -->
+<!-- eslint-disable-next-line svelte/no-useless-mustaches -- the {', '} expression is the fix described above -->
 {#snippet trace(refs: TraceRef[])}{#if refs.length}{#each refs as ref, i (i)}{#if i}{', '}{/if}{#if ref.id}<a class={ref.cls} href={ref.href}>{ref.id}</a>{:else}<span class="req-missing" title="Not found: {ref.raw}"><span class="wd-mounted" use:icon={warningIcon}></span> {ref.raw}</span>{/if}{/each}{:else}<span class="req-none">—</span>{/if}{/snippet}
 
 <!--

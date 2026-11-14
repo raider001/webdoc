@@ -22,6 +22,7 @@ import type { CoverageResults } from './coverage.js';
 import type { TestCaseEntry } from './requirements.js';
 import type { SourceConfig } from './catalog.js';
 import type { GraphModel } from './graph-model.js';
+import type { FolderInfo } from './folders.js';
 
 export type IslandProps = Record<string, unknown>;
 
@@ -52,6 +53,8 @@ export interface IslandModule {
   setCrumbs: (docId: string) => void;
   setToc: (toc: TocEntry[]) => void;
   setFootLinks: (assumes: string[], next: string[]) => void;
+  /** a folder's generated page (one with no page file), into a `.wd-mounted` host in #content */
+  mountFolderPage: (target: Element, info: FolderInfo, opts?: { canWrite?: boolean, onCreatePage?: () => void }) => { destroy: () => void };
   /** the full-screen wall; removes itself before reporting success */
   mountSignInWall: (target: Element, opts: { onSignedIn: () => void }) => void;
   /** the header button's contents only */

@@ -16,4 +16,5 @@ reader navigate the whole document set) and composes to `R_WD_NAV_{no}`.
 | 1 | Present the document set as a folder tree. | sys_3 |
 | 2 | Show the current document's headings as a contents list. | sys_3 |
 | 3 | Deep-link to any document and requirement. | sys_3 |
+| 4 | Present every folder as a page: its page file when it has one, otherwise a listing of its contents. | sys_3 |
 <!--meta end {"requirement-group":"nav"}-->

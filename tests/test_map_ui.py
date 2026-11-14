@@ -324,7 +324,10 @@ def test_empty_canvas_is_not_a_node(page):
 @pytest.mark.e2e
 def test_edge_legend_lists_its_categories_and_toggles_one(page):
     open_map(page)
-    items = page.locator("#graphOverlay .graph-legend-item")
+    # Category toggles carry data-kind. The legend bar also holds action buttons
+    # styled the same way (Re-layout, compact layout, selected tree), which are
+    # not edge categories, so they are not counted here.
+    items = page.locator("#graphOverlay .graph-legend-item[data-kind]")
     kinds = items.evaluate_all("els => els.map(e => e.getAttribute('data-kind'))")
     assert set(kinds) == EXPECTED_LEGEND_KINDS, f"legend categories changed: {kinds}"
     assert len(kinds) == len(set(kinds)), f"duplicate legend entries: {kinds}"

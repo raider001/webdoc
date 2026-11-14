@@ -13,8 +13,15 @@
   const store = $derived.by(() => { void version; const current = sourceRuns(source); return { ...current, cases: { ...current.cases }, runs: current.runs.map(r => ({ ...r, cases: { ...r.cases } })) }; });
   const info = $derived(caseId ? store.cases[caseId] : undefined);
   const selected = $derived(caseId ? [caseId] : (scope === 'source' ? Object.keys(store.cases) : ids).filter(id => store.cases[id]?.runnable));
-  const active = $derived(store.runs.findLast(r => r.ids.some(id => selected.includes(id)) && r.state !== 'finished'));
-  const latest = $derived(store.runs.findLast(r => r.ids.some(id => selected.includes(id))));
+  // Newest matching run. Not Array.prototype.findLast: that is ES2023, and the
+  // components are type-checked against ES2022.
+  const newest = <T,>(items: T[], match: (item: T) => boolean): T | undefined => {
+    for (let i = items.length - 1; i >= 0; i--) if (match(items[i])) return items[i];
+    return undefined;
+  };
+  const active = $derived(newest(store.runs, r => r.ids.some(id => selected.includes(id)) && r.state !== 'finished'));
+  const latest = $derived(newest(store.runs, r => r.ids.some(id => selected.includes(id))));
+  const output = $derived([info?.failure || '', latest?.error || '', latest?.output || info?.outputTail || ''].join('\n'));
   const automated = $derived(!!info?.automated);
   function manual(): void { document.dispatchEvent(new window.CustomEvent('webdoc:run-test', { detail: { testId: caseId } })); }
 </script>
@@ -30,7 +37,7 @@
     {#if info?.startedBy}<span>Started by: {info.startedBy}</span>{/if}
     <button type="button" class="tc-run" disabled={!info?.runnable || !!active} onclick={() => startRun(source, selected)}>{active?.state || 'Run now'}</button>
     {#if !info?.runnable}<span>Page running is disabled</span>{/if}
-    {#if info?.failure || info?.outputTail || latest?.output || latest?.error}<details><summary>Failure and output</summary><pre>{info?.failure || ''}{'\n'}{latest?.error || ''}{'\n'}{latest?.output || info?.outputTail || ''}</pre></details>{/if}
+    {#if info?.failure || info?.outputTail || latest?.output || latest?.error}<details><summary>Failure and output</summary><pre>{output}</pre></details>{/if}
   {:else if !store.error}
     <span class="tc-manual">Manual</span><button type="button" class="tc-run" onclick={manual}>Record manual result</button>
   {/if}

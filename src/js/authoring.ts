@@ -27,6 +27,7 @@ import { mapOpen, requestMapRebuild } from './overlays.js';
 import { loadDoc } from './catalog.js';
 import { buildRequirementIndex, requirementList, testList, resolveRequirementRef } from './requirements.js';
 import { apiFetch, describeFailure, auth, docAccess, invalidateAccess } from './auth.js';
+import { newFolderPageId } from './folders.js';
 
 import type { Doc, SourceConfig } from './catalog.js';
 import type { Block } from './editor.js';
@@ -128,11 +129,22 @@ async function openNewDocFlow(): Promise<void> {
   });
 }
 
-async function startNewDoc(id: string) {
-  const title = titleFromId(id);
+async function startNewDoc(id: string, title = titleFromId(id)) {
   await enterEdit(id, { title, description: '', assumes: [], next: [] },
     [{ type: 'heading', level: 1, html: title }, { type: 'paragraph', html: '' }], true);
 }
+
+/**
+ * "Write a page for this folder", from a folder's generated page: open the
+ * editor on a new document that will BE that folder's page once saved - the
+ * sibling `<folder>.md`, or `index.md` inside a source root (see
+ * folders.newFolderPageId). Titled after the folder, not after the file name,
+ * so a source root's page is not called "Index".
+ */
+async function createFolderPage(folderPath: string): Promise<void> {
+  await startNewDoc(newFolderPageId(folderPath), titleFromId(folderPath));
+}
+app.createFolderPage = createFolderPage;
 
 // Create a minimal document on disk WITHOUT opening the editor (used from the map:
 // the file is written + indexed and its node appears; the user stays on the map).

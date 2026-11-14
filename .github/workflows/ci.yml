@@ -23,6 +23,12 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # The components import app modules as /js/*.js, which resolve to the
+      # COMPILED app/js/ (jsconfig paths, and the vitest alias). A fresh clone has
+      # no app/js/, so compile it before type-checking or testing anything.
+      - name: Compile app/js
+        run: npm run build:js
+
       # tsc over src/** at strict, then svelte-check over the components.
       - name: Type-check
         run: npm run check
@@ -91,13 +97,19 @@ jobs:
       - name: Assemble the runnable tree
         run: bash scripts/make-release.sh /tmp/webdoc
 
-      # ...then prove it needs nothing but Python. node and npm are removed from
-      # PATH and node_modules is left behind, so anything reaching for a
-      # toolchain fails here rather than in a user's hands.
+      # ...then prove it needs nothing but Python. Every node/npm binary on the
+      # runner is hidden and node_modules is left behind, so anything reaching
+      # for a toolchain fails here rather than in a user's hands. Filtering PATH
+      # is not enough: the runner image ships a system node in /usr/local/bin
+      # beside the one setup-node adds, and that directory also holds tools the
+      # job needs.
       - name: Start it with no Node available
         run: |
           cd /tmp/webdoc
-          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v -E 'node|npm' | paste -sd:)"
+          for tool in node nodejs npm npx corepack; do
+            for found in $(type -ap "$tool"); do if [ -e "$found" ]; then sudo mv "$found" "$found.hidden-by-sys9"; fi; done
+          done
+          hash -r
           ! command -v node || { echo "::error::node is still on PATH; this job proves nothing"; exit 1; }
           python3 serve.py --port 8123 &
           for i in $(seq 1 60); do

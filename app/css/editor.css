@@ -13,6 +13,9 @@
 .doc-edit-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
 .doc-edit-btn:active { transform: translateY(0); box-shadow: none; }
 body.is-editing .doc-edit-btn { display: none; }
+/* The class's inline-flex would otherwise beat the hidden attribute, leaving Edit
+   and Delete on screen for pages that cannot be edited (restricted, generated). */
+.doc-edit-btn[hidden] { display: none; }
 
 /* Floating "delete this document" button, stacked just below the edit pencil. */
 .doc-delete-btn { top: 56px; }

@@ -22,3 +22,6 @@ requirements it **Verifies**, and every row is one step — an **action** and it
 
 <!--meta start {"test":"nav-deeplink","name":"Deep-link resolves","verifies":["nav_3"],"steps":[{"action":"- Do step 1","expected":"The target document loads"},{"action":"Observe the requirement row","expected":"It scrolls into view and flashes"}]}-->
 <!--meta end {"test":"nav-deeplink"}-->
+
+<!--meta start {"test":"nav-folder-page","name":"Folders are pages","verifies":["nav_4"],"steps":[{"action":"Open the tree and click the name of a folder with no page file","expected":"A page listing the folder's sub-folders and documents opens at #/<folder path>"},{"action":"Click the name of a folder that has a README.md, index.md or same-named sibling file","expected":"That document opens, and it is not listed again inside the folder"},{"action":"Click a folder in the breadcrumb trail","expected":"That folder's page opens"}]}-->
+<!--meta end {"test":"nav-folder-page"}-->
