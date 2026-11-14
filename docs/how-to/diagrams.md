@@ -128,7 +128,8 @@ When reading, the diagram sits in the same pan/zoom frame as other diagrams.
   (`#checkout`), or to a web address. Linked elements show a link mark;
   clicking one follows it.
 - An element can carry a **checkbox**, saved as `"done": true` or `false`,
-  for marking stages of a plan complete.
+  for marking stages of a plan complete. Readers who may edit the page can
+  tick it right there; each tick is saved into the page.
 - **Text** shows the diagram in words. The same description is always in the
   page for screen readers and for AI tools that read pages, and every shape in
   the drawing is tagged with its element id and type.

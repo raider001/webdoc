@@ -21,8 +21,9 @@
 //      ```
 //      <!-- meta end {"widget":"software-design"} -->
 //    Readers who may edit the page get an Edit button that opens the full editor
-//    over the page and saves straight back into the block. In the page editor
-//    the widget's settings open the same editor.
+//    over the page and saves straight back into the block, and can tick the
+//    diagram's checkboxes in place. In the page editor the widget's settings
+//    open the same editor.
 //
 // The diagram format is the library's FORMAT.md: JSON that people and AI tools
 // can read and write, with the meaning (elements, relations) apart from layout.
@@ -33,6 +34,7 @@ import { registerWidget } from '../js/widgets.js';
 import { app } from '../js/app-shell.js';
 import { registerMounted, resolveDocPaths } from '../js/reader.js';
 import { elem } from '../js/dom.js';
+import { announce } from '../js/announce.js';
 import type { WidgetContext, WidgetEditorContext } from '../js/widgets.js';
 
 /** The slice of the library's API this facade uses (see its EMBEDDING.md). */
@@ -92,10 +94,13 @@ const STYLE = `
   --sd-accent-text: var(--accent-contrast); --sd-accent-soft: var(--accent-soft);
   --sd-bar: var(--surface); --sd-bar-text: var(--text); --sd-bar-input: var(--bg);
   --sd-backdrop: var(--scrim); --sd-warning-soft: var(--warn-bg);
+  --sd-selection: var(--accent); --sd-selection-strong: var(--accent-hover); --sd-selection-soft: var(--accent-soft);
 }
 .wd-software-design { margin: 1em 0; }
 .wd-software-design > .wd-sd-title { font-weight: 600; margin: 0 0 .4em; }
 .wd-software-design > .wd-sd-empty { color: var(--muted); }
+.wd-software-design > .wd-sd-problem { margin: .4em 0 0; color: var(--warn-text); }
+.wd-software-design > .wd-sd-problem:empty { display: none; }
 .wd-sd-overlay { position: fixed; inset: 0; z-index: 1000; background: var(--scrim); display: flex; padding: 2vh 2vw; }
 .wd-sd-overlay > .wd-sd-frame { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; }
@@ -271,8 +276,19 @@ registerWidget({
       return host;
     }
     const view = elem('div', 'wd-mounted');
-    host.append(view);
-    await mountViewer(view, diagram, ctx.docId, { height, ...(onedit ? { onedit } : {}) });
+    const problem = elem('p', { class: 'wd-sd-problem', role: 'status' });
+    host.append(view, problem);
+    // Readers who may edit the page can tick checkboxes; each tick saves the page
+    const onchange = save ? async (json: string) => {
+      problem.textContent = '';
+      const next = withFence(inner, json);
+      try { await save(next); inner = next; announce('Saved.'); }
+      catch (e) {
+        problem.textContent = 'Not saved: ' + (e instanceof Error ? e.message : String(e));
+        throw e;   // the viewer undoes the tick
+      }
+    } : undefined;
+    await mountViewer(view, diagram, ctx.docId, { height, ...(onedit ? { onedit } : {}), ...(onchange ? { onchange } : {}) });
     return host;
   },
 });
