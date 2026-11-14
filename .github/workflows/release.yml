@@ -50,9 +50,14 @@ jobs:
       # rather than after. The same check runs on every push (ci.yml), but a
       # release is worth re-proving on the literal bytes being uploaded.
       - name: Prove it runs on Python alone
+        # Hide every node/npm binary rather than filtering PATH: the runner image
+        # also ships a system node in /usr/local/bin (see ci.yml).
         run: |
           cd dist/webdoc
-          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v -E 'node|npm' | paste -sd:)"
+          for tool in node nodejs npm npx corepack; do
+            for found in $(type -ap "$tool"); do if [ -e "$found" ]; then sudo mv "$found" "$found.hidden-by-sys9"; fi; done
+          done
+          hash -r
           ! command -v node || { echo "::error::node is still on PATH"; exit 1; }
           python3 serve.py --port 8123 &
           for i in $(seq 1 60); do

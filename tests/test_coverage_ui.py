@@ -237,10 +237,13 @@ def test_test_case_block_renders_its_steps_and_run_button(page):
     expect(rows.nth(0)).to_contain_text("Open the requirements fixture.")
     expect(rows.nth(0)).to_contain_text("The requirement table renders with two rows.")
 
+    # The fixture corpus has no automation, so the block offers a MANUAL run:
+    # it says so, and its button records a result in the runner (the click
+    # itself is covered by the runner test further down).
+    expect(case.locator(".tc-manual")).to_have_text("Manual")
     run = case.locator("button.tc-run")
     expect(run).to_have_count(1)
-    expect(run).to_have_attribute("title", "Run this test case")
-    expect(run).to_contain_text("Run")
+    expect(run).to_have_text("Record manual result")
 
 
 # --------------------------------------------------------------------------- #
