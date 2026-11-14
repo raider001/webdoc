@@ -27,6 +27,8 @@ describe('live source and section extraction', () => {
     expect(extractSection(source, 'Running')).toBe('## Running\n- job\n```text\n## Done\n```\n### Details\nwork');
     expect(extractSection(source)).toContain('# Queue');
     expect(extractSection(source)).not.toContain('<!--meta {');
+    // Same document from a CRLF checkout: the fenced "## Done" must not end the section.
+    expect(extractSection(source.replace(/\n/g, '\r\n'), 'Running')).toBe('## Running\n- job\n```text\n## Done\n```\n### Details\nwork');
   });
 
   it('supports setext and formatted ATX headings and reports absent sections', () => {

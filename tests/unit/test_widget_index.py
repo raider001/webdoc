@@ -66,6 +66,26 @@ class WidgetIndexTests(unittest.TestCase):
         self.assertIn('wd-restricted', redacted)
         self.assertIn('"widget":"collapse"', redacted)
 
+    def test_crlf_fences_keep_examples_literal_and_sections_redacted(self):
+        # serve.py decodes the raw bytes, so a CRLF checkout reaches these scanners
+        # with "\r" still on every line. A fence that never closes would hide every
+        # later access marker and serve the restricted section unredacted.
+        cfg = SimpleNamespace(enabled=True)
+        reader = SimpleNamespace(admin=False, groups=frozenset(), authenticated=True)
+        lf = ('Intro\n\n```text\n' + wrap('collapse', REQ) + '\n<!--access start {"read":["x"]}-->\n```\n\n'
+              '<!--access start {"read":["staff"]}-->\nSECRET\n<!--access end-->\n\n' + wrap('collapse', 'Real') + '\n')
+        for eol in ('\n', '\r\n'):
+            with self.subTest(eol=repr(eol)):
+                body = lf.replace('\n', eol)
+                widgets = [b for b in webdoc_index.meta_blocks(body) if b['widget']]
+                self.assertEqual(len(widgets), 1)
+                self.assertIn('Real', body[widgets[0]['inner_start']:widgets[0]['inner_end']])
+                self.assertEqual(webdoc_index.extract_blocks(body, 'WD'), ([], []))
+                self.assertEqual(len(webdoc_access.parse_section_regions(body)), 1)
+                redacted, count = webdoc_access.redact_sections(cfg, reader, body)
+                self.assertEqual(count, 1)
+                self.assertNotIn('SECRET', redacted)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -37,6 +37,26 @@ describe('paired metadata widgets', () => {
     }
   });
 
+  it('keeps fenced examples literal on CRLF line endings', () => {
+    // A Windows checkout (core.autocrlf=true) hands the reader CRLF text. The
+    // fence scan must still see ```text...``` or the example becomes a real widget
+    // and its placeholder fence swallows the rest of the page.
+    const example = wrapped('collapse', 'Example');
+    const requirement = '<!--meta start {"requirement-group":"queue"}-->\n| requirement-no | description | trace-to |\n|---|---|---|\n| 1 | Queue | |\n<!--meta end {"requirement-group":"queue"}-->';
+    const lf = 'Intro\n\n```text\n' + example + '\n```\n\n~~~markdown\n' + requirement + '\n~~~\n\nProse\n\n' + wrapped('collapse', 'Real') + '\n';
+    for (const eol of ['\n', '\r\n']) {
+      const markdown = lf.replace(/\n/g, eol);
+      const widgets = scanMetaBlocks(markdown).filter(b => b.widget);
+      expect(widgets).toHaveLength(1);
+      expect(markdown.slice(widgets[0].innerStart, widgets[0].innerEnd)).toContain('Real');
+      expect(scanMetaBlocks(markdown).filter(b => !b.widget)).toEqual([]);
+      expect(extractGroups(markdown, { id: 'Docs/example', source: 'Docs' }, 'WD')).toEqual([]);
+      const processed = preprocessWidgets(markdown);
+      expect(processed.split('```wd-widget')).toHaveLength(2);
+      expect(processed).toContain('```text' + eol + example.replace(/\n/g, eol) + eol + '```');
+    }
+  });
+
   it('accepts multiline JSON and CRLF', () => {
     const markdown = '<!--meta start {\r\n "widget": "collapse",\r\n "title": "Queue"\r\n}-->\r\ncontent\r\n<!--meta end {"widget":"collapse"}-->';
     expect(scanMetaBlocks(markdown)[0].options.title).toBe('Queue');

@@ -92,9 +92,13 @@ def fenced_ranges(body):
     ranges = []
     offset = 0
     open_f = None
-    for line in str(body).split("\n"):
+    for raw in str(body).split("\n"):
         start = offset
-        end = offset + len(line)
+        end = offset + len(raw)
+        # serve.py decodes raw bytes, so a CRLF file keeps "\r" on each line. If
+        # the closing fence failed to match, every later marker would read as
+        # fenced and its section would be served unredacted.
+        line = raw[:-1] if raw.endswith("\r") else raw
         if open_f is None:
             o = FENCE_OPEN_RE.match(line)
             if o:

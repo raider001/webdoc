@@ -27,7 +27,9 @@ export async function fetchLiveSource(id: string, signal: AbortSignal): Promise<
 /** Preserve source Markdown while using the actual parser to recognise headings. */
 export function extractSection(markdown: string, section?: string): string {
   // A page header is not a widget opener; keep body-only documents intact.
-  const body = markdown.replace(/^\uFEFF?\s*<!--\s*meta\b(?!\s+(?:start|end)\b)[\s\S]*?-->\s*/i, '');
+  // Normalise CRLF first: the line scan's fence test ends in `(.*)$`, which a
+  // trailing "\r" defeats. The result is only rendered, so no offsets matter.
+  const body = markdown.replace(/\r\n?/g, '\n').replace(/^\uFEFF?\s*<!--\s*meta\b(?!\s+(?:start|end)\b)[\s\S]*?-->\s*/i, '');
   if (!section) return body;
   const lines = body.split('\n');
   let fence: { char: string; length: number } | null = null;

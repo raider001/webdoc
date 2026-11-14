@@ -68,8 +68,10 @@ const ACCESS_TOKEN_RE = /<!--\s*access\s+(start|end)\b\s*(\{[\s\S]*?\})?\s*-->/g
 function fencedRanges(body: string): [number, number][] {
   const ranges: [number, number][] = [];
   let offset = 0, open: { ch: string, len: number, from: number } | null = null;
-  for (const line of String(body).split('\n')) {
-    const start = offset, end = offset + line.length;
+  for (const raw of String(body).split('\n')) {
+    const start = offset, end = offset + raw.length;
+    // A CRLF body keeps "\r" on each line, which `[ \t]*$` would reject.
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     if (!open) {
       const o = /^ {0,3}([`~]{3,})/.exec(line);
       if (o) open = { ch: o[1][0], len: o[1].length, from: start };
