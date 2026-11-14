@@ -39,6 +39,19 @@ describe('widget editor round-trips', () => {
     expect(markdown).toContain('Run | once');
   });
 
+  it('keeps widgets and access boundaries after a fenced example on CRLF', () => {
+    const lf = 'Intro\n\n```text\n<!--access start {"read":["example"]}-->\n' + wrapped('collapse', 'Example') + '\n```\n\n' +
+      '<!--access start {"read":["staff"]}-->\nSecret\n<!--access end-->\n\n' + wrapped('collapse', 'Real') + '\n';
+    for (const eol of ['\n', '\r\n']) {
+      const parsed = parseDoc(lf.replace(/\n/g, eol));
+      expect(parsed.lostMarkers).toBe(0);
+      expect(parsed.blocks.filter(b => b.type === 'widget')).toHaveLength(1);
+      const markdown = serializeDoc(metadata, parsed.blocks.map(convert));
+      expect(markdown).toContain('<!--access start {"read":["staff"]}-->');
+      expect(markdown).toContain('<!--access end-->');
+    }
+  });
+
   it('preserves malformed widget source verbatim', () => {
     const source = '<!--meta start {"widget":"collapse",}-->\nDo not lose me\n<!--meta end {"widget":"collapse"}-->';
     const parsed = parseDoc(source);

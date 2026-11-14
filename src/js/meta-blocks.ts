@@ -29,7 +29,9 @@ export function scanMetaBlocks(source: string): MetaBlock[] {
   let fence: { char: string; length: number; start: number } | null = null;
   for (const line of source.split('\n')) {
     const end = offset + line.length;
-    const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    // CRLF sources keep "\r" on each line; `.` and `$` do not match it, so test
+    // the line without it while offsets still count it.
+    const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line.endsWith('\r') ? line.slice(0, -1) : line);
     if (f) {
       if (!fence) fence = { char: f[1][0], length: f[1].length, start: offset };
       else if (f[1][0] === fence.char && f[1].length >= fence.length && !f[2].trim()) {

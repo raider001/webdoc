@@ -36,7 +36,7 @@ FENCE_CLOSE = re.compile(r'^ {0,3}([`~]{3,})[ \t]*$')
 HEADING_RE = re.compile(r'^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$', re.M)
 LINK_RE = re.compile(r'\[(?:[^\]\\]|\\.)*\]\(\s*(<[^>]*>|[^()\s]+)')
 META_TOKEN_RE = re.compile(r'<!--\s*meta\s+(start|end)\b\s*(.*?)-->', re.I | re.S)
-FENCED_STRIP = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*$', re.M | re.S)
+FENCED_STRIP = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t\r]*$', re.M | re.S)  # \r: CRLF
 INLINE_CODE = re.compile(r'`[^`]*`')
 HAS_SCHEME = re.compile(r'^(?:[a-z][a-z0-9+.-]*:)', re.I)
 INLINE_MD = re.compile(r'[*_`~]')
@@ -80,9 +80,11 @@ def fenced_ranges(body):
     ranges = []
     offset = 0
     open_f = None
-    for line in body.split('\n'):
+    for raw in body.split('\n'):
         start = offset
-        end = offset + len(line)
+        end = offset + len(raw)
+        # A CRLF body keeps "\r" on each line, which `[ \t]*$` would reject.
+        line = raw[:-1] if raw.endswith('\r') else raw
         if open_f is None:
             o = FENCE_OPEN.match(line)
             if o:
