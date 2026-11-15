@@ -126,7 +126,7 @@ describe('SignInWall', () => {
     // The first account is not a choice, so "I already have an account" is hidden.
     expect(container.querySelector<HTMLElement>('.auth-switch')!.hidden).toBe(true);
     expect(container.querySelector('.auth-hint')!.textContent)
-      .toContain('The first account created becomes the administrator.');
+      .toContain('Create the first administrator offline with bootstrap_admin.py.');
   });
 
   it('hides the display-name field until it is registering, and quotes the real minimum length', async () => {

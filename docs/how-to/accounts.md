@@ -18,7 +18,7 @@ Add an `auth` block to `config.json`:
   "sources": [{ "name": "Docs", "path": "docs", "component": "WD" }],
   "auth": {
     "enabled": true,
-    "allowRegistration": true,
+    "allowRegistration": false,
     "groups": {
       "staff":   { "label": "Staff",           "color": "#0ea5e9" },
       "ops":     { "label": "Operations",      "color": "#f59e0b" },
@@ -36,20 +36,24 @@ Restart the server. It prints what it has done, so you never have to read the
 code to find out how exposed you are:
 
 ```text
-  auth: ENABLED - 0 account(s), registration open
+  auth: ENABLED - 0 account(s), registration closed
         accounts: C:\...\.webdoc-auth\users.json
         groups:   admins, ops, staff
-        no accounts yet - the FIRST account registered becomes the administrator
+        create the first administrator with bootstrap_admin.py
 ```
 
 ## 2. Create the first administrator
 
-Open the site. Because there are no accounts yet, the sign-in screen opens
-straight into **Create account** and tells you the first account becomes the
-administrator. Fill it in and you are signed in as an administrator.
+Stop the server and run this explicit local command from the application folder:
 
-That bootstrap only ever happens once. Every account created afterwards starts
-with no groups and no administrator flag.
+```powershell
+python -B bootstrap_admin.py --config config.json --username admin
+```
+
+Enter and confirm the password at the prompts, then restart the server and sign
+in. The command refuses if an administrator already exists. HTTP registration
+never grants administrator status, including the first registration; approval
+and non-administrator default groups apply to every registrant.
 
 ## 3. Close registration, or gate it
 

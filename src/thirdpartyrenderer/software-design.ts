@@ -29,7 +29,7 @@
 // can read and write, with the meaning (elements, relations) apart from layout.
 // ===========================================================================
 
-import { registerBlockRenderer } from '../js/blocks.js';
+import { registerBlockRenderer, trustLiveMount } from '../js/blocks.js';
 import { registerWidget } from '../js/widgets.js';
 import { app } from '../js/app-shell.js';
 import { registerMounted, resolveDocPaths } from '../js/reader.js';
@@ -164,6 +164,9 @@ const EMPTY = '{\n  "format": "softwaredesigner/2",\n  "elements": []\n}';
 async function mountViewer(host: HTMLElement, diagram: string, baseId: string, extra: Record<string, unknown> = {}): Promise<void> {
   const lib = await loadLib();
   addStyle();
+  // The library owns this subtree; the core scrub must not strip the
+  // attributes it draws and ticks checkboxes with (blocks.ts trustLiveMount).
+  trustLiveMount(host);
   const handle = lib.mountViewer(host, {
     diagram, theme: theme(),
     onlink: (href: string) => { void followLink(href, baseId); },

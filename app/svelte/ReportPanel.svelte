@@ -27,6 +27,8 @@
   press.
 -->
 <script lang="ts">
+  import { isReadOnly } from '/js/policy.js';
+  const readOnly = isReadOnly();
   import { closeIcon, externalLinkIcon, playIcon } from '/js/icons.js';
   import { requirementList, testList } from '/js/requirements.js';
   import { uniqueStrings } from '/js/lists.js';
@@ -205,9 +207,9 @@
       {/each}
     </div>
     <AutomatedTests {id} {results} {onReload} />
-    <div class="cov-medit-bar">
+    {#if !readOnly}<div class="cov-medit-bar">
       <button type="button" class="btn btn-primary" onclick={runTest}><span class="wd-mounted" use:icon={playIcon}></span>Run this test</button>
-    </div>
+    </div>{/if}
   {/if}
   {/key}
 </aside>

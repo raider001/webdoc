@@ -28,7 +28,6 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import webdoc_access
-import webdoc_runs
 import webdoc_auth
 
 try:
@@ -41,16 +40,28 @@ APP_DIR = os.path.join(HERE, "app")
 
 # Request body ceilings. Without these a single request can pin an arbitrary
 # amount of memory, and the JSON APIs have no business receiving megabytes.
-MAX_DOC_BODY = 8 * 1024 * 1024
+MAX_DOC_BODY = 2 * 1024 * 1024
 MAX_JSON_BODY = 1 * 1024 * 1024
 MAX_AUTH_BODY = 16 * 1024
 MAX_DATA_BYTES = 2 * 1024 * 1024
+
+
+class _Missing(Exception):
+    pass
 
 
 class _Refused(Exception):
     """A policy refusal raised deep in a handler and turned into a 400 by the
     dispatcher, so guard code can bail out without threading a return value back
     through every caller."""
+
+
+class _ValidationError(Exception):
+    """An intentional user-facing validation message, written by this app.
+
+    Only raise with safe explanatory text, never an underlying exception or a
+    filesystem/runner diagnostic. Other exceptions remain generic on the wire.
+    """
 
 # Force correct content types. Windows' registry sometimes maps .js -> text/plain,
 # which breaks ES module loading; be explicit.
@@ -108,6 +119,11 @@ def gzippable(ctype):
 def load_config(path):
     with open(path, encoding="utf-8") as fh:
         cfg = json.load(fh)
+    hosts = cfg.get("allowedHosts")
+    if hosts is not None and (not isinstance(hosts, list) or not hosts or any(
+            not isinstance(h, str) or not re.fullmatch(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]{1,5}", h)
+            for h in hosts)):
+        raise SystemExit("config error: allowedHosts must contain explicit host:port authorities")
     projects = cfg.get("projects")
     legacy = projects is None
     if legacy:
@@ -191,6 +207,10 @@ def load_config(path):
                 "config error: the auth folder %s overlaps the source '%s' (%s); "
                 "move usersFile outside every served source" % (auth.auth_dir, src["name"], src["path"]))
     return {
+        "readOnly": bool(cfg.get("readOnly", False)),
+        "allowedHosts": cfg.get("allowedHosts"),
+        "servedOverHttps": bool(cfg.get("servedOverHttps", False)),
+        "maxDocBodyBytes": max(1, min(16 * 1024 * 1024, _as_int(cfg.get("maxDocBodyBytes"), MAX_DOC_BODY))),
         "projects": projects,
         "legacy": legacy,
         "siteTitle": cfg.get("siteTitle", "Documentation"),
@@ -222,6 +242,55 @@ def load_config(path):
 _HOSTILE_CHARS = re.compile(r'[<>:"|?*\x00-\x1f]')
 
 
+def long_path(path):
+    """Expand Windows aliases with the filesystem, never with URL heuristics."""
+    if os.name != "nt":
+        return os.path.realpath(path)
+    import ctypes
+    from ctypes import wintypes
+    fn = ctypes.WinDLL("kernel32", use_last_error=True).GetLongPathNameW
+    fn.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    fn.restype = wintypes.DWORD
+    size = fn(path, None, 0)
+    if not size:
+        raise OSError("cannot resolve path")
+    buf = ctypes.create_unicode_buffer(size)
+    if not fn(path, buf, size):
+        raise OSError("cannot resolve path")
+    return os.path.realpath(buf.value)
+
+
+def canonical_path(root, full):
+    """Refuse aliases/junction escapes, including aliases in a new file's parent."""
+    existing, suffix = full, []
+    while not os.path.exists(existing):
+        parent, leaf = os.path.split(existing)
+        if parent == existing:
+            return None
+        suffix.append(leaf)
+        existing = parent
+    try:
+        resolved = os.path.join(long_path(existing), *reversed(suffix))
+        base = long_path(os.path.abspath(root))
+        if os.path.commonpath([os.path.normcase(base), os.path.normcase(resolved)]) != os.path.normcase(base):
+            return None
+        # Require the source-relative spelling returned by the filesystem.
+        # A configured root may have different drive/root casing; the URL may
+        # not substitute a short name, symlink, junction or differently cased leaf.
+        if os.path.relpath(resolved, base) != os.path.relpath(full, os.path.abspath(root)):
+            return None
+        return resolved
+    except (OSError, ValueError):
+        return None
+
+
+def blocked_path(src, rel):
+    from fnmatch import fnmatchcase
+    patterns = [str(p).lower() for p in src.get("excludeDirectories", [])]
+    return any(p.startswith(".") or any(fnmatchcase(p.lower(), pat) for pat in patterns)
+               for p in rel.replace("\\", "/").split("/") if p)
+
+
 def safe_join(root, rel):
     """Join rel onto root, refusing to escape root (path-traversal guard) and
     refusing any path component that a filesystem would silently rewrite."""
@@ -234,7 +303,7 @@ def safe_join(root, rel):
     root_abs = os.path.abspath(root)
     if full != root_abs and not full.startswith(root_abs + os.sep):
         return None
-    return full
+    return canonical_path(root, full)
 
 
 def safe_data_path(root, rel):
@@ -251,7 +320,7 @@ def safe_data_path(root, rel):
             return None
     except ValueError:
         return None
-    return full
+    return canonical_path(root, full)
 
 
 def _as_int(value, default):
@@ -292,7 +361,46 @@ class DocHandler(BaseHTTPRequestHandler):
     # thread indefinitely, and enough of them would hold all of them.
     timeout = 30
 
-    server_version = "WebDocTool/0.1"
+    server_version = "Kalynx"
+
+    def version_string(self):
+        return self.server_version
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        hosts = self.headers.get_all("Host") or []
+        port = self.server.server_port
+        allowed = self.config.get("allowedHosts")
+        if allowed is None:
+            allowed = ["127.0.0.1:" + str(port), "localhost:" + str(port), "[::1]:" + str(port)]
+        if len(hosts) != 1 or hosts[0].lower() not in {h.lower() for h in allowed}:
+            self._drain_early_body()
+            self._json(403, {"error": "host refused"})
+            return False
+        if self.config.get("readOnly") and self.command not in ("GET", "HEAD"):
+            self._drain_early_body()
+            self._json(405, {"error": "read-only"}, [("Allow", "GET, HEAD")])
+            return False
+        return True
+
+    def _drain_early_body(self):
+        # Avoid a TCP reset discarding the refusal when the client already sent
+        # a small body. Never wait for a slow upload before enforcing policy.
+        if getattr(self, '_body_consumed', False):
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            self.connection.settimeout(.05)
+            if 0 < length <= MAX_DOC_BODY:
+                self._drain(length)
+        except (ValueError, OSError):
+            pass
+        finally:
+            self.connection.settimeout(self.timeout)
+
+    def send_error(self, code, message=None, explain=None):
+        self._json(code, {"error": "request refused"})
     protocol_version = "HTTP/1.0"   # one request per connection; no keep-alive framing to get wrong
     config = None  # attached to the class before serving
     indexes = None  # project name -> isolated Index
@@ -358,7 +466,7 @@ class DocHandler(BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(url.query)
         requested = qs.get("project", [None])[0]
         path = urllib.parse.unquote(url.path)
-        match = re.match(r"/(?:docs|api/(?:tests|auto|xml))/([^/]+)", path)
+        match = re.match(r"/(?:docs|api/(?:tests|auto|xml|results))/([^/]+)", path)
         source = match.group(1) if match else qs.get("source", [None])[0]
         owner = next((p for p in projects if any(s["name"] == source for s in p["sources"])), None)
         project = next((p for p in projects if p["name"] == requested), None) if requested else owner or projects[0]
@@ -400,6 +508,11 @@ class DocHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        if self.config.get("servedOverHttps"):
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
         if self.csp:
             self.send_header("Content-Security-Policy", self.csp)
 
@@ -520,6 +633,8 @@ class DocHandler(BaseHTTPRequestHandler):
             canon = self.index.canonical_id(doc_id)
             if canon:
                 return canon
+        if os.path.exists(fspath):
+            raise _Missing()
         return doc_id
 
     # -- request bodies ------------------------------------------------------
@@ -530,6 +645,7 @@ class DocHandler(BaseHTTPRequestHandler):
         this server does not decode chunked bodies, so accepting the header would
         leave undrained bytes in the socket for the next parse to pick up.
         """
+        self._body_consumed = True
         if self.headers.get("Transfer-Encoding"):
             return None
         lengths = self.headers.get_all("Content-Length") or []
@@ -582,7 +698,9 @@ class DocHandler(BaseHTTPRequestHandler):
         Belt to the SameSite cookie's braces - and the check that still holds if a
         browser ever relaxes SameSite defaults."""
         origin = self.headers.get("Origin")
-        if not origin or origin == "null":
+        if origin == "null":
+            return False
+        if not origin:
             return True                       # non-browser client, or same-origin navigation
         host = (self.headers.get("Host") or "").strip()
         try:
@@ -615,9 +733,11 @@ class DocHandler(BaseHTTPRequestHandler):
     def _guard_mutation(self):
         """Every unsafe method funnels through here. -> True when it may proceed."""
         if not self._same_origin():
+            self._drain_early_body()
             self._json(403, {"error": "cross-origin request refused"})
             return False
         if not self._csrf_ok():
+            self._drain_early_body()
             self._json(403, {"error": "missing or invalid CSRF token", "csrf": True})
             return False
         return True
@@ -634,6 +754,10 @@ class DocHandler(BaseHTTPRequestHandler):
                 # Boot needs state/pct to show the index-build progress bar; the
                 # document count is library data and waits for a sign-in.
                 st = {"state": st["state"], "pct": st["pct"], "generation": st["generation"], "version": st["version"], "docs": 0}
+            elif not self.gate.unrestricted:
+                # Start-page cards use this count. Hidden pages must leave no
+                # trace there either; count only documents visible in this gate.
+                st["docs"] = max(0, st["docs"] - sum(self.gate.is_hidden(doc_id) for doc_id in self.gate.acl)) if self.gate.ready else 0
             return self._json(200, st)
         if idx.state != "ready":
             return self._json(503, {"error": "index building", "status": idx.status()})
@@ -702,8 +826,8 @@ class DocHandler(BaseHTTPRequestHandler):
                 "inheritedFrom": list(eff.get("inheritedFrom") or ()),
             },
             "canRead": self.gate.can_read(doc_id),
-            "canWrite": self.gate.can_write(doc_id) and not (self._source(doc_id.split('/', 1)[0]) or {}).get('readOnly'),
-            "canEditAccess": webdoc_access.can_edit_acl(cfg, self.principal),
+            "canWrite": not self.config.get("readOnly") and self.gate.can_write(doc_id) and not (self._source(doc_id.split('/', 1)[0]) or {}).get('readOnly'),
+            "canEditAccess": not self.config.get("readOnly") and webdoc_access.can_edit_acl(cfg, self.principal),
             "knownGroups": sorted(set(cfg.known_groups()) | set(self.index.access_groups() if self.index else [])),
         })
 
@@ -765,10 +889,9 @@ class DocHandler(BaseHTTPRequestHandler):
             "auth": cfg.to_json(),
             "user": self.principal.to_json() if self.principal.authenticated else None,
             "csrf": csrf,
-            "canWrite": webdoc_access.can_write(cfg, self.principal, webdoc_access.UNRESTRICTED),
-            "canEditAccess": webdoc_access.can_edit_acl(cfg, self.principal),
-            "needsBootstrap": bool(cfg.enabled and self.users is not None
-                                   and self.users.count() == 0 and cfg.allow_registration),
+            "canWrite": not self.config.get("readOnly") and webdoc_access.can_write(cfg, self.principal, webdoc_access.UNRESTRICTED),
+            "canEditAccess": not self.config.get("readOnly") and webdoc_access.can_edit_acl(cfg, self.principal),
+            "needsBootstrap": False,  # administrator creation is an offline CLI step
         })
 
     def _auth_route_post(self, rest):
@@ -848,52 +971,6 @@ class DocHandler(BaseHTTPRequestHandler):
                                                          http_only=False))
         return self._json(200, {"ok": True})
 
-    def _auth_register(self):
-        cfg = self.config["auth"]
-        if not cfg.allow_registration:
-            return self._json(403, {"error": "Registration is closed on this server."})
-        body = self._read_json(MAX_AUTH_BODY)
-        if body is None:
-            return self._json(400, {"error": "invalid request"})
-        ip = self._client_ip()
-        wait = self.register_limiter.retry_after("ip:" + ip)
-        if wait:
-            return self._json(429, {"error": "Too many attempts. Try again in %d seconds." % wait,
-                                    "retryAfter": wait}, extra=[("Retry-After", str(wait))])
-        username = str(body.get("username") or "").strip()
-        password = str(body.get("password") or "")
-        display = body.get("displayName")
-        ok, msg = webdoc_auth.validate_username(username)
-        if not ok:
-            self.register_limiter.fail("ip:" + ip)
-            return self._json(400, {"error": msg})
-        ok, msg = webdoc_auth.validate_password(password, cfg.password_min_length)
-        if not ok:
-            return self._json(400, {"error": msg})
-        # Bootstrap: the very first account on an empty server becomes the
-        # administrator, because otherwise a fresh install has nobody who can grant
-        # anyone anything. Every later account follows the configured defaults.
-        # Whether this is the first account is decided INSIDE the store lock
-        # (first_only_admin), not out here: two concurrent registrations on an
-        # empty server both read count()==0 and both became administrators.
-        first = self.users.count() == 0
-        disabled = bool(cfg.require_approval and not first)
-        rec, err = self.users.create(username, password, display,
-                                     groups=cfg.default_groups, disabled=disabled,
-                                     first_only_admin=cfg.first_user_is_admin)
-        is_admin = bool(rec and rec.get("admin"))
-        if err:
-            self.register_limiter.fail("ip:" + ip)
-            return self._json(409, {"error": err})
-        # Successful registrations count against the limiter as well: only
-        # counting failures left anonymous account creation effectively unbounded.
-        self.register_limiter.fail("ip:" + ip)
-        print("  auth: registered '%s'%s%s" % (rec["username"], " [admin]" if is_admin else "",
-                                               " [awaiting approval]" if disabled else ""))
-        if disabled:
-            return self._json(202, {"ok": True, "pendingApproval": True,
-                                    "message": "Your account was created and is waiting for an administrator to approve it."})
-        return self._start_session(rec)
 
     def _auth_change_password(self):
         cfg = self.config["auth"]
@@ -992,7 +1069,7 @@ class DocHandler(BaseHTTPRequestHandler):
         removing = (("admin" in body and not body.get("admin")) or
                     ("disabled" in body and body.get("disabled")) or losing_groups)
         if was_admin and removing and self.users.admin_count(cfg.admin_groups) <= 1:
-            raise _Refused("That is the last administrator; promote another account first.")
+            raise _ValidationError("That is the last administrator; promote another account first.")
 
     def _clean_groups(self, raw):
         """Only groups declared in config.json may be assigned - otherwise an admin
@@ -1009,6 +1086,10 @@ class DocHandler(BaseHTTPRequestHandler):
                 data = fh.read()
         except OSError:
             return self._json(404, {"error": "not found"})
+        if content_type(fspath).startswith("text/html"):
+            # Match the universal-newline text used by _inline_script_hashes
+            # and the browser's HTML parser, even after a CRLF checkout.
+            data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
         self._send_static(200, data, content_type(fspath))
 
     def _source(self, name):
@@ -1030,6 +1111,8 @@ class DocHandler(BaseHTTPRequestHandler):
             fp = os.path.join(fsdir, n)
             is_dir = os.path.isdir(fp)
             rel_child = (rel + "/" + n).strip("/")
+            if blocked_path(self._source(name), rel_child) or not safe_join(self._source(name)["path"], rel_child):
+                continue
             if filtering and not self._listing_visible(name, rel_child, is_dir):
                 continue
             url = "/docs/" + name + "/" + urllib.parse.quote(rel_child)
@@ -1077,6 +1160,8 @@ class DocHandler(BaseHTTPRequestHandler):
         Step 1 exists because the folder rule alone was unusable: one locked page
         at a source root made every logo and diagram at that level disappear.
         """
+        if blocked_path(self._source(source), rel_child):
+            return False
         if self.gate.unrestricted:
             return True
         if not self.index:
@@ -1114,16 +1199,41 @@ class DocHandler(BaseHTTPRequestHandler):
             return None
         if tr.startswith("/") or "://" in tr:
             return tr
-        return "/docs/" + s["name"] + "/" + tr.lstrip("/")
+        return "/api/results/" + s["name"]
+
+    def _results_get(self, name):
+        src = self._source(name)
+        if not src or not self._readable_site():
+            return self._not_found()
+        if self._acl_blocked():
+            return self._not_ready()
+        rel = src.get("testResults") or self.config.get("testResults")
+        if not isinstance(rel, str) or rel.startswith("/") or "://" in rel:
+            return self._not_found()
+        # Only the exact configured feed may use a dot filename through this
+        # API. Dot directories and excluded components remain inaccessible.
+        parent, leaf = os.path.split(rel.replace("\\", "/"))
+        from fnmatch import fnmatchcase
+        excluded = any(fnmatchcase(leaf.lower(), str(p).lower()) for p in src.get('excludeDirectories', []))
+        if not leaf or blocked_path(src, parent) or excluded:
+            return self._not_found()
+        path = safe_join(src["path"], rel)
+        if not path or not os.path.isfile(path):
+            return self._not_found()
+        if self._can_run_source(name):
+            return self._file(path)
+        return self._reader_xml(path, name)
 
     def _site_json(self):
         cfg = self.config
         self._json(200, {
+            "readOnly": bool(cfg.get("readOnly", False)),
             "siteTitle": cfg["siteTitle"],
             "defaultDoc": cfg["defaultDoc"],
             "legacy": cfg.get("legacy", False),
             "project": getattr(self, "project", {}).get("name"),
             "projects": [{"name": p["name"], "title": p["title"],
+                          "description": p.get("description"), "defaultDoc": p.get("defaultDoc"),
                           "sources": [s["name"] for s in p["sources"]]} for p in cfg.get("projects", [])],
             "theme": cfg["theme"],
             "plugins": cfg.get("plugins", []),
@@ -1151,16 +1261,25 @@ class DocHandler(BaseHTTPRequestHandler):
     def _dispatch(self, fn):
         """Every verb enters here: resolve the caller once, run the route, and turn
         a policy refusal into a clean 400 instead of a stack trace."""
+        if self.config.get("readOnly") and self.command not in ("GET", "HEAD"):
+            return self._json(405, {"error": "read-only"}, [("Allow", "GET, HEAD")])
         try:
             self._begin()
         except _Refused as e:
-            return self._json(404, {"error": str(e)})
+            return self._json(404, {"error": "request failed"})
         except Exception as e:
-            return self._json(500, {"error": "auth unavailable: %s" % e})
+            return self._json(500, {"error": "service unavailable"})
         try:
             fn()
-        except _Refused as e:
-            self._json(400, {"error": str(e)})
+        except _Missing:
+            self._not_found()
+        except _ValidationError as exc:
+            self._json(400, {"error": str(exc)})
+        except _Refused:
+            self._json(400, {"error": "request refused"})
+        except Exception as exc:
+            print("  ! request failed:", exc)
+            self._json(500, {"error": "request failed"})
 
     def _run_described(self, source, write=False):
         if not self.index or self.index.state != "ready":
@@ -1169,38 +1288,19 @@ class DocHandler(BaseHTTPRequestHandler):
         return {t["id"]: t for t in tests if t["docId"].split("/", 1)[0] == source
                 and (not write or self.gate.can_write(t["docId"]))}
 
-    def _runs_post(self):
-        # Consume the bounded body before refusal so unread bytes cannot reset TCP.
-        body = self._read_json()
-        # Origin must be present, canonical and match the server's own origin.
-        origin = self.headers.get("Origin", "")
-        scheme = "https" if self.config["auth"].cookie_secure else "http"
-        if (origin != scheme + "://" + self.headers.get("Host", "")
-                or self.headers.get("X-WebDoc-Run") != "1"):
-            return self._json(403, {"error": "same Origin and X-WebDoc-Run: 1 required"})
-        if not self.config["auth"].enabled:
-            try: hostname = urllib.parse.urlsplit(origin).hostname
-            except ValueError: hostname = None
-            if hostname not in ("127.0.0.1", "localhost", "::1"):
-                return self._json(403, {"error": "local runner requires a local host origin"})
-        if not self._guard_mutation(): return
-        if not isinstance(body, dict) or set(body) != {"source", "ids"}:
-            return self._json(400, {"error": "only source and ids accepted"})
-        source = body["source"]
-        if not isinstance(source, str) or not self._source(source):
-            return self._json(400, {"error": "unknown source"})
-        if self.config.get("projects"):
-            owner = next((p for p in self.config["projects"] if any(s["name"] == source for s in p["sources"])), None)
-            if not owner or owner["name"] != self.project["name"]:
-                return self._not_found()
-        if not self._can_write_source(source): return self._deny(what="test runs")
-        try:
-            if self.runs is None: raise ValueError("test running unavailable")
-            described = self._run_described(source, write=True)
-            rid = self.runs.submit(source, body["ids"], described)
-            return self._json(202, {"id": rid, "state": "waiting"})
-        except (ValueError, TypeError) as exc:
-            return self._json(400, {"error": str(exc)})
+    def _can_run_source(self, source):
+        if self.config.get("readOnly") or self.runs is None or source not in self.runs.specs:
+            return False
+        described = self._run_described(source)
+        configured = self.runs.specs[source]['cases']
+        return self._may_run(source, list(configured), described)
+
+    def _may_run(self, source, ids, described=None):
+        if not self._can_write_source(source):
+            return False
+        described = described if described is not None else self._run_described(source)
+        return all(tid in described and self.gate.can_write(described[tid]["docId"]) for tid in ids)
+
 
     def _runs_get(self, path):
         if not self._readable_site(): return self._deny(what="test runs")
@@ -1213,6 +1313,10 @@ class DocHandler(BaseHTTPRequestHandler):
                 described = self._run_described(source)
                 catalog = self.runs.catalog(source, described)
                 for tid, item in catalog.items():
+                    if not self._may_run(source, [tid], described):
+                        for key in list(item):
+                            if key not in ("automated", "runnable", "result", "lastRun", "duration", "startedBy"):
+                                del item[key]
                     item["runnable"] = item["runnable"] and self._can_write_source(source) and self.gate.can_write(described[tid]["docId"])
                 return self._json(200, {"cases": catalog})
             rid = path[len("/api/runs/"):]
@@ -1222,9 +1326,11 @@ class DocHandler(BaseHTTPRequestHandler):
             described = self._run_described(rec["source"])
             # Output may mention any selected case: refuse the whole status if one is hidden.
             if any(tid not in described for tid in rec["ids"]): return self._not_found()
+            if not self._may_run(rec["source"], rec["ids"], described):
+                rec = {k: rec[k] for k in ("id", "source", "ids", "state", "duration", "startedBy") if k in rec}
             return self._json(200, rec)
         except KeyError: return self._not_found()
-        except (ValueError, OSError) as exc: return self._json(400, {"error": str(exc)})
+        except (ValueError, OSError) as exc: return self._json(400, {"error": "request failed"})
 
     def _post(self):
         path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
@@ -1256,6 +1362,8 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._auto_get(path[len("/api/auto/"):])
         if path.startswith("/api/xml/"):
             return self._xml_list(path[len("/api/xml/"):])
+        if path.startswith("/api/results/"):
+            return self._results_get(path[len("/api/results/"):])
         if path.startswith("/docs/"):
             return self.route_docs(path[len("/docs/"):])
         if path in ("", "/"):
@@ -1283,7 +1391,7 @@ class DocHandler(BaseHTTPRequestHandler):
                     for entry in entries:
                         budget -= 1
                         child = (current + '/' + entry.name).strip('/')
-                        full = safe_data_path(source['path'], child)
+                        full = safe_data_path(source['path'], child) if not blocked_path(source, child) else None
                         if full and os.path.isdir(full):
                             pending.append((child, depth + 1))
                         elif full and entry.name.lower().endswith('.' + kind) and self._asset_readable(source['name'], child):
@@ -1313,7 +1421,7 @@ class DocHandler(BaseHTTPRequestHandler):
                     if self._data_folder_visible(s, '', kind)], 'files': []})
             name, _, rel = path.partition('/')
             source = self._source(name)
-            folder = safe_data_path(source['path'], rel) if source and rel else (source['path'] if source else None)
+            folder = safe_data_path(source['path'], rel) if source and rel and not blocked_path(source, rel) else (source['path'] if source and not rel else None)
             if not folder or not os.path.isdir(folder):
                 return self._not_found()
             folders, files = [], []
@@ -1323,7 +1431,7 @@ class DocHandler(BaseHTTPRequestHandler):
                 return self._not_found()
             for entry in names:
                 child = (rel + '/' + entry).strip('/')
-                full = safe_data_path(source['path'], child)
+                full = safe_data_path(source['path'], child) if not blocked_path(source, child) else None
                 if not full:
                     continue
                 if os.path.isdir(full):
@@ -1339,7 +1447,7 @@ class DocHandler(BaseHTTPRequestHandler):
         identifier = (qs.get('src') or [''])[0]
         name, _, rel = identifier.partition('/')
         source = self._source(name)
-        full = safe_data_path(source['path'], rel) if source else None
+        full = safe_data_path(source['path'], rel) if source and not blocked_path(source, rel) else None
         if not full or not rel.lower().endswith(('.csv', '.json')) or not os.path.isfile(full):
             return self._not_found()
         # Match the raw-asset endpoint: never name a refused data file.
@@ -1364,7 +1472,7 @@ class DocHandler(BaseHTTPRequestHandler):
         identifier = (qs.get('src') or [''])[0]
         name, _, rel = identifier.partition('/')
         source = self._source(name)
-        full = safe_data_path(source['path'], rel) if source else None
+        full = safe_data_path(source['path'], rel) if source and not blocked_path(source, rel) else None
         if not full or not rel.lower().endswith('.json') or not self._asset_readable(name,rel):
             return self._not_found()
         tables = None
@@ -1398,7 +1506,7 @@ class DocHandler(BaseHTTPRequestHandler):
                         row['subsection']={'label':row['subsection'],'href':'#/'+row['link']}
             return self._json(200,result)
         except (ValueError,KeyError,TypeError,IndexError) as error:
-            return self._json(400,{'error':str(error)})
+            return self._json(400,{'error':'invalid request'})
         except OSError:
             return self._not_found()
         except Exception:
@@ -1412,6 +1520,8 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "no source"})
         name, _, rel = rest.partition("/")
         src = self._source(name)
+        if src and blocked_path(src, rel):
+            return self._not_found()
         if not src:
             return self._json(404, {"error": f"unknown source '{name}'"})
         fspath = safe_join(src["path"], rel)
@@ -1444,7 +1554,57 @@ class DocHandler(BaseHTTPRequestHandler):
             if visible and self._readable_site():
                 return self._deny(what="file")
             return self._not_found()
+        if rel.lower().endswith(".xml") and not self._can_run_source(name):
+            return self._reader_xml(fspath, name)
         return self._file(fspath)
+
+    def _reader_xml(self, path, source):
+        import xml.etree.ElementTree as ET
+        try:
+            with open(path, "rb") as stream:
+                raw = stream.read(16 * 1024 * 1024 + 1)
+            if len(raw) > 16 * 1024 * 1024 or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+                return self._not_found()
+            text = raw.decode("utf-8-sig")
+            if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
+                return self._not_found()
+            original = ET.fromstring(text)
+            suite = ET.Element("testsuite")
+            owners = self.index.result_key_owner() if self.index else {}
+            for case in original.iter("testcase"):
+                # IDs are necessary for coverage matching; never echo arbitrary
+                # names that could themselves be paths or runner output.
+                identity = case.get("classname", "")
+                name = case.get("name", "")
+                ids = set(re.findall(r"[TR]_[A-Za-z0-9]+_[A-Za-z0-9_.-]+", identity + ' ' + name))
+                for prop in case.findall('./properties/property'):
+                    if prop.get('name') in ('requirement', 'test', 'testId', 'webdoc.id'):
+                        ids.add(prop.get('value', ''))
+                if not self.gate.unrestricted and not any(
+                        owners.get(tid, '').startswith(source + '/') and self.gate.can_read(owners[tid])
+                        and not self._redacted_count(owners[tid]) for tid in ids if tid in owners):
+                    continue
+                strict = re.compile(r"[A-Za-z0-9_.-]{1,200}")
+                clean = ET.SubElement(suite, "testcase", classname=identity if strict.fullmatch(identity) else "case",
+                                      name=name if strict.fullmatch(name) else "case")
+                # Keep coverage ownership without retaining arbitrary runner
+                # properties, stdout, failure messages or path-shaped names.
+                for prop in case.findall('./properties/property'):
+                    value = prop.get('value', '')
+                    if prop.get('name') == 'requirement' and re.fullmatch(r'[TR]_[A-Za-z0-9]+_[A-Za-z0-9_.-]+', value):
+                        if self.gate.unrestricted or value in owners and self.gate.can_read(owners[value]):
+                            props = clean.find('properties')
+                            if props is None:
+                                props = ET.SubElement(clean, 'properties')
+                            ET.SubElement(props, 'property', name='requirement', value=value)
+                duration = case.get("time", "0")
+                clean.set("time", duration if re.fullmatch(r"[0-9.]{1,30}", duration) else "0")
+                for state in ("failure", "error", "skipped"):
+                    if case.find(state) is not None:
+                        ET.SubElement(clean, state)
+            return self._send(200, ET.tostring(suite), "application/xml; charset=utf-8")
+        except (OSError, ET.ParseError, UnicodeError):
+            return self._not_found()
 
     def _doc_file(self, src, fspath):
         """Serve one document, section-redacted for this reader.
@@ -1491,7 +1651,9 @@ class DocHandler(BaseHTTPRequestHandler):
 
     def _sidecar_path(self, name, filename):
         src = self._source(name.strip("/"))
-        return os.path.join(src["path"], filename) if src else None
+        if not src:
+            return None
+        return canonical_path(src["path"], os.path.join(src["path"], filename))
 
     def _sidecar_get(self, name, filename):
         fp = self._sidecar_path(name, filename)
@@ -1526,51 +1688,13 @@ class DocHandler(BaseHTTPRequestHandler):
             out[key] = value
         return out
 
-    def _sidecar_put(self, name, filename):
-        fp = self._sidecar_path(name, filename)
-        if fp is None:
-            return self._json(404, {"error": "unknown source"})
-        if not self._can_write_source(name):
-            return self._deny(what="results")
-        body = self._read_body(MAX_JSON_BODY)
-        if body is None:
-            return self._json(413, {"error": "request body rejected"})
-        try:
-            obj = json.loads((body or b"{}").decode("utf-8"))  # validate it's JSON
-        except (ValueError, UnicodeDecodeError) as e:
-            return self._json(400, {"error": str(e)})
-        if not isinstance(obj, dict):
-            return self._json(400, {"error": "expected a JSON object"})
-        # A restricted reader never received the withheld keys, so writing back
-        # what they DO have would silently delete results they cannot see. Merge
-        # onto the stored file instead of replacing it.
-        if not self.gate.unrestricted:
-            try:
-                with open(fp, encoding="utf-8") as fh:
-                    stored = json.load(fh)
-            except (OSError, ValueError):
-                stored = {}
-            if isinstance(stored, dict):
-                owner = self.index.result_key_owner() if self.index else {}
-                hidden_keys = {k: v for k, v in stored.items()
-                               if owner.get(k) and not self.gate.can_read(owner[k])}
-                hidden_keys.update(obj)
-                obj = hidden_keys
-        try:
-            tmp = "%s.%d.tmp" % (fp, threading.get_ident())   # unique per writer
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(obj, fh, indent=2)
-            os.replace(tmp, fp)
-        except OSError as e:
-            return self._json(500, {"error": str(e)})
-        return self._json(200, {"ok": True})
 
     def _can_write_source(self, name):
         """Whether this caller may write a source's shared sidecar. Modelled on an
         unrestricted document in that source: if they could not edit an ordinary
         page, they cannot record results either."""
         src = self._source(str(name).strip("/"))
-        if not src or src.get("readOnly"):
+        if self.config.get("readOnly") or not src or src.get("readOnly"):
             return False
         cfg = self.config["auth"]
         if not cfg.enabled:
@@ -1601,229 +1725,25 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._deny(what="reports")
         out = []
         for root, _dirs, files in os.walk(src["path"]):
+            _dirs[:] = [d for d in _dirs if not blocked_path(src, os.path.relpath(os.path.join(root, d), src["path"]))]
             for f in files:
                 if f.lower().endswith(".xml"):
                     rel = os.path.relpath(os.path.join(root, f), src["path"]).replace("\\", "/")
-                    if not self._asset_readable(src["name"], rel):
+                    if blocked_path(src, rel) or not safe_join(src["path"], rel) or not self._asset_readable(src["name"], rel):
                         continue
                     out.append("/docs/" + src["name"] + "/" + urllib.parse.quote(rel))
         out.sort()
         return self._json(200, out)
 
-    def _check_write(self, doc_id, fspath, body):
-        """Authorise one document write. -> None to proceed, or a truthy sent
-        response (see _send/_json) that the caller must return on immediately.
-
-        Two separate gates, deliberately:
-          1. WRITE rights on the document (inherited down `next` like read rights).
-          2. ACL-EDIT rights, but only if this write CHANGES an access block.
-        Without (2) the whole model would be advisory: anyone able to edit a locked
-        page could simply delete its `access` block and publish it.
-        """
-        src = self._source(doc_id.split("/", 1)[0])
-        if src and src.get("readOnly"):
-            return self._json(403, {"error": "source is read-only"})
-        cfg = self.config["auth"]
-        if not cfg.enabled:
-            return None
-        if webdoc_index is None:
-            return self._json(503, {"error": "document parsing is unavailable; writes are refused"})
-        vis = self.gate.visibility(doc_id)
-        if vis == webdoc_access.HIDDEN:
-            return self._not_found()
-        if not self.gate.can_write(doc_id):
-            return self._deny(self.gate.eff(doc_id))
-        try:
-            text = body.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            return self._json(400, {"error": "documents must be valid UTF-8"})
-        new_meta, new_body = webdoc_index.split_meta(text)
-        new_sig = webdoc_access.access_signature(new_meta, new_body)
-        try:
-            with open(fspath, encoding="utf-8-sig") as fh:
-                old_text = fh.read()
-        except OSError:
-            old_text = None
-        if old_text is not None:
-            # This reader was served a REDACTED copy of the file. Saving it back
-            # would overwrite the withheld sections with their placeholders, so a
-            # partial view is a read-only view - never a lossy write.
-            _r, withheld = webdoc_access.redact_sections(cfg, self.principal, old_text)
-            if withheld:
-                return self._json(403, {
-                    "error": "This page contains %d section(s) you are not cleared to see, "
-                             "so it cannot be edited here." % withheld,
-                    "redactedSections": withheld,
-                })
-            old_meta, old_body = webdoc_index.split_meta(old_text)
-            old_sig = webdoc_access.access_signature(old_meta, old_body)
-        else:
-            old_sig = webdoc_access.access_signature({}, "")   # creating a new file
-        # A restricted page's `next`/`assumes` lists ARE part of its access rule:
-        # everything downstream inherits through them, so quietly dropping an edge
-        # unlocks a whole chapter without touching a single access block.
-        eff = self.gate.eff(doc_id)
-        if (eff.get("read") is not None or eff.get("hidden")) and old_text is not None:
-            def rel(meta):
-                return json.dumps({k: sorted(str(v) for v in (meta.get(k) or []))
-                                   for k in ("next", "assumes")}, sort_keys=True)
-            if rel(new_meta) != rel(old_meta) and not webdoc_access.can_edit_acl(cfg, self.principal):
-                self._json(403, {
-                    "error": "This page is restricted, so changing its Assumed-knowledge or "
-                             "Recommended-next links needs access-management rights - those links "
-                             "are what carry the restriction to the pages after it.",
-                    "aclChange": True,
-                    "requiresGroups": sorted(cfg.acl_editor_groups()),
-                })
-                return True
-        if new_sig != old_sig and not webdoc_access.can_edit_acl(cfg, self.principal):
-            return self._json(403, {
-                "error": "Changing who can see this page needs access-management rights.",
-                "aclChange": True,
-                "requiresGroups": sorted(cfg.acl_editor_groups()),
-            })
-        return None
 
     def do_PUT(self):
         self._dispatch(self._put)
 
-    def _put(self):
-        """Write a document (PUT /docs/<source>/<path>.md, raw Markdown body) or a
-        source's results sidecar (PUT /api/tests/<source>, JSON body)."""
-        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
-        if not self._guard_mutation():
-            return
-        if path.startswith("/api/tests/"):
-            return self._tests_put(path[len("/api/tests/"):])
-        if path.startswith("/api/auto/"):
-            return self._auto_put(path[len("/api/auto/"):])
-        if not path.startswith("/docs/"):
-            return self._json(405, {"error": "writes are only allowed under /docs/"})
-        rest = path[len("/docs/"):].strip("/")
-        name, _, rel = rest.partition("/")
-        src = self._source(name)
-        if not src:
-            return self._json(404, {"error": f"unknown source '{name}'"})
-        if not rel or not rel.lower().endswith(".md"):
-            return self._json(400, {"error": "path must be a .md file"})
-        fspath = safe_join(src["path"], rel)
-        if not fspath:
-            return self._json(400, {"error": "invalid path"})
-        if self._acl_blocked():
-            return self._not_ready()
-        doc_id = self._doc_id_for(src, fspath)
-        body = self._read_body(MAX_DOC_BODY)
-        if body is None:
-            return self._json(413, {"error": "request body rejected"})
-        # Check and write under one lock. The gap between "may they write this?"
-        # and the write is small but real: two interleaved PUTs could otherwise
-        # land a body that no check ever approved.
-        with self.write_lock:
-            if self._check_write(doc_id, fspath, body):
-                return
-            try:
-                existed = os.path.exists(fspath)
-                os.makedirs(os.path.dirname(fspath), exist_ok=True)
-                with open(fspath, "wb") as fh:
-                    fh.write(body)
-            except (OSError, ValueError) as e:
-                return self._json(500, {"error": str(e)})
-            if self.index:   # keep the index in step with the write (incremental, cheap)
-                try:
-                    # Index under the CANONICAL relative path, not the URL's
-                    # spelling - a case-variant URL would otherwise create a second
-                    # index row that no ACL is attached to.
-                    self.index.update_doc(name, os.path.relpath(fspath, src["path"]).replace("\\", "/"),
-                                          body.decode("utf-8", "replace"))
-                except Exception as e:
-                    print("  ! index update failed:", e)
-        doc_id = name + "/" + rel[:-3]  # drop the .md
-        return self._json(200 if existed else 201,
-                          {"ok": True, "id": doc_id, "created": not existed})
 
-    def _check_delete(self, doc_id, fspath):
-        """Authorise a delete. Write rights are necessary but not sufficient: a
-        document holding sections you cannot read cannot be destroyed by you
-        either, and removing a locked page is itself an access change."""
-        src = self._source(doc_id.split("/", 1)[0])
-        if src and src.get("readOnly"):
-            return self._json(403, {"error": "source is read-only"})
-        cfg = self.config["auth"]
-        if not cfg.enabled:
-            return None
-        vis = self.gate.visibility(doc_id)
-        if vis == webdoc_access.HIDDEN:
-            return self._not_found()
-        if not self.gate.can_write(doc_id):
-            return self._deny(self.gate.eff(doc_id))
-        try:
-            with open(fspath, encoding="utf-8-sig") as fh:
-                text = fh.read()
-        except OSError:
-            return self._not_found()
-        _r, withheld = webdoc_access.redact_sections(cfg, self.principal, text)
-        if withheld:
-            return self._json(403, {"error": "This page contains sections you are not cleared to see, "
-                                             "so it cannot be deleted here.", "redactedSections": withheld})
-        eff = self.gate.eff(doc_id)
-        if (eff.get("read") is not None or eff.get("hidden")) and not webdoc_access.can_edit_acl(cfg, self.principal):
-            return self._json(403, {"error": "Deleting a restricted page needs access-management rights.",
-                                    "aclChange": True,
-                                    "requiresGroups": sorted(cfg.acl_editor_groups())})
-        return None
 
     def do_DELETE(self):
         self._dispatch(self._delete)
 
-    def _delete(self):
-        """Delete a document: DELETE /docs/<source>/<path>.md. Removes the .md
-        file and prunes any parent folders it leaves empty (never the source
-        root). This is how the in-app CRUD "delete document" action removes a doc."""
-        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
-        if not self._guard_mutation():
-            return
-        if not path.startswith("/docs/"):
-            return self._json(405, {"error": "deletes are only allowed under /docs/"})
-        rest = path[len("/docs/"):].strip("/")
-        name, _, rel = rest.partition("/")
-        src = self._source(name)
-        if not src:
-            return self._json(404, {"error": f"unknown source '{name}'"})
-        if not rel or not rel.lower().endswith(".md"):
-            return self._json(400, {"error": "path must be a .md file"})
-        fspath = safe_join(src["path"], rel)
-        if not fspath:
-            return self._json(400, {"error": "invalid path"})
-        if not os.path.isfile(fspath):
-            return self._json(404, {"error": "not found"})
-        if self._acl_blocked():
-            return self._not_ready()
-        canon_rel = os.path.relpath(fspath, src["path"]).replace("\\", "/")
-        doc_id = self._doc_id_for(src, fspath)
-        # Same lock as the write path: check and act atomically.
-        with self.write_lock:
-            if self._check_delete(doc_id, fspath):
-                return
-            try:
-                os.remove(fspath)
-                # Prune now-empty parent directories up to (but never including) the
-                # source root, so deleting the last doc in a folder doesn't leave an
-                # empty branch in the tree.
-                root_abs = os.path.abspath(src["path"])
-                d = os.path.dirname(os.path.abspath(fspath))
-                while d != root_abs and d.startswith(root_abs + os.sep):
-                    if os.listdir(d):
-                        break
-                    os.rmdir(d)
-                    d = os.path.dirname(d)
-            except OSError as e:
-                return self._json(500, {"error": str(e)})
-            if self.index:
-                try:
-                    self.index.delete_doc(name, canon_rel)
-                except Exception as e:
-                    print("  ! index delete failed:", e)
-        return self._json(200, {"ok": True, "id": doc_id, "deleted": True})
 
     def log_message(self, fmt, *args):
         print("  %s - %s" % (self.address_string(), fmt % args))
@@ -1857,9 +1777,12 @@ def setup_auth(cfg, host):
     and print exactly what the security posture is - an operator should never have
     to read the code to find out whether their server is open."""
     auth = cfg["auth"]
-    DocHandler.csp = build_csp(auth)
+    DocHandler.csp = build_csp(auth, cfg.get("plugins", []))
+    if DocHandler.csp and inline_style_plugins(cfg.get("plugins", [])):
+        print("  csp: inline styles allowed for the %s plugin; scripts stay hash-only"
+              % ", ".join(inline_style_plugins(cfg.get("plugins", []))))
     if not auth.enabled:
-        print("  auth: DISABLED - anyone who can reach this server can read AND edit every document")
+        print("  auth: DISABLED - " + ("global read-only mode" if cfg.get("readOnly") else "anyone who can reach this server can read AND edit every document"))
         if host not in ("127.0.0.1", "localhost", "::1"):
             print("        (bound to %s, so that means anyone on the network)" % host)
         return
@@ -1878,7 +1801,7 @@ def setup_auth(cfg, host):
     if auth.public_read:
         print("        publicRead is ON: unrestricted documents are readable without signing in")
     if n == 0 and auth.allow_registration:
-        print("        no accounts yet - the FIRST account registered becomes the administrator")
+        print("        create the first administrator with bootstrap_admin.py")
     if n == 0 and not auth.allow_registration:
         print("        ! no accounts exist and registration is closed - nobody can sign in")
     if host not in ("127.0.0.1", "localhost", "::1") and not auth.cookie_secure:
@@ -1887,22 +1810,36 @@ def setup_auth(cfg, host):
         print("          Put this behind HTTPS and set auth.cookieSecure true.")
 
 
-def build_csp(auth):
+# Renderer plugins whose bring-your-own library styles itself inline. The
+# Software Designer embed build injects its components' CSS as <style> elements
+# at run time and its editor writes style attributes (software-design.ts adds a
+# <style> for its theme tokens too), so under style-src 'self' a design renders
+# unstyled. Enabling such a plugin restores the pre-154E style policy, for
+# styles only: script-src stays hash-only. Drop the entry once the library ships
+# its CSS as a file and no inline style attributes.
+INLINE_STYLE_PLUGINS = frozenset({"software-design"})
+
+
+def inline_style_plugins(plugins):
+    """The configured plugins that need inline styles (see INLINE_STYLE_PLUGINS)."""
+    return sorted(INLINE_STYLE_PLUGINS.intersection(plugins or ()))
+
+
+def build_csp(auth, plugins=()):
     """The Content-Security-Policy sent with every response.
 
     Everything this app needs is same-origin, so the policy is simply 'self' plus
     a hash for the theme-resolving inline script - no 'unsafe-inline', so a
-    sanitizer escape does not become script execution.
+    sanitizer escape does not become script execution. `plugins` are the
+    configured renderer plugins (see INLINE_STYLE_PLUGINS).
     """
     if not auth.security_headers:
         return None
-    if isinstance(auth.content_security_policy, str) and auth.content_security_policy.strip():
-        return auth.content_security_policy.strip()      # operator override
     script_src = ["'self'"] + _inline_script_hashes(os.path.join(APP_DIR, "index.html"))
-    return "; ".join([
+    baseline = [
         "default-src 'self'",
         "script-src " + " ".join(script_src),
-        "style-src 'self' 'unsafe-inline'",              # the app sets inline styles on nodes
+        "style-src 'self'" + (" 'unsafe-inline'" if inline_style_plugins(plugins) else ""),   # see INLINE_STYLE_PLUGINS
         "img-src 'self' data: blob:",
         "font-src 'self'",
         "connect-src 'self'",
@@ -1910,19 +1847,57 @@ def build_csp(auth):
         "base-uri 'none'",
         "form-action 'none'",                            # the app never submits a form
         "frame-ancestors 'none'",
-    ])
+    ]
+    required = {line.split()[0]: line for line in baseline}
+    override = auth.content_security_policy
+    if isinstance(override, str):
+        for directive in override.split(";"):
+            parts = directive.strip().split()
+            if not parts:
+                continue
+            key = parts[0].lower()
+            if key in required:
+                if " ".join(parts) != required[key]:
+                    raise ValueError("CSP override conflicts with required directive: " + key)
+            elif key in ("script-src-elem", "script-src-attr", "style-src-elem", "style-src-attr"):
+                if parts[1:] != ["'none'"]:
+                    raise ValueError("CSP override would weaken required policy")
+                required[key] = " ".join(parts)
+            else:
+                if any("\r" in p or "\n" in p for p in parts):
+                    raise ValueError("invalid CSP directive")
+                required[key] = " ".join(parts)
+    return "; ".join(required.values())
+
+
+def handler_class(read_only=False):
+    if read_only:
+        return type("ReadOnlyHandler", (DocHandler,), {})
+    from webdoc_mutations import MutationHandler
+    return type("InteractiveHandler", (MutationHandler, DocHandler), {})
 
 
 def main():
+    # When launched as a script, avoid importing a second copy from the mixin.
+    import sys
+    sys.modules.setdefault("serve", sys.modules[__name__])
     ap = argparse.ArgumentParser(description="Web Document Tool static server")
     ap.add_argument("--config", default=os.path.join(HERE, "config.json"))
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--read-only", action="store_true")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    cfg["readOnly"] = cfg["readOnly"] or args.read_only
+    if cfg["readOnly"]:
+        cfg["auth"].allow_registration = False
+        cfg["auth"].public_read = True
     DocHandler.config = cfg
-    DocHandler.runs = webdoc_runs.Runs(cfg["sources"], args.host, cfg["auth"].enabled)
+    handler = handler_class(cfg["readOnly"])
+    if not cfg["readOnly"]:
+        import webdoc_runs
+        handler.runs = webdoc_runs.Runs(cfg["sources"], args.host, cfg["auth"].enabled)
     setup_auth(cfg, args.host)
 
     # Separate databases and resolvers make references project-local by construction.
@@ -1948,7 +1923,7 @@ def main():
                 reconcile_projects()
         threading.Thread(target=watch_projects, daemon=True).start()
 
-    httpd = ThreadingHTTPServer((args.host, args.port), DocHandler)
+    httpd = ThreadingHTTPServer((args.host, args.port), handler)
     print(f"Web Document Tool  -  http://{args.host}:{args.port}")
     print(f"  site: {cfg['siteTitle']}")
     for s in cfg["sources"]:

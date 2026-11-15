@@ -64,8 +64,6 @@
 .widget-field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .9rem; }
 .widget-field-error { color: #c73535; font-size: .85rem; min-height: .2rem; }
 .widget-field[data-invalid="true"] input, .widget-field[data-invalid="true"] select { border-color: #c73535; }
-.blk-widget input:not([type="checkbox"]), .blk-widget select, .blk-widget textarea { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: .35rem; padding: .4rem .5rem; min-width: 0; }
-.blk-widget button:not(.wd-live button) { color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: .35rem; padding: .3rem .6rem; cursor: pointer; }
 .blk-widget button:disabled { opacity: .55; cursor: default; }
 .widget-document-picker { display: flex; flex-wrap: wrap; gap: .4rem; }
 .widget-document-picker > input { flex: 1; }

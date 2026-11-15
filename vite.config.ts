@@ -28,7 +28,7 @@ const keepNative: Plugin = {
 
 export default defineConfig({
   cacheDir: '.cache/vite',
-  plugins: [keepNative, svelte({ emitCss: false })],
+  plugins: [keepNative, svelte({ emitCss: true })],
   build: {
     outDir: 'app/build',
     emptyOutDir: true,
@@ -38,9 +38,9 @@ export default defineConfig({
     // signed-out visitor on an accounts-enabled server.
     sourcemap: false,
     minify: 'oxc',
-    lib: { entry: 'app/svelte/entry.ts', formats: ['es'], fileName: () => 'islands.js' },
+    lib: { entry: 'app/svelte/entry.ts', formats: ['es'], fileName: () => 'islands.js', cssFileName: 'islands' },
     rollupOptions: {
-      output: { codeSplitting: false },
+      output: { codeSplitting: true },
       // app/thirdpartyrenderer is never a build input under this strategy; this
       // is belt-and-braces against someone making it one.
       external: [/app\/thirdpartyrenderer\//],

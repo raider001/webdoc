@@ -17,13 +17,13 @@
   The action/expected are author-written Markdown and go in through
   `use:fragment`; the recorded response is HTML a previous run stored and goes in
   through `use:sanitized`. Both end at app/js/sanitize.js - see
-  ./actions/richtext.js for why they are two different actions.
+  ./actions/sanitized.js for the read-only action.
 -->
 <script lang="ts">
   import { checkIcon, closeIcon } from '/js/icons.js';
   import { icon } from './actions/icon.js';
   import { fragment } from './actions/fragment.js';
-  import { sanitized } from './actions/richtext.js';
+  import { sanitized } from './actions/sanitized.js';
 
   import type { TestStep } from '/js/requirements.js';
 

@@ -7,7 +7,6 @@ import { loadSite, loadDoc, isRestrictedError } from './catalog.js';
 import { searchDocs } from './search.js';
 import { invalidateGraphModel } from './graph-model.js';
 import { ensureOverlayHosts, requestMapRebuild } from './overlays.js';
-import { setLinkSearch } from './editor/richtext.js';
 import { loadResults, combinedStatus } from './coverage.js';
 import { loadPlugins } from './plugins.js';
 import { buildRequirementIndex, revealRequirement, revealTest, routeParams, requirementList, testList, setCoverageStatus } from './requirements.js';
@@ -15,7 +14,9 @@ import { state, el, mustEl, app, defaultId, getDoc } from './app-shell.js';
 import { loadIslands } from './islands.js';
 import { renderDoc, setupDocSearch, registerMounted, teardownMounted } from './reader.js';
 import { refreshReadingDocument } from './reader-refresh.js';
-import { setupEditButtons } from './authoring.js';
+import { setReadOnly } from './policy.js';
+import { setupProjectMenu } from './project-menu.js';
+import { renderProjectStart } from './project-start.js';
 import { elem } from './dom.js';
 import { html } from './html.js';
 import { sunIcon, moonIcon } from './icons.js';
@@ -280,11 +281,16 @@ function setupDrawerSearch() {
  * document (lazily loading it via getDoc/loadDoc), renders it, and reveals any
  * deep-linked requirement or test.
  */
+// Read-only navigation never imports authoring, including the project menu.
+let guardEditorLeave: () => Promise<boolean> = async () => true;
+let guardEditorRoute: (hash: string) => Promise<boolean> = async () => true;
+
 let routeSequence = 0;
 async function route(): Promise<void> {
   const sequence = ++routeSequence;
   const hash = location.hash || '';
   if (!hash.startsWith('#/')) return; // ignore in-page anchors etc.
+  if (!await guardEditorRoute(hash) || sequence !== routeSequence) return;
   const raw = hash.slice(2);
   const q = raw.indexOf('?');                      // split off ?req=<ID>
   const id = decodeURIComponent(q === -1 ? raw : raw.slice(0, q));
@@ -347,10 +353,16 @@ async function route(): Promise<void> {
  * document at its own address.
  */
 function showDocument(doc: Doc, folder: string | null, query: string): void {
+  // Re-showing the page already on screen at the same address (a guarded route
+  // back to it after the editor closes, a deep link within it) keeps the reader's
+  // place. The same file at another address (its own id vs. its folder's) is a
+  // new page: an unchanged preserved render returns early and would leave the
+  // breadcrumb and tree highlight on the old address.
+  const sameAddress = state.current?.id === doc.id && state.folder === folder;
   state.current = doc;
   state.folder = folder;
   document.dispatchEvent(new CustomEvent('webdoc:current', { detail: doc.id }));
-  renderDoc(doc);
+  renderDoc(doc, { preserveReading: sameAddress });
   const { req, test } = routeParams(query);      // deep-link to a requirement or test
   if (req) requestAnimationFrame(() => revealRequirement(req));
   if (test) requestAnimationFrame(() => revealTest(test));
@@ -536,6 +548,10 @@ async function waitForIndex(): Promise<void> {
 // boot already uses and react when its "generation" counter moves.
 /** Shared navigation/timer watcher, seeded by waitForIndex at boot. */
 const indexWatcher = createIndexWatcher(onExternalChange);
+document.addEventListener('webdoc:editor-write', event => {
+  const detail = (event as CustomEvent<{ waitUntil: (task: Promise<void>) => void }>).detail;
+  detail.waitUntil(indexWatcher.check());
+});
 async function pollForChanges(): Promise<void> {
   if (document.hidden) return;
   try { await indexWatcher.check(); } catch (e) { /* retry at the next scheduled check */ }
@@ -557,7 +573,13 @@ async function onExternalChange(): Promise<void> {
   await buildRequirementIndex(null, (state.site && state.site.sources) || []);
   if (app.invalidateTree) app.invalidateTree();   // refetch open levels; keep the reader's expansion
   if (document.body.classList.contains('is-editing')) {
-    announce('Files changed on disk. Close the editor to see the latest version.');
+    const status = document.querySelector<HTMLElement>('.editor-status');
+    // Consume our own write's index generation while the save is still pending.
+    // Later external generations remain visible without replacing the buffer.
+    if (status?.dataset.state !== 'saving') {
+      announce('Files changed on disk. Close the editor to see the latest version.');
+      if (status) { status.dataset.state = 'error'; status.textContent = 'Files changed on disk. Close the editor to see the latest version before saving.'; }
+    }
   } else if (current && current === state.current && sequence === routeSequence) {
     try {
       await refreshReadingDocument(current, () => current === state.current && sequence === routeSequence);
@@ -647,36 +669,31 @@ async function boot(): Promise<void> {
   setupDocSearch();
   lazyOverlayButton('graphBtn', async () => (await import('./map-view.js')).setupGraphButton());
   lazyOverlayButton('covBtn', async () => (await import('./coverage-view.js')).setupCoverageView());
-  setupEditButtons();
-  setupTestRun();
+
 
   try {
     state.site = await loadSite();
   } catch (e) {
     return showError('Could not reach the server config. Is serve.py running? (' + errorMessage(e) + ')');
   }
-  mustEl('brand').textContent = state.site.siteTitle || 'Documentation';
-  const switcher = document.getElementById('projectSelect') as HTMLSelectElement | null;
-  if (switcher && state.site.projects?.length) {
-    switcher.hidden = state.site.projects.length < 2;
-    for (const project of state.site.projects) {
-      const option = document.createElement('option');
-      option.value = project.name; option.textContent = project.title;
-      switcher.appendChild(option);
-    }
-    switcher.value = state.site.project || '';
-    switcher.addEventListener('change', () => {
-      const url = new URL(location.href);
-      url.searchParams.set('project', switcher.value); url.hash = '';
-      location.assign(url.href);
-    });
+  setReadOnly(!!state.site.readOnly);
+  if (!state.site.readOnly) {
+    const authoring = await import('./authoring.js');
+    authoring.setupEditButtons();
+    guardEditorLeave = authoring.guardEditorLeave;
+    guardEditorRoute = authoring.guardEditorRoute;
+    setupTestRun();
+  } else {
+    for (const id of ['editBtn', 'deleteBtn', 'newDocBtn']) mustEl(id).hidden = true;
   }
+  setupProjectMenu(state.site, guardEditorLeave);
 
   // Accounts. loadAuth() is also what mints this browser's CSRF token, so it has
   // to happen before anything can be saved - and before the index calls below,
   // which the server answers differently depending on who is asking.
   await loadAuth();
-  setupAccountButton();
+  if (!state.site.readOnly) setupAccountButton();
+  else mustEl('accountBtn').hidden = true;
   if (signInRequired()) {
     // BOOT IS SUSPENDED HERE, and that is the point. Nothing below this line -
     // waitForIndex, buildRequirementIndex, the tree mount, route(), the change
@@ -688,6 +705,14 @@ async function boot(): Promise<void> {
     await loadAuth();            // the session, and this browser's CSRF token
   }
   document.body.setAttribute('data-auth', auth.enabled ? (auth.user ? 'user' : 'anon') : 'off');
+
+  if (state.site.startPage) {
+    renderProjectStart(state.site);
+    // Hash-only bookmarks entered while on the splash still resolve by source at boot.
+    window.addEventListener('hashchange', () => { if (location.hash.startsWith('#/')) location.reload(); });
+    document.body.setAttribute('data-app-ready', '1');
+    return;
+  }
 
   // Load any opted-in renderer plugins (config "plugins"). Fault-tolerant: a
   // missing plugin or absent library is skipped, never blocking boot.
@@ -703,15 +728,13 @@ async function boot(): Promise<void> {
   // all server-backed. Boot cost is now flat regardless of corpus size.
   state.docs = [];
   await buildRequirementIndex(null, state.site.sources);
-  // Editor link autocomplete: server-backed title/id suggestions via the search index
-  // (scales past any client-held document list).
-  setLinkSearch(async q => (await searchDocs(q, 8)).map(h => ({ id: h.docId, title: h.title })));
 
-  // Test-coverage status, so requirement badges in the tables colour by pass/fail.
-  try {
-    const cov = await loadResults(state.site && state.site.sources);
+  // Results are optional. Missing/empty feeds leave neutral badges, and even
+  // an unfinished request must not delay the document or the app-ready gate.
+  // Mounted badges subscribe to status changes, so results can arrive later.
+  void loadResults(state.site.sources).then(cov => {
     setCoverageStatus(combinedStatus(requirementList(), testList(), cov));
-  } catch (e) { /* no results -> badges stay neutral */ }
+  }).catch(() => { /* no results -> badges stay neutral */ });
 
   await mountShellIslands();
   setupDrawerSearch();

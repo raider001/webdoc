@@ -111,8 +111,8 @@ export function generateReportHtml(data: TestReportData): string {
    * @returns HTML
    */
   function bar(counts: Record<string, number>, total: number, order: string[]): string {
-    if (!total) return '<div class="bar"><span class="seg seg-untested" style="width:100%"></span></div>';
-    const segs = order.map(k => counts[k] ? '<span class="seg seg-' + k + '" style="width:' + (counts[k] / total * 100) + '%" title="' + esc(LABEL[k]) + ': ' + counts[k] + '"></span>' : '').join('');
+    if (!total) return '<div class="bar"><span class="seg seg-untested seg-w100"></span></div>';
+    const segs = order.map(k => counts[k] ? '<span class="seg seg-' + k + ' seg-w' + Math.round(counts[k] / total * 100) + '" title="' + esc(LABEL[k]) + ': ' + counts[k] + '"></span>' : '').join('');
     return '<div class="bar">' + segs + '</div>';
   }
 
@@ -167,6 +167,7 @@ export function generateReportHtml(data: TestReportData): string {
   const genLine = data.generatedAt ? 'Generated ' + esc(data.generatedAt) : '';
 
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; style-src \'sha256-wau4YFYZ5IuP+ufSNAEJsQEVHK8CZj71wh88v3XZD0I=\'; img-src data:; base-uri \'none\'; form-action \'none\'; object-src \'none\'">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<title>' + esc(data.title || 'Test Coverage') + ' — Test Report</title>' +
     '<style>' + CSS + '</style></head><body><main class="rpt">' +
@@ -270,4 +271,6 @@ td.runcell .by{color:var(--faint);font-size:11px}
 .rpt-foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--faint);font-size:12px}
 @media (max-width:640px){.cards{grid-template-columns:1fr}}
 @media print{body{background:#fff}.rpt{max-width:none;padding:0}.card,.ev{break-inside:avoid}tr{break-inside:avoid}}
+
+.seg-w0{width:0%}.seg-w1{width:1%}.seg-w2{width:2%}.seg-w3{width:3%}.seg-w4{width:4%}.seg-w5{width:5%}.seg-w6{width:6%}.seg-w7{width:7%}.seg-w8{width:8%}.seg-w9{width:9%}.seg-w10{width:10%}.seg-w11{width:11%}.seg-w12{width:12%}.seg-w13{width:13%}.seg-w14{width:14%}.seg-w15{width:15%}.seg-w16{width:16%}.seg-w17{width:17%}.seg-w18{width:18%}.seg-w19{width:19%}.seg-w20{width:20%}.seg-w21{width:21%}.seg-w22{width:22%}.seg-w23{width:23%}.seg-w24{width:24%}.seg-w25{width:25%}.seg-w26{width:26%}.seg-w27{width:27%}.seg-w28{width:28%}.seg-w29{width:29%}.seg-w30{width:30%}.seg-w31{width:31%}.seg-w32{width:32%}.seg-w33{width:33%}.seg-w34{width:34%}.seg-w35{width:35%}.seg-w36{width:36%}.seg-w37{width:37%}.seg-w38{width:38%}.seg-w39{width:39%}.seg-w40{width:40%}.seg-w41{width:41%}.seg-w42{width:42%}.seg-w43{width:43%}.seg-w44{width:44%}.seg-w45{width:45%}.seg-w46{width:46%}.seg-w47{width:47%}.seg-w48{width:48%}.seg-w49{width:49%}.seg-w50{width:50%}.seg-w51{width:51%}.seg-w52{width:52%}.seg-w53{width:53%}.seg-w54{width:54%}.seg-w55{width:55%}.seg-w56{width:56%}.seg-w57{width:57%}.seg-w58{width:58%}.seg-w59{width:59%}.seg-w60{width:60%}.seg-w61{width:61%}.seg-w62{width:62%}.seg-w63{width:63%}.seg-w64{width:64%}.seg-w65{width:65%}.seg-w66{width:66%}.seg-w67{width:67%}.seg-w68{width:68%}.seg-w69{width:69%}.seg-w70{width:70%}.seg-w71{width:71%}.seg-w72{width:72%}.seg-w73{width:73%}.seg-w74{width:74%}.seg-w75{width:75%}.seg-w76{width:76%}.seg-w77{width:77%}.seg-w78{width:78%}.seg-w79{width:79%}.seg-w80{width:80%}.seg-w81{width:81%}.seg-w82{width:82%}.seg-w83{width:83%}.seg-w84{width:84%}.seg-w85{width:85%}.seg-w86{width:86%}.seg-w87{width:87%}.seg-w88{width:88%}.seg-w89{width:89%}.seg-w90{width:90%}.seg-w91{width:91%}.seg-w92{width:92%}.seg-w93{width:93%}.seg-w94{width:94%}.seg-w95{width:95%}.seg-w96{width:96%}.seg-w97{width:97%}.seg-w98{width:98%}.seg-w99{width:99%}.seg-w100{width:100%}
 `;

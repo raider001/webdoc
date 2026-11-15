@@ -137,6 +137,32 @@ would drop out of search and traceability for everybody.
 
 Keep the `title` in the header identical to the H1 that follows it; the H1 is the
 human-visible heading while the metadata `title` feeds the navigation surfaces.
+The visual editor warns visibly if these differ. Its Metadata panel is
+collapsible, and its relationship fields search document titles and ids.
+
+### Visual editing and saving
+
+Enter splits a text block into a paragraph at the caret; Shift+Enter inserts a
+hard line break. Table cells keep their structure on Enter. Adjacent text blocks
+join with Backspace at the start or Delete at the end. Lists split into items
+on Enter, and an empty item exits to a paragraph. The serializer preserves hard
+breaks and treats pasted HTML `div`/`p` boundaries as line breaks.
+
+Block handles provide keyboard menus, type conversion for text/list/code
+blocks, movement and deletion, and support pointer dragging on mouse and touch.
+Structural edits and field edits share the session undo history. Tables permit
+insertion and deletion at any row or column; at least one column remains.
+
+Ctrl/Cmd+S writes the file and keeps the editor open with Saved visible.
+Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y) redoes. Alt+Up/Down reorders
+the current block. Ctrl/Cmd+K opens a link dialog; Ctrl/Cmd+Shift+G inserts an
+inline image. Dialogs contain focus, restore it when closed, and submit their
+forms on Enter. Danger confirmations initially focus Cancel.
+
+Unsaved edits are guarded on Cancel, replacement, document navigation, reload
+and tab close. A new document is unsaved even before typing. A failed save keeps
+the buffer and presents an error. External disk changes are reported visibly;
+close the editor to inspect the latest version before overwriting it.
 
 ## The H1 and body
 

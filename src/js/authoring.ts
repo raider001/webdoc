@@ -13,14 +13,22 @@ import { state, mustEl, app, titleFromId, defaultId, getDoc } from './app-shell.
 // editorModule() first, so the editor is fetched on the first authoring action and
 // cached by the module loader from then on.
 //
-// setLinkSearch is still configured by main.ts at boot, but against
-// editor/richtext.js directly - that module imports only dom.ts, so wiring link
-// autocomplete early costs nothing and does not drag the editor in.
+// Configure link search and await the editor stylesheet at this same boundary.
+// Reading a page (including in private mode) needs neither resource.
 let editorMod: Promise<typeof import('./editor.js')> | null = null;
 function editorModule(): Promise<typeof import('./editor.js')> {
-  if (!editorMod) editorMod = import('./editor.js');
+  if (isReadOnly()) return Promise.reject(new Error('Editing is disabled.'));
+  if (!editorMod) editorMod = Promise.all([
+    import('./editor.js'), loadStylesheet('/css/editor.css'),
+  ]).then(([mod]) => {
+    mod.setLinkSearch(async q => (await searchDocs(q, 8)).map(h => ({ id: h.docId, title: h.title })));
+    return mod;
+  }).catch(error => { editorMod = null; throw error; });
   return editorMod;
 }
+import { isReadOnly } from './policy.js';
+import { loadStylesheet } from './styles.js';
+import { searchDocs } from './search.js';
 import { ensureGraphModel, invalidateGraphModel } from './graph-model.js';
 import { announce } from './announce.js';
 import { mapOpen, requestMapRebuild } from './overlays.js';
@@ -33,6 +41,7 @@ import { renderDoc } from './reader.js';
 
 import type { Doc, SourceConfig } from './catalog.js';
 import type { Block } from './editor.js';
+import type { EditorElement } from './editor.js';
 import type { DocMeta } from './editor/serialize.js';
 import type { GraphDocNode } from './graph-model.js';
 import type { TestCaseEntry } from './requirements.js';
@@ -56,7 +65,35 @@ export interface NewDocModalOpts {
 type RawMetaHeader = Record<string, unknown>;
 
 /** The open editor's root element, so exitEdit can take it back out. */
-let editorEl: HTMLElement | null = null;
+let editorEl: EditorElement | null = null;
+let editorHash = '', readerScroll = 0;
+let leavePending: Promise<boolean> | null = null;
+const disabledControls = new Map<HTMLButtonElement | HTMLInputElement | HTMLSelectElement, boolean>();
+
+async function mayLeaveEditor(): Promise<boolean> {
+  if (!editorEl) return true;
+  if (editorEl.isSaving()) return false;
+  if (!editorEl.isDirty()) return true;
+  if (!leavePending) leavePending = editorModule().then(mod => mod.confirmDialog({ title: 'Discard unsaved changes?', message: 'Your edits have not been saved.', confirmLabel: 'Discard', danger: true })).finally(() => { leavePending = null; });
+  return leavePending;
+}
+
+/** Restore the URL synchronously while the modal is pending; the old buffer never masquerades as a new page. */
+export async function guardEditorRoute(hash: string): Promise<boolean> {
+  if (!editorEl) return true;
+  history.replaceState(null, '', location.pathname + location.search + editorHash);
+  if (!await mayLeaveEditor()) return false;
+  exitEdit();
+  history.replaceState(null, '', location.pathname + location.search + hash);
+  return true;
+}
+
+/** Project navigation uses the same discard dialog before leaving this document. */
+export async function guardEditorLeave(): Promise<boolean> {
+  if (!await mayLeaveEditor()) return false;
+  exitEdit();
+  return true;
+}
 
 /**
  * Re-render the tree after a create/delete (structure changed), wiring each entry to
@@ -76,6 +113,8 @@ function rerenderTree(): void {
 
 /** Wire the header's new-document / edit / delete buttons. */
 export function setupEditButtons() {
+  if (isReadOnly()) return;
+  document.querySelector('a.skip')?.addEventListener('click', e => { if (editorEl) { e.preventDefault(); editorEl.focus(); } });
   const newDocBtn = mustEl('newDocBtn');
   newDocBtn.addEventListener('click', () => openNewDocFlow());
   mustEl('editBtn').addEventListener('click', () => { if (state.current) editExisting(state.current); });
@@ -92,6 +131,7 @@ export function setupEditButtons() {
  */
 async function updateDocActions(docId: string): Promise<void> {
   const edit = mustEl('editBtn'), del = mustEl('deleteBtn');
+  if (isReadOnly()) { edit.hidden = true; del.hidden = true; return; }
   if (!auth.enabled) { edit.hidden = false; del.hidden = false; return; }
   // Hide immediately, reveal once the server has answered - so the buttons never
   // flash on for a document this account cannot touch.
@@ -205,15 +245,20 @@ async function editExisting(doc: Doc): Promise<void> {
 }
 
 async function enterEdit(id: string, meta: DocMeta, blocks: Block[], isNew: boolean): Promise<void> {
-  exitEdit();
-  if (app.closeMapView) app.closeMapView();   // opening the editor: dismiss the map so it isn't left behind the editor
-  document.body.classList.add('is-editing');
+  const openingHash = location.hash;
   // The metadata pickers (Assumed knowledge / Recommended next) need the full doc
   // list. Boot no longer holds one (lazy/server-backed), so pull it from the same
   // server graph model the map uses (cached; invalidated after a create/delete/edit).
   const allDocs: GraphDocNode[] = (await ensureGraphModel()).docs;
   const access = await docAccess(id);
   const { openEditor } = await editorModule();
+  if (location.hash !== openingHash) return;
+  if (!await mayLeaveEditor() || location.hash !== openingHash) return;
+  exitEdit();
+  if (app.closeMapView) app.closeMapView();
+  if (app.closeCoverageView) app.closeCoverageView();
+  readerScroll = mustEl('content').scrollTop;
+  editorHash = location.hash;
   editorEl = openEditor({
     docId: id, meta, blocks, isNew,
     sources: (state.site && state.site.sources) || [],
@@ -224,7 +269,7 @@ async function enterEdit(id: string, meta: DocMeta, blocks: Block[], isNew: bool
     component: componentFor(id),
     // serializeDoc has already folded the edited metadata into `md`, so the
     // second argument is redundant here - only `status` is wanted after it.
-    onSave: (md, _newMeta, status) => saveDoc(id, md, isNew, status),
+    onSave: async (md, _newMeta, status) => { const ok = await saveDoc(id, md, isNew, status); if (ok) isNew = false; return ok; },
     onClose: () => {
       exitEdit();
       // Back to the document just edited if it is known, else the site default.
@@ -240,11 +285,27 @@ async function enterEdit(id: string, meta: DocMeta, blocks: Block[], isNew: bool
   const appBody = document.querySelector('.app-body');
   if (!appBody) throw new Error('Cannot open the editor: .app-body is missing from the page.');
   appBody.appendChild(editorEl);
+  document.body.classList.add('is-editing');
+  for (const id of ['newDocBtn', 'graphBtn', 'covBtn', 'splitBtn', 'docSearch']) {
+    const control = document.getElementById(id) as HTMLButtonElement | HTMLInputElement | HTMLSelectElement | null;
+    if (control) { disabledControls.set(control, control.disabled); control.disabled = true; }
+  }
+  const skip = document.querySelector<HTMLAnchorElement>('a.skip'); if (skip) { skip.href = '#document-editor'; skip.textContent = 'Skip to editor'; }
+  // Restore the approximate writing position using the corresponding heading.
+  const headings = [...mustEl('content').querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')];
+  const nearest = headings.filter(h => h.offsetTop <= readerScroll + 80).at(-1)?.textContent?.replace(/^\s*[\d.]+\s*/, '').trim();
+  const target = nearest && [...editorEl.querySelectorAll<HTMLElement>('.blk-heading .blk-edit')].find(h => h.textContent?.trim() === nearest);
+  if (target) { target.scrollIntoView({ block: 'start' }); target.focus({ preventScroll: true }); }
+  else editorEl.querySelector<HTMLElement>('[contenteditable]')?.focus({ preventScroll: true });
 }
 /** Remove the open editor from the DOM, if any, and leave editing mode. */
 function exitEdit() {
+  const wasEditing = !!editorEl;
   document.body.classList.remove('is-editing');
   if (editorEl) { editorEl.remove(); editorEl = null; }
+  disabledControls.forEach((disabled, control) => { control.disabled = disabled; }); disabledControls.clear();
+  const skip = document.querySelector<HTMLAnchorElement>('a.skip'); if (skip) { skip.href = '#content'; skip.textContent = 'Skip to content'; }
+  const content = document.getElementById('content'); if (content && wasEditing) content.scrollTop = readerScroll;
 }
 /**
  * The requirement-id prefix declared for whichever source `id` lives in.
@@ -261,21 +322,27 @@ function componentFor(id: string): string {
  * Write a document back to disk. `md` is the fully serialized document; `status`
  * is the element to report save progress/errors into.
  */
-async function saveDoc(id: string, md: string, wasNew: boolean, status: HTMLElement): Promise<void> {
+async function saveDoc(id: string, md: string, wasNew: boolean, status: HTMLElement): Promise<boolean> {
   const slash = id.indexOf('/');
   const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
   let res: Response;
   try {
     res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
       { method: 'PUT', body: md });
-  } catch (e) { status.textContent = 'Save failed: ' + errorMessage(e); return; }
-  if (!res.ok) { status.textContent = 'Save failed: ' + await describeFailure(res); return; }
+  } catch (e) { status.textContent = 'Save failed: ' + errorMessage(e); return false; }
+  if (!res.ok) { status.textContent = 'Save failed: ' + await describeFailure(res); return false; }
   status.textContent = 'Saved.';
   const cached = state.byId.get(id); if (cached) cached._loaded = false;   // force a fresh reload of the new body
   await refreshCatalog();
   if (wasNew) await rerenderTree();   // new file -> tree structure changed
-  exitEdit();
-  if (app.navigate) app.navigate(id);
+  // Keep the buffer mounted and Saved visible. The reading pane refreshes on exit.
+  const saved = getDoc(id);
+  if (saved) { await loadDoc(saved); state.current = saved; const { renderDoc } = await import('./reader.js'); renderDoc(saved, { preserveReading: true }); }
+  if (wasNew) { editorHash = '#/' + id; history.replaceState(null, '', location.pathname + location.search + editorHash); }
+  const checks: Promise<void>[] = [];
+  document.dispatchEvent(new CustomEvent('webdoc:editor-write', { detail: { waitUntil: (task: Promise<void>) => checks.push(task) } }));
+  await Promise.allSettled(checks);
+  return true;
 }
 
 /**

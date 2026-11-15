@@ -75,11 +75,11 @@ export function attachView(g: GraphContext): void {
    * Centre the viewport on node `id` and flash it.
    * @returns whether the node exists in the layout and was focused
    */
-  g.focus = function (id) {
+  g.focus = function (id, preserveZoom = false) {
     const n = g.layout.nodes.get(id);
     if (!n) return false;
     const vs = g.viewSize();
-    g.k = Math.min(1.25, Math.max(g.k, Math.min(vs.w / (n.w + 120), vs.h / (n.h + 120))));
+    if (!preserveZoom) g.k = Math.min(1.25, Math.max(g.k, Math.min(vs.w / (n.w + 120), vs.h / (n.h + 120))));
     g.tx = vs.w / 2 - n.cx * g.k;
     g.ty = vs.h / 2 - n.cy * g.k;
     g.applyTransform();

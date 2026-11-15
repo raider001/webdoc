@@ -125,7 +125,7 @@ describe('type-specific editor insertion, previews and save', () => {
   });
   it('lists named widget types with icons/descriptions and no generic extension entry', () => {
     const editor = openEditor({ docId: 'Docs/demo', meta, blocks: [], allDocs: [], isNew: false, onSave: vi.fn(), onClose: vi.fn() }); document.body.append(editor);
-    [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '+ Add widget')!.click();
+    [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '+ Add block')!.click();
     const names = [...document.querySelectorAll('.blk-menu button')].map(b => b.getAttribute('aria-label'));
     expect(names).toEqual(expect.arrayContaining(['Collapsible section', 'Auto-update section', 'Auto-update table', 'Panel']));
     expect(document.querySelector('.blk-menu')?.textContent).not.toContain('Extension widget'); expect(document.querySelectorAll('.blk-menu .widget-type-icon').length).toBeGreaterThanOrEqual(4);
@@ -134,7 +134,7 @@ describe('type-specific editor insertion, previews and save', () => {
   it('inserts a table, edits its settings, previews real data and saves meta Markdown', async () => {
     let saved = '';
     const editor = openEditor({ docId: 'Docs/demo', meta, blocks: [], allDocs: [], isNew: false, onSave: markdown => { saved = markdown; }, onClose: vi.fn() }); document.body.append(editor);
-    [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '+ Add widget')!.click();
+    [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '+ Add block')!.click();
     document.querySelector<HTMLButtonElement>('.blk-menu [aria-label="Auto-update table"]')!.click();
     const widget = editor.querySelector('.blk-widget')!; expect(widget.querySelector<HTMLElement>('.blk-widget-settings')!.hidden).toBe(true);
     expect(widget.querySelector<HTMLDetailsElement>('.widget-advanced')!.open).toBe(false);
@@ -167,7 +167,7 @@ describe('type-specific editor insertion, previews and save', () => {
     } }, render: ctx => ctx.content });
     let saved = '';
     const editor = openEditor({ docId: 'Docs/demo', meta, blocks: [], allDocs: [], isNew: false, onSave: markdown => { saved = markdown; }, onClose: vi.fn() }); document.body.append(editor);
-    [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '+ Add widget')!.click(); document.querySelector<HTMLButtonElement>('.blk-menu [aria-label="Custom card"]')!.click();
+    [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '+ Add block')!.click(); document.querySelector<HTMLButtonElement>('.blk-menu [aria-label="Custom card"]')!.click();
     editor.querySelector<HTMLButtonElement>('[aria-label="Edit Custom card"]')!.click(); [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Set custom option')!.click();
     [...editor.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Save')!.click(); expect(saved).toContain('"special":"custom"');
   });

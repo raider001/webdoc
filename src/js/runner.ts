@@ -15,6 +15,8 @@
 // component would put a data format inside a view.
 // ---------------------------------------------------------------------------
 import { loadIslands } from './islands.js';
+import { loadStylesheet } from './styles.js';
+import { isReadOnly } from './policy.js';
 
 import type { RunnerOpts } from './main.js';
 import type { CoverageResults } from './coverage.js';
@@ -97,14 +99,17 @@ export function closeRunner(): void {
  * Open the full-screen test-run overlay for a set of test cases.
  */
 export function openRunner(opts: RunnerOpts): void {
+  if (isReadOnly()) return;
   closeRunner();
   const mine = generation;
   // Set before the await, not after: it is what stops the document scrolling
   // behind the overlay, and the overlay is what the reader is about to look at.
   document.body.classList.add('is-running');
-  loadIslands().then(islands => {
+  Promise.all([loadIslands(), loadStylesheet('/css/runner.css'), loadStylesheet('/css/editor.css')]).then(async ([islands]) => {
     if (mine !== generation) return;   // closed (or superseded) while the bundle was in flight
-    island = islands.mountRunner(document.body, {
+    const runner = await islands.loadRunner();
+    if (mine !== generation) return;
+    island = runner.mountRunner(document.body, {
       tests: opts.tests || [],
       // The one caller (main.js) always supplies results; the fallback is
       // belt-and-braces for a caller that does not, and builds only the two maps

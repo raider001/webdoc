@@ -1,3 +1,4 @@
+import { isReadOnly } from './policy.js';
 import { apiFetch } from './auth.js';
 import { state } from './app-shell.js';
 import { loadResults, combinedStatus } from './coverage.js';
@@ -29,6 +30,7 @@ export function loadRunCases(source: string, force = false): Promise<void> {
   loading.set(source, task); void task.finally(() => { if (loading.get(source) === task) loading.delete(source); }); return task;
 }
 export async function startRun(source: string, ids: string[]): Promise<void> {
+  if (isReadOnly()) return;
   const store = sourceRuns(source);
   let run: RunStatus | undefined;
   try {

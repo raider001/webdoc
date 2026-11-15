@@ -22,12 +22,13 @@ import time
 import sqlite3
 import threading
 import hashlib
+from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatchcase
 
 import webdoc_access
 
-SCHEMA_VERSION = 10  # rebuild once: preserve missing authored test names for run validation
+SCHEMA_VERSION = 11  # rebuild once: preserve missing authored test names for run validation
 
 # ---- extraction regexes (ported from the client) ---------------------------
 META_RE = re.compile(r'^﻿?\s*<!--\s*meta\b(?!\s+(?:start|end)\b)(.*?)-->\s*', re.I | re.S)
@@ -101,10 +102,41 @@ def fenced_ranges(body):
 
 
 def in_fence(ranges, pos):
-    for a, b in ranges:
-        if a <= pos < b:
-            return True
-    return False
+    at = bisect_right(ranges, (pos, float('inf'))) - 1
+    return at >= 0 and ranges[at][0] <= pos < ranges[at][1]
+
+
+def comment_tokens(text, pattern):
+    # Search once for each comment terminator. A regex with .*? retried from
+    # every unterminated opener otherwise rescans the entire remaining file.
+    pos = 0
+    while True:
+        start = text.find('<!--', pos)
+        if start < 0:
+            return
+        end = text.find('-->', start + 4)
+        if end < 0:
+            return
+        match = pattern.fullmatch(text, start, end + 3)
+        if match:
+            yield match
+        pos = end + 3
+
+
+def remove_spans(text, spans):
+    # Spans arrive in document order, with parents preceding their children.
+    chunks, end = [], 0
+    for a, b in spans:
+        if a < end:
+            continue
+        chunks.append(text[end:a])
+        end = b
+    chunks.append(text[end:])
+    return ''.join(chunks)
+
+
+def strip_fences(text):
+    return remove_spans(text, fenced_ranges(text))
 
 
 def meta_blocks(body):
@@ -118,11 +150,27 @@ def meta_blocks(body):
         return str(meta.get('test') or meta.get('test-case') or
                    meta.get('requirement-group') or meta.get('group') or '')
 
-    for match in META_TOKEN_RE.finditer(body):
+    line_start, line_end, fence = 0, body.find('\n'), 0
+    if line_end < 0:
+        line_end = len(body)
+    for match in comment_tokens(body, META_TOKEN_RE):
         start, end = match.span()
-        line_end = body.find('\n', end)
-        if in_fence(ranges, start) or not re.fullmatch(r' {0,3}', body[body.rfind('\n', 0, start) + 1:start]) \
-                or not re.fullmatch(r'[ \t\r]*', body[end:line_end if line_end >= 0 else len(body)]):
+        while start > line_end:
+            line_start = line_end + 1
+            line_end = body.find('\n', line_start)
+            if line_end < 0:
+                line_end = len(body)
+        while fence < len(ranges) and ranges[fence][1] <= start:
+            fence += 1
+        in_code = fence < len(ranges) and ranges[fence][0] <= start < ranges[fence][1]
+        # Once another token occupies this line, reject in constant time before
+        # slicing or scanning its prefix/suffix again.
+        if in_code or start - line_start > 3 or not re.fullmatch(r' {0,3}', body[line_start:start]):
+            continue
+        tail_end = line_end if end <= line_end else body.find('\n', end)
+        if tail_end < 0:
+            tail_end = len(body)
+        if not re.fullmatch(r'[ \t\r]*', body[end:tail_end]):
             continue
         error = False
         try:
@@ -137,6 +185,8 @@ def meta_blocks(body):
                      'options': options, 'widget': widget, 'error': error}
             blocks.append(block)
             stack.append(block)
+            if len(stack) > 64:
+                return []  # fixed nesting limit bounds nested table extraction
         elif stack:
             block = stack.pop()
             block.update(end=end, inner_end=start)
@@ -150,15 +200,12 @@ def meta_blocks(body):
 def strip_meta_blocks(body):
     """Index ordinary prose inside widgets while excluding requirement/test data."""
     spans = [(b['start'], b['end']) for b in meta_blocks(body) if not b['widget']]
-    outer = [(a, b) for a, b in spans if not any(c < a and d >= b for c, d in spans)]
-    for start, end in sorted(outer, reverse=True):
-        # Requirement/test blocks cannot themselves contain widgets.
-        body = body[:start] + body[end:]
-    return META_TOKEN_RE.sub('', body)
+    body = remove_spans(body, spans)
+    return remove_spans(body, (m.span() for m in comment_tokens(body, META_TOKEN_RE)))
 
 
 def extract_headings(body):
-    s = FENCED_STRIP.sub('', body)
+    s = strip_fences(body)
     s = strip_meta_blocks(s)
     out = []
     for m in HEADING_RE.finditer(s):
@@ -171,7 +218,7 @@ def extract_headings(body):
 def extract_links(body):
     """In-body [text](target) links -> list of (raw_target, is_scheme). Mirrors
     doclinks.documentLinks pre-classification (fences / inline code / meta stripped)."""
-    s = FENCED_STRIP.sub('', body)
+    s = strip_fences(body)
     s = INLINE_CODE.sub('', s)
     s = strip_meta_blocks(s)
     out = []
@@ -380,6 +427,39 @@ def _row_spec(raw):
             'inherit': bool(raw.get('inherit', True)), 'label': '', 'malformed': False}
 
 
+def parse_document(doc_id, component, text):
+    meta, body, header_ok = split_meta_ex(text)
+    title = (meta.get('title') if isinstance(meta, dict) else None) or fallback_title(doc_id)
+    # Access control: the document's own `access` block, plus every group named
+    # by an in-body <!--access start--> section. `public_body` is the document
+    # with all restricted sections REMOVED - it is the ONLY form that reaches
+    # the headings table, the link graph, the requirement/test index and the
+    # full-text index, so restricted content can never surface as a search hit,
+    # a heading, a map edge or a requirement row for anyone. The trade (and it
+    # is documented): requirement groups and test cases written INSIDE a
+    # restricted section are not indexed at all.
+    doc_acl = webdoc_access.doc_access_from_meta(meta)
+    if not header_ok:
+        # The header did not parse, so we cannot know whether it carried an
+        # access rule. Treating that as "no rule" would mean a stray comma in
+        # a locked page's header publishes it. Restrict instead: the failure
+        # is loud, an administrator can still read and repair the page, and it
+        # errs toward less access rather than more.
+        doc_acl = webdoc_access.malformed_access()
+    public_body = webdoc_access.strip_all_sections(body)
+    reqs, tests = extract_blocks(public_body, component) if component else ([], [])
+    return {
+        'title': title,
+        'description': (meta.get('description') if isinstance(meta, dict) else '') or '',
+        'assumes': meta.get('assumes') or [] if isinstance(meta, dict) else [],
+        'next': meta.get('next') or [] if isinstance(meta, dict) else [],
+        'headings': extract_headings(public_body),
+        'links': extract_links(public_body),
+        'requirements': reqs, 'tests': tests, 'body': public_body,
+        'access': doc_acl,
+        'access_groups': webdoc_access.groups_mentioned(meta, body),
+    }
+
 class Index:
     """The SQLite-backed site index. Thread-safe: one connection per thread (WAL),
     a single write lock. Reconcile is incremental (mtime,size + config hash)."""
@@ -504,37 +584,8 @@ class Index:
 
     # -- parsing one file --
     def _parse(self, doc_id, component, text):
-        meta, body, header_ok = split_meta_ex(text)
-        title = (meta.get('title') if isinstance(meta, dict) else None) or fallback_title(doc_id)
-        # Access control: the document's own `access` block, plus every group named
-        # by an in-body <!--access start--> section. `public_body` is the document
-        # with all restricted sections REMOVED - it is the ONLY form that reaches
-        # the headings table, the link graph, the requirement/test index and the
-        # full-text index, so restricted content can never surface as a search hit,
-        # a heading, a map edge or a requirement row for anyone. The trade (and it
-        # is documented): requirement groups and test cases written INSIDE a
-        # restricted section are not indexed at all.
-        doc_acl = webdoc_access.doc_access_from_meta(meta)
-        if not header_ok:
-            # The header did not parse, so we cannot know whether it carried an
-            # access rule. Treating that as "no rule" would mean a stray comma in
-            # a locked page's header publishes it. Restrict instead: the failure
-            # is loud, an administrator can still read and repair the page, and it
-            # errs toward less access rather than more.
-            doc_acl = webdoc_access.malformed_access()
-        public_body = webdoc_access.strip_all_sections(body)
-        reqs, tests = extract_blocks(public_body, component) if component else ([], [])
-        return {
-            'title': title,
-            'description': (meta.get('description') if isinstance(meta, dict) else '') or '',
-            'assumes': meta.get('assumes') or [] if isinstance(meta, dict) else [],
-            'next': meta.get('next') or [] if isinstance(meta, dict) else [],
-            'headings': extract_headings(public_body),
-            'links': extract_links(public_body),
-            'requirements': reqs, 'tests': tests, 'body': public_body,
-            'access': doc_acl,
-            'access_groups': webdoc_access.groups_mentioned(meta, body),
-        }
+        from webdoc_parse_worker import bounded_parse
+        return bounded_parse(doc_id, component, text)
 
     def _write_doc(self, c, doc_id, source, rel, component, text, mtime_ns, size):
         self._write_parsed(c, doc_id, source, rel, component, self._parse(doc_id, component, text), mtime_ns, size)
@@ -731,7 +782,7 @@ class Index:
                         dirnames[:] = [d for d in dirnames if not d.startswith('.')
                                        and not any(fnmatchcase(d.lower(), pattern) for pattern in excluded)]
                         for fn in filenames:
-                            if not fn.lower().endswith('.md'):
+                            if fn.startswith('.') or any(fnmatchcase(fn.lower(), pattern) for pattern in excluded) or not fn.lower().endswith('.md'):
                                 continue
                             files.append((s, os.path.join(dirpath, fn)))
                 self.progress = {'done': 0, 'total': len(files)}
@@ -754,12 +805,12 @@ class Index:
                         return ('skip', doc_id)
                     try:
                         with open(fp, 'r', encoding='utf-8-sig', errors='replace') as fh:
-                            text = fh.read()
+                            text = fh.read(16 * 1024 * 1024 + 1)
                     except OSError:
                         return ('skip', doc_id)
                     return ('doc', doc_id, s['name'], rel, s.get('component'),
                             self._parse(doc_id, s.get('component'), text), st.st_mtime_ns, st.st_size)
-                workers = max(1, min(16, int(os.environ.get('WEBDOC_INDEX_WORKERS', '16'))))
+                workers = 1  # bounded parser process handles CPU work; keep scan concurrency bounded
                 with ThreadPoolExecutor(max_workers=workers) as ex:
                     for res in ex.map(read_parse, files, chunksize=64):
                         self.progress['done'] += 1

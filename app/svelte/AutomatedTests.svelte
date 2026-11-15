@@ -24,6 +24,8 @@
   connected until the reader picks one.
 -->
 <script lang="ts">
+  import { isReadOnly } from '/js/policy.js';
+  const readOnly = isReadOnly();
   import { checkIcon, closeIcon, circleIcon } from '/js/icons.js';
   import { state as appState } from '/js/app-shell.js';
   import { uniqueBy } from '/js/lists.js';
@@ -164,14 +166,14 @@
           <span class="cov-vtest-name">{tc.name}</span>
           <span class="cov-vtest-id">{tc.classname || tc.suite || ''}</span>
         </div>
-        <button
+        {#if !readOnly}<button
           type="button"
           class="cov-vtest-rm"
           title="Disconnect this automated test"
           disabled={busy === keyOf(tc)}
           onclick={() => disconnect(tc)}
           use:icon={closeIcon}
-        ></button>
+        ></button>{/if}
       </div>
     {/each}
     {#each declared as a (a.name)}
@@ -184,6 +186,7 @@
       </div>
     {/each}
   </div>
+  {#if !readOnly}
   <div class="cov-vtest-add">
     <input
       class="cov-vtest-search"
@@ -208,4 +211,5 @@
     <input class="cov-vtest-search" placeholder="Add an external xUnit URL…" bind:value={url} onkeydown={onUrlKey} />
     <button type="button" class="blk-small" disabled={fetching} onclick={addUrl}>Add</button>
   </div>
+  {/if}
 </div>

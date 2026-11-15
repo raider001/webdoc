@@ -5,6 +5,7 @@
 // on demand (whose <!--meta--> header is split off client-side).
 
 import { setActiveProject } from './project.js';
+import { projectRoute } from './project-navigation.js';
 import { errorMessage } from './errors.js';
 import { uniqueStrings } from './lists.js';
 
@@ -29,10 +30,12 @@ export interface SourceConfig {
  * referenced here rather than redeclared.
  */
 export interface SiteConfig {
+  readOnly?: boolean;
   /** Top-level sources config: preserve its existing hash-only page URLs. */
   legacy?: boolean;
   project?: string;
-  projects?: { name: string; title: string; sources: string[] }[];
+  projects?: ProjectSummary[];
+  startPage?: boolean;
   siteTitle: string;
   defaultDoc: string;
   theme?: string;
@@ -40,6 +43,14 @@ export interface SiteConfig {
   plugins?: string[];
   auth?: import('./auth.js').AuthPolicy;
   sources: SourceConfig[];
+}
+
+export interface ProjectSummary {
+  name: string;
+  title: string;
+  description?: string;
+  defaultDoc?: string;
+  sources: string[];
 }
 
 /**
@@ -89,19 +100,20 @@ export async function loadSite(): Promise<SiteConfig> {
   const res = await fetch('/site.json', { cache: 'no-cache' });
   if (!res.ok) throw new Error('Could not load /site.json (' + res.status + ')');
   let site: SiteConfig = await res.json();
-  const requested = new URLSearchParams(location.search).get('project');
-  const source = decodeURIComponent(location.hash.slice(2).split('/')[0]);
-  const selected = requested || site.projects?.find(p => p.sources.includes(source))?.name || site.project;
+  const { project: selected, startPage } = projectRoute(site, location.search, location.hash);
   if (selected && selected !== site.project) {
     const scoped = await fetch('/site.json?project=' + encodeURIComponent(selected), { cache: 'no-cache' });
     if (!scoped.ok) throw new Error('Unknown project: ' + selected);
     site = await scoped.json();
   }
+  site.startPage = startPage;
+  if (startPage) site.project = undefined;
   setActiveProject(site.project || null);
   if (site.project && !site.legacy) {
     const url = new URL(location.href);
     url.searchParams.set('project', site.project);
-    history.replaceState(null, '', url);
+    url.searchParams.delete('view');
+    history.replaceState(history.state, '', url);
   }
   return site;
 }

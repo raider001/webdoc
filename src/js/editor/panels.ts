@@ -1,10 +1,11 @@
 // editor/panels.ts - the editor's document-metadata side panel and the
 // standalone "new document" modal (choose source + web path).
 import { elem, append } from '../dom.js';
-import { labelEl, labeledInput, labeledTextarea } from './ui.js';
+import { labeledTextarea } from './ui.js';
 import { closeIcon } from '../icons.js';
 import { auth } from '../auth.js';
 import { groupChip, destroyGroupChip } from '../auth-ui.js';
+import { openDialog } from './dialog.js';
 
 import type { DocMeta } from './serialize.js';
 import type { NewDocModalOpts } from '../authoring.js';
@@ -36,7 +37,7 @@ export function metadataPanel(meta: Partial<DocMeta>, allDocs: DocPickerEntry[],
   meta.next = meta.next || [];
   return elem('aside', 'editor-meta',
     elem('h2', 'editor-meta-h', 'Document metadata'),
-    labeledInput('Title', meta.title || '', v => meta.title = v),
+    labeledTextarea('Title', meta.title || '', v => meta.title = v),
     labeledTextarea('Description', meta.description || '', v => meta.description = v),
     docPicker('Assumed knowledge', meta.assumes, allDocs, selfId),
     docPicker('Recommended next', meta.next, allDocs, selfId),
@@ -134,48 +135,64 @@ function accessField(meta: Partial<DocMeta>, access: DocAccess | null): HTMLElem
 function docPicker(label: string, arr: string[], allDocs: DocPickerEntry[], selfId: string): HTMLElement {
   const chips = elem('div', 'meta-chips');
 
-  const select = elem('select', 'meta-select', elem('option', { value: '' }, '+ add…'));
-  for (const doc of allDocs || []) {
-    if (doc.id === selfId) continue;
-    append(select, elem('option', { value: doc.id }, doc.title + '  (' + doc.id + ')'));
+  const select = elem('input', { class: 'meta-select', type: 'search', 'aria-label': 'Search ' + label, placeholder: 'Search documents…', role: 'combobox', 'aria-expanded': 'false', 'aria-autocomplete': 'list' });
+  const results = elem('div', { class: 'meta-results', role: 'listbox', hidden: true, 'aria-label': label + ' results', id: 'picker-' + label.replace(/\W/g, '') });
+  select.setAttribute('aria-controls', results.id);
+  let active = -1;
+  function search() {
+    const q = select.value.toLowerCase(); active = -1; results.replaceChildren();
+    const matches = allDocs.filter(d => d.id !== selfId && !arr.includes(d.id) && (d.id + ' ' + d.title).toLowerCase().includes(q)).slice(0, 20);
+    matches.forEach((doc, i) => results.append(elem('button', { type: 'button', role: 'option', id: results.id + '-' + i, 'aria-selected': 'false', onClick: () => {
+      arr.push(doc.id); select.value = ''; redraw(); hide(); select.focus(); select.dispatchEvent(new Event('input', { bubbles: true })); hide();
+    } }, doc.title + ' (' + doc.id + ')')));
+    if (!matches.length) results.append(elem('span', undefined, 'No matching documents'));
+    results.hidden = false; select.setAttribute('aria-expanded', 'true');
   }
-  select.addEventListener('change', () => {
-    if (select.value && !arr.includes(select.value)) { arr.push(select.value); redraw(); }
-    select.value = '';
+  function hide() { results.hidden = true; select.setAttribute('aria-expanded', 'false'); select.removeAttribute('aria-activedescendant'); }
+  select.addEventListener('input', search); select.addEventListener('focus', search);
+  select.addEventListener('keydown', e => {
+    const options = [...results.querySelectorAll('button')];
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hide(); }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); if (results.hidden) search();
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+      options.forEach((o, i) => o.setAttribute('aria-selected', String(i === active)));
+      if (options[active]) { select.setAttribute('aria-activedescendant', options[active].id); options[active].scrollIntoView({ block: 'nearest' }); }
+    } else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); options[active]?.click(); }
   });
+  const picker = elem('div', 'meta-field', elem('span', undefined, label), chips, select, results);
+  picker.addEventListener('focusout', e => { if (!picker.contains(e.relatedTarget as Node)) hide(); });
 
   function redraw() {
     chips.textContent = '';
     arr.forEach((id, i) => {
-      const remove = elem('button', { onClick: () => { arr.splice(i, 1); redraw(); } }, closeIcon());
+      const remove = elem('button', { type: 'button', 'aria-label': 'Remove ' + id, onClick: () => { arr.splice(i, 1); redraw(); select.focus(); select.dispatchEvent(new Event('input', { bubbles: true })); } }, closeIcon());
       append(chips, elem('span', 'meta-chip', id, remove));
     });
   }
   redraw();
 
-  return elem('div', 'meta-field', elem('label', undefined, label), chips, select);
+  return picker;
 }
 
 /* ---- new-document modal ---- */
 export function openNewDocModal(opts: NewDocModalOpts): void {
   const sourceSelect = elem('select');
-  for (const s of opts.sources) append(sourceSelect, elem('option', { value: s.name }, s.name + '  (' + s.component + ')'));
+  for (const s of opts.sources) append(sourceSelect, elem('option', { value: s.name }, s.name + (s.component && s.component !== s.name ? ' (' + s.component + ')' : '')));
 
   const pathInput = elem('input', { placeholder: 'guides/setup/installation' });
   const preview = elem('div', 'modal-preview');
   const error = elem('div', 'modal-err');
 
   const modal = elem('div', 'modal',
-    elem('h2', undefined, 'New document'),
-    elem('div', 'modal-field', labelEl('Component / source'), sourceSelect),
-    elem('div', 'modal-field', labelEl('Path (folders you choose)'), pathInput),
+    elem('label', 'modal-field', 'Component / source', sourceSelect),
+    elem('label', 'modal-field', 'Path (folders you choose)', pathInput),
     preview,
     error,
     elem('div', 'modal-bar',
-      elem('button', { class: 'btn', onClick: close }, 'Cancel'),
-      elem('button', { class: 'btn btn-primary', onClick: submit }, 'Create'))
+      elem('button', { type: 'button', class: 'btn', onClick: close }, 'Cancel'),
+      elem('button', { type: 'submit', class: 'btn btn-primary' }, 'Create'))
   );
-  const scrim = elem('div', 'modal-scrim', modal);
 
   /**
    * The composed id: <source>/<path>, with any leading/trailing slashes and
@@ -190,7 +207,7 @@ export function openNewDocModal(opts: NewDocModalOpts): void {
     preview.textContent = id ? 'Will create:  ' + id : '';
     error.textContent = '';
   }
-  function close() { scrim.remove(); }
+  function close() { dialog.close(); }
   function submit() {
     const id = docId();
     if (!id || !pathInput.value.trim()) { error.textContent = 'Enter a path.'; return; }
@@ -204,13 +221,9 @@ export function openNewDocModal(opts: NewDocModalOpts): void {
   pathInput.addEventListener('input', updatePreview);
   updatePreview();
 
-  scrim.addEventListener('click', e => { if (e.target === scrim) close(); });
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
-  });
-
-  document.body.appendChild(scrim);
-  setTimeout(() => pathInput.focus(), 30);
+  modal.className = '';
+  error.setAttribute('role', 'alert');
+  const dialog = openDialog('New document', modal, { initial: pathInput, onSubmit: submit });
 }
 
 /* ---- confirm dialog (reusable yes/no modal) ---- */
@@ -239,32 +252,23 @@ export function confirmDialog(opts?: ConfirmDialogOptions): Promise<boolean> {
     function finish(value: boolean) {
       if (done) return;
       done = true;
-      document.removeEventListener('keydown', onKey, true);
-      scrim.remove();
+      dialog.close();
       resolve(value);
     }
-    // Capture phase so Enter / Escape here don't also trigger the map / coverage
-    // overlay's own key handlers underneath (which would e.g. close the map).
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
-      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); finish(true); }
-    }
-
+    // Native button activation handles Enter; Cancel never submits the form.
     const cancel = alertOnly ? null
-      : elem('button', { class: 'btn', onClick: () => finish(false) }, opts.cancelLabel || 'Cancel');
-    const ok = elem('button', { class: 'btn ' + (opts.danger ? 'btn-danger' : 'btn-primary'), onClick: () => finish(true) },
+      : elem('button', { type: 'button', class: 'btn', onClick: () => finish(false) }, opts.cancelLabel || 'Cancel');
+    const ok = elem('button', { type: 'submit', class: 'btn ' + (opts.danger ? 'btn-danger' : 'btn-primary') },
       opts.confirmLabel || 'OK');
 
     const modal = elem('div', 'modal modal-confirm',
-      elem('h2', undefined, opts.title || 'Are you sure?'),
       opts.message && elem('p', 'modal-msg', opts.message),
       elem('div', 'modal-bar', cancel, ok)
     );
-    const scrim = elem('div', 'modal-scrim', modal);
-
-    scrim.addEventListener('click', e => { if (e.target === scrim) finish(false); });
-    document.addEventListener('keydown', onKey, true);
-    document.body.appendChild(scrim);
-    setTimeout(() => ok.focus(), 30);
+    modal.className = 'modal-confirm';
+    const dialog = openDialog(opts.title || 'Are you sure?', modal, {
+      initial: opts.danger && cancel ? cancel : ok, onSubmit: () => finish(true),
+      onClose: () => { if (!done) { done = true; resolve(false); } }
+    });
   });
 }

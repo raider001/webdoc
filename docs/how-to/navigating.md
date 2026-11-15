@@ -11,6 +11,12 @@ are the short version.
 
 ## Move between documents
 
+To switch projects, click the current project's title in the header (or focus
+it and press Enter or Space). Use the arrow keys to select a project, then
+Enter to open its default page. Escape closes the menu and restores focus.
+**All projects** opens the site's start page; each card shows a title, project
+name, optional description and page count. Unsaved edits ask before switching.
+
 Open the tree drawer with the hamburger button — the menu icon at the far left
 of the header, labelled "Open document navigation". The drawer lists every
 document as a folder tree derived from the document ids: source folders sit at

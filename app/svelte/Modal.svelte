@@ -11,7 +11,7 @@
   DOM contract, unchanged from modal(): `div.modal-scrim > div.modal(.modal-wide)
   > h2 + <body> + div.modal-bar > <buttons>`. The h2 carries no class - app.css
   styles it by descent - and .modal-scrim / .modal / .modal-bar / .modal-field
-  all live in app/css/editor.css, shared with the editor's own modals.
+  all live in app/css/app.css, shared with the editor's own modals.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';

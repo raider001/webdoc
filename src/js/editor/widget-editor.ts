@@ -16,7 +16,7 @@ export function widgetEditor(widget: WidgetEditorBlock, docId: string, children:
   const element = elem('div', { class: 'blk-widget', 'data-widget-type': String(widget.options.widget) });
   const preview = elem('div', { class: 'blk-widget-preview', 'aria-label': name + ' preview' });
   const settings = elem('section', { class: 'blk-widget-settings', hidden: true, 'aria-label': name + ' settings', id: 'widget-settings-' + (++nextPreview) });
-  const edit = elem('button', { type: 'button', class: 'widget-edit-btn', 'aria-label': 'Edit ' + name, 'aria-controls': settings.id, 'aria-expanded': false }, '⚙ Edit');
+  const edit = elem('button', { type: 'button', class: 'btn widget-edit-btn', 'aria-label': 'Edit ' + name, 'aria-controls': settings.id, 'aria-expanded': false }, '⚙ Edit');
   let timer: ReturnType<typeof setTimeout> | undefined;
   let destroyed = false;
   const path = 'editor-widget-' + nextPreview;

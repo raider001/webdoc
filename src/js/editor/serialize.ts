@@ -163,7 +163,12 @@ function escInline(s: string): string {
 function inlineToMd(node: Node): string {
   let out = '';
   node.childNodes.forEach(n => {
-    if (n.nodeType === 3) { out += escInline(n.nodeValue || ''); return; }   // a text node always has one; `|| ''` is a no-op there
+    if (n.nodeType === 3) {
+      // The renderer emits <br>\n for a hard break. That formatting newline
+      // must not become a second Markdown newline (and split the paragraph).
+      const value = n.previousSibling instanceof Element && n.previousSibling.tagName === 'BR' ? (n.nodeValue || '').replace(/^\r?\n/, '') : n.nodeValue || '';
+      out += escInline(value); return;
+    }
     if (n.nodeType !== 1) return;
     const el = n as Element;
     const tag = el.tagName.toLowerCase();
@@ -179,6 +184,7 @@ function inlineToMd(node: Node): string {
     // fell through to `inner` (empty) and inline images were silently lost on save.
     else if (tag === 'img') out += '![' + (el.getAttribute('alt') || '') + '](' + mdDest(el.getAttribute('data-mdsrc') || el.getAttribute('src') || '') + ')';
     else if (tag === 'br') out += '  \n';
+    else if (tag === 'div' || tag === 'p') out += (out && !out.endsWith('\n') ? '  \n' : '') + inner + '  \n';
     else out += inner;
   });
   return out.replace(/\s+$/g, s => s.replace(/[^\n]/g, ' ')); // keep trailing spaces sane
@@ -219,10 +225,13 @@ export function blockToMd(b: MdSourceBlock): string {
     case 'heading': return '#'.repeat(b.level) + ' ' + b.text;
     case 'paragraph': return b.text;
     case 'quote': return b.text.split('\n').map(l => '> ' + l).join('\n');
-    case 'list': return b.items.map(it => (b.ordered ? '1. ' : '- ') + it).join('\n');
+    case 'list': {
+      const marker = b.ordered ? '1. ' : '- ';
+      return b.items.map(it => marker + it.replace(/\n/g, '\n' + ' '.repeat(marker.length))).join('\n');
+    }
     case 'code': return '```' + (b.lang || '') + '\n' + b.code.replace(/\n$/, '') + '\n```';
     case 'hr': return '---';
-    case 'image': return '![' + (b.alt || '') + '](' + (b.src || '') + ')';
+    case 'image': return '![' + (b.alt || '') + '](' + mdDest(b.src || '') + ')';
     case 'table': {
       // GFM pipe table. Cells are inline HTML (rich-text contenteditable) -> convert
       // each to inline Markdown, then escape literal pipes and collapse newlines
@@ -233,7 +242,7 @@ export function blockToMd(b: MdSourceBlock): string {
       const rows = b.rows || [];
       const esc = (s: string): string => String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\r?\n+/g, ' ');
       /** @param html one cell's inline HTML */
-      const cellMd = (html: string): string => esc(htmlToMd(String(html == null ? '' : html)));
+      const cellMd = (html: string): string => esc(htmlToMd(String(html == null ? '' : html)).replace(/ *\n/g, '<br>'));
       /** @param a a column's align attribute */
       const sepFor = (a: string): string => a === 'center' ? ':---:' : a === 'right' ? '---:' : a === 'left' ? ':---' : '---';
       // Driven by `headers`, not by the row, so a ragged row is padded rather than
@@ -458,7 +467,15 @@ export function parseDoc(rawBody: string, docMeta?: Partial<DocMeta> & Record<st
     const hit = placeholder(el.textContent.trim());
     if (hit) { blocks.push(hit); return; }
     if (/^h[1-6]$/.test(tag)) blocks.push({ type: 'heading', level: +tag[1], html: stripNums(el) });
-    else if (tag === 'p') blocks.push({ type: 'paragraph', html: el.innerHTML });
+    else if (tag === 'p') {
+      // CommonMark wraps even a standalone image in <p>. Reopen it with the
+      // image controls/preview; retain mixed prose and linked images as inline
+      // HTML so their surrounding text/link is never discarded.
+      const content = [...el.childNodes].filter(n => n.nodeType !== 3 || n.textContent?.trim());
+      const img = content.length === 1 && content[0] instanceof HTMLImageElement ? content[0] : null;
+      if (img) blocks.push({ type: 'image', src: img.getAttribute('src') || '', alt: img.getAttribute('alt') || '' });
+      else blocks.push({ type: 'paragraph', html: el.innerHTML });
+    }
     else if (tag === 'blockquote') blocks.push({ type: 'quote', html: el.innerHTML.replace(/<\/?p>/g, '').trim() });
     else if (tag === 'ul' || tag === 'ol') blocks.push({ type: 'list', ordered: tag === 'ol', itemsHtml: [...el.children].map(li => li.innerHTML) });
     else if (tag === 'pre') { const code = el.querySelector('code'); blocks.push({ type: 'code', lang: langOf(code), code: (code || el).textContent.replace(/\n$/, '') }); }
@@ -520,7 +537,7 @@ function tableBlock(table: HTMLTableElement): TableBlock {
  */
 export function toMarkdownBlocks(blocks: Block[]): MdSourceBlock[] {
   return blocks.map(b => {
-    if (b.type === 'heading') return { type: b.type, level: b.level || 2, text: htmlToMd(b.html) };
+    if (b.type === 'heading') return { type: b.type, level: b.level || 2, text: htmlToMd(b.html).replace(/ *\n/g, '<br>') };
     if (b.type === 'paragraph' || b.type === 'quote') return { type: b.type, text: htmlToMd(b.html) };
     if (b.type === 'list') return { type: b.type, ordered: b.ordered, items: b.itemsHtml.map(htmlToMd).filter(text => text !== '') };
     if (b.type === 'widget') return { ...b, blocks: toMarkdownBlocks(b.blocks) };

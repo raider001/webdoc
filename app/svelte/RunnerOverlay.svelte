@@ -193,7 +193,7 @@
   <div class="runner-bar">
     <span class="runner-title">Test run</span>
     <span class="runner-progress">{progress}</span>
-    <span style="flex:1"></span>
+    <span class="wd-flex-spacer"></span>
     <label class="runner-by-l">Tester <input class="runner-by" placeholder="name…" bind:value={by} bind:this={byBox} /></label>
     <span class="runner-status">{status}</span>
     <button type="button" class="btn" onclick={onClose}>Close</button>

@@ -33,8 +33,10 @@ def _bundle():
             "app/build/islands.js is missing. It is a COMMITTED build artifact - "
             "run `npm run build` and commit the result. See SVELTE_UPLIFT_PLAN.md."
         )
-    with open(BUNDLE, encoding="utf-8") as fh:
-        return fh.read()
+    # Runtime/control chunks stay local while /js imports stay external.
+    folder = os.path.dirname(BUNDLE)
+    return '\n'.join(open(os.path.join(folder, name), encoding='utf-8').read()
+                     for name in sorted(os.listdir(folder)) if name.endswith('.js'))
 
 
 def test_bundle_exists_and_is_not_empty():
@@ -44,7 +46,7 @@ def test_bundle_exists_and_is_not_empty():
 def test_every_import_is_a_root_absolute_app_module():
     """No bare specifiers, no relative paths, no URLs - only /js/... paths."""
     specs = {m.group(2) for m in SPECIFIER_RE.finditer(_bundle())}
-    bad = sorted(s for s in specs if not s.startswith("/js/"))
+    bad = sorted(s for s in specs if not (s.startswith("/js/") or re.fullmatch(r'\./[A-Za-z0-9_-]+\.js', s)))
     assert not bad, (
         f"The bundle carries non-app import specifiers: {bad}. A bare specifier "
         f"(e.g. 'svelte') cannot be resolved by a browser, and a relative path "
@@ -57,7 +59,7 @@ def test_every_external_import_resolves_to_a_real_served_file():
     missing = []
     for spec in sorted(specs):
         # The server maps a root-absolute URL onto APP_DIR.
-        fs = os.path.join(APP, spec.lstrip("/").replace("/", os.sep))
+        fs = os.path.join(os.path.dirname(BUNDLE), spec[2:]) if spec.startswith('./') else os.path.join(APP, spec.lstrip("/").replace("/", os.sep))
         if not os.path.isfile(fs):
             missing.append(spec)
     assert not missing, (
@@ -112,8 +114,9 @@ def test_bundle_ships_no_sourcemap():
     assert not os.path.isfile(BUNDLE + ".map")
 
 
-def test_build_dir_holds_exactly_one_file():
+def test_build_dir_holds_only_served_scripts_and_styles():
     entries = sorted(os.listdir(os.path.dirname(BUNDLE)))
-    assert entries == ["islands.js"], (
-        f"app/build/ should contain exactly one committed artifact, found {entries}."
-    )
+    assert 'islands.js' in entries and 'islands.css' in entries
+    assert any(re.fullmatch(r'runner-[A-Za-z0-9_-]+\.js', entry) for entry in entries)
+    assert any(re.fullmatch(r'RunControls-[A-Za-z0-9_-]+\.js', entry) for entry in entries)
+    assert all(re.fullmatch(r'[A-Za-z0-9_-]+\.(?:js|css)', entry) for entry in entries), entries

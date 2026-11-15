@@ -35,7 +35,10 @@
   the incoming controller had already asked for it.
 -->
 <script lang="ts">
+  import { isReadOnly } from '/js/policy.js';
+  const readOnly = isReadOnly();
   import { onMount } from 'svelte';
+  let root: HTMLDivElement;
   import { state as appState, app } from '/js/app-shell.js';
   import {
     mapState, mapBuildSeeds, rememberMapView, nextLayout,
@@ -116,6 +119,18 @@
   let apiOwner: object | null = null;
   let opening = true;
   onMount(() => {
+    let frame = 0;
+    let lastWidth = 0, lastHeight = 0;
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      if (width === lastWidth && height === lastHeight) return;
+      lastWidth = width; lastHeight = height;
+      cancelAnimationFrame(frame);
+      // The engine's resize observer updates its backing store first. Recenter
+      // in the next frame, after the split pane has its actual dimensions.
+      frame = requestAnimationFrame(() => { if (appState.current?.id) api?.focus(appState.current.id, true); });
+    });
+    resize?.observe(root);
     const follow = () => {
       const id = appState.current?.id || null;
       mapState.selectedId = id;
@@ -124,7 +139,7 @@
       else if (id) api?.focus(id);
     };
     document.addEventListener('webdoc:current', follow);
-    return () => document.removeEventListener('webdoc:current', follow);
+    return () => { resize?.disconnect(); cancelAnimationFrame(frame); document.removeEventListener('webdoc:current', follow); };
   });
   const treePreferenceKey = selectedTreePreferenceKey(appState.site, location.origin);
   mapState.selectedTreeOnly = readSelectedTreePreference(treePreferenceKey);
@@ -392,7 +407,7 @@
   });
 </script>
 
-<div class="graph-root" class:is-editing={change.editMode}>
+<div class="graph-root" class:is-editing={change.editMode} bind:this={root}>
   <!--
     The scene. {#key} is the rebuild: a new model or a new layout replaces the
     element, so the action tears the old controller down and builds a new one.
@@ -416,6 +431,8 @@
 
   <MapSearch onSearch={(query) => { if (api) api.search(query); }} />
 
+  <div class="graph-bottom-controls">
+  {#if !readOnly}<EditControls state={change} onToggle={() => { if (api) api.setEditMode(!change.editMode); }} />{/if}
   <div class="graph-legend">
     <button type="button" class="graph-legend-item graph-relayout" title="Rearrange the displayed nodes" onclick={() => nextLayout(true, false)}>Re-layout</button>
     <button type="button" class="graph-legend-item graph-compact-layout"
@@ -444,12 +461,12 @@
       <span class="graph-tree-hint" role="status">Select a page to show its tree</span>
     {/if}
   </div>
+  </div>
 
   {#if accessGroups.length}
     <GroupLegend groups={accessGroups} hidden={change.hiddenGroups} onToggle={toggleGroup} />
   {/if}
 
-  <EditControls state={change} onToggle={() => { if (api) api.setEditMode(!change.editMode); }} />
 
   {#if isEmpty}<MapEmpty />{/if}
 </div>

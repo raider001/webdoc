@@ -20,6 +20,7 @@ import { preprocessWidgets, renderWidgets } from './widgets.js';
 import { documentFingerprint } from './reader-fingerprint.js';
 import { captureReadingPosition } from './reader-position.js';
 import { plainTables } from './widgets/plain-table.js';
+import { isReadOnly } from './policy.js';
 
 import type { Doc } from './catalog.js';
 import type { TocEntry } from './numbering.js';
@@ -68,8 +69,9 @@ export function renderContent(markdown: string, docId: string, path = 'page', de
   renderWidgets(root, { docId, pageId, path, depth,
     renderContent: (body, sourceId, key, level, decorate) => renderContent(body, sourceId, key, level, decorate, pageId, decorate ? undefined : reuse),
     register: registerMounted, teardown: teardownMounted, reuse,
-    // Widgets on the page being read may save their own content; editor previews (another pageId) may not
-    save: pageId === docId
+    // Widgets on the page being read may save their own content; editor previews (another pageId) may not,
+    // and nothing may in read-only mode (policy.ts), which offers no write controls at all
+    save: pageId === docId && !isReadOnly()
       ? (options, oldInner, newInner) => app.saveWidgetContent
         ? app.saveWidgetContent(docId, options, oldInner, newInner)
         : Promise.reject(new Error('Editing is not available here.'))

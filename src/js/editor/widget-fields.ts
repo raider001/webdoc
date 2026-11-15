@@ -103,19 +103,21 @@ export function createWidgetFields(definition: WidgetDefinition | undefined, opt
   const globalErrors = new Map<string, string>();
   let custom: CustomWidgetEditor | undefined;
   let refreshing = false;
+  const touched = new Set<string>();
+  let submitted = false;
   const setError = (name: string, text = '') => {
     const item = controls.find(c => c.field.name === name);
     if (item) { item.external = text; check(item); }
     else { if (text) globalErrors.set(name, text); else globalErrors.delete(name); globalNote.textContent = [...globalErrors.values()].join(' · '); }
   };
   const globalNote = elem('p', { class: 'widget-field-error', role: 'status' });
-  function changed(field: WidgetField, value: unknown) { options[field.name] = value; setError(field.name); refresh(); onChange(); }
+  function changed(field: WidgetField, value: unknown) { touched.add(field.name); options[field.name] = value; setError(field.name); refresh(); onChange(); }
   function check(item: typeof controls[number]): boolean {
     try { item.root.hidden = !!item.field.visibleWhen && !item.field.visibleWhen(options); }
     catch (failure) { item.root.hidden = false; item.external = message(failure); }
     const text = item.root.hidden ? '' : item.external || item.control.invalid?.() || validateWidgetField(item.field, options[item.field.name] ?? item.field.default, options);
     item.error.textContent = text;
-    item.root.dataset.invalid = String(!!text);
+    item.root.dataset.invalid = String(!!text && (submitted || touched.has(item.field.name) || !!item.external));
     item.input?.setCustomValidity(text);
     item.input?.setAttribute('aria-invalid', String(!!text));
     return !text;
@@ -235,7 +237,7 @@ export function createWidgetFields(definition: WidgetDefinition | undefined, opt
     }
     const input = control.element.matches('input,select') ? control.element as HTMLInputElement | HTMLSelectElement : control.element.querySelector<HTMLInputElement | HTMLSelectElement>('input,select') || undefined;
     if (input) { input.id = 'widget-field-' + nextFieldId; input.setAttribute('aria-describedby', error.id); }
-    const label = elem('label', { class: 'meta-field', htmlFor: input?.id }, field.label);
+    const label = elem('label', { class: 'widget-field-label', htmlFor: input?.id }, field.label);
     root.append(label, control.element, ...(field.hint ? [elem('small', 'widget-field-hint', field.hint)] : []), error);
     controls.push({ field, control, root, input, error, external: '' }); element.append(root);
   }
@@ -248,7 +250,7 @@ export function createWidgetFields(definition: WidgetDefinition | undefined, opt
   }
   element.append(globalNote); refresh();
   return { element, refresh, setError,
-    validate() { refresh(); let valid = !globalErrors.size; for (const item of controls) if (!check(item)) valid = false; try { if (custom?.validate?.() === false) valid = false; } catch (failure) { setError('editor', message(failure)); valid = false; } return valid; },
+    validate() { submitted = true; refresh(); let valid = !globalErrors.size; for (const item of controls) if (!check(item)) valid = false; try { if (custom?.validate?.() === false) valid = false; } catch (failure) { setError('editor', message(failure)); valid = false; } return valid; },
     destroy() { abort.abort(); controls.forEach(c => c.control.destroy?.()); try { custom?.destroy?.(); } catch { /* isolated plugin cleanup */ } },
   };
 }

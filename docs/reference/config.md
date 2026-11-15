@@ -38,7 +38,7 @@ The fields:
 
 | Field | Type | Default | Meaning |
 | ----- | ---- | ------- | ------- |
-| `siteTitle` | string | `"Documentation"` | The site name, shown in the header and the browser tab. |
+| `siteTitle` | string | `"Documentation"` | The site name, shown on the start page and its browser tab. Within a project, the header shows the project's title. |
 | `sources` | object[] | `[]` | The library: one entry per mounted folder of documents (see below). |
 | `defaultDoc` | string | — | The document id opened when no deep-link is present. |
 | `theme` | string | `"auto"` | Passed through into `/site.json` but **not currently read** by the browser, so it has no effect on the rendered theme. The live theme is `light` or `dark`, chosen from `localStorage["wd-theme"]` (the reader's remembered choice) or, when nothing is stored, the OS `prefers-color-scheme`. |
@@ -70,6 +70,7 @@ human-readable `title`, its own `sources`, `defaultDoc` and `indexDir`:
     {
       "name": "LM",
       "title": "LM programme",
+      "description": "Programme requirements and test documentation.",
       "defaultDoc": "LM/overview",
       "indexDir": ".webdoc-index/LM",
       "sources": [{"name":"LM", "path":"E:/documents/lm", "component":"LM"}]
@@ -91,12 +92,31 @@ be unique. Component ids allow letters and digits only. A project may contain
 several sources, and those sources can reference one another. References to
 another project's documents or requirements remain unresolved.
 
-The header's Project selector navigates to `/?project=LM#/LM/overview`. Each
-project has a separate navigation tree, search index, requirement and test
+`description` is an optional string on each project, shown as plain text on its
+start-page card. Omit it to show just the title, name and page count. No new
+keys are required.
+
+The project title in the header is a button: click it or press Enter or Space
+to open the Projects menu. Arrow keys move through the projects; Home and End
+move to the first and last entries. Escape closes it and returns focus to the
+button. The current project is marked. Choose a project to open its default
+page, or **All projects** to open the start page. Unsaved edits trigger the
+discard dialog before either navigation.
+
+With two or more projects, a bare URL (no `?project=` and no page hash) opens
+the start page, headed by `siteTitle`, with a card and indexed page count per
+project. Selecting a card navigates to `/?project=LM#/LM/overview`. A single
+project still opens directly from a bare URL. **All projects** can explicitly
+open its start page using `?view=projects`. Legacy top-level `sources` keep
+their direct document entry behavior.
+
+Each project has a separate navigation tree, search index, requirement and test
 catalog, coverage and map. Index APIs take `?project=LM` (append with `&` when
 there are other parameters). `/site.json?project=LM` returns that project's
-sources and default document, plus the project selector's names and titles.
-Omitting the project parameter selects the first project.
+sources and default document, plus all projects' names, titles, optional
+descriptions, default documents and source names. The server API still defaults
+to the first project when its project parameter is omitted; the browser leaves
+the URL unselected when showing the start page.
 
 Document ids and source mounts remain unchanged: `LM/overview` and
 `/docs/LM/overview.md` still resolve. Direct source URLs infer their project;
@@ -117,8 +137,11 @@ as a single project and retains its original index location.
 Sources can additionally set `readOnly: true` to refuse document PUT/DELETE,
 result writes and test runs for that source, even when accounts are disabled.
 `excludeDirectories` is an optional list of case-insensitive directory-name glob
-patterns excluded from indexing. It does not change file-serving access policy;
-use ACLs or source mounts for access control.
+patterns excluded from indexing and HTTP access. Any matching path component
+returns 404 for reads and writes; matching entries are omitted from listings.
+Dotfiles and dot directories are also inaccessible on the raw document mount.
+Configured result feeds remain available through `/api/results/<source>` so a
+private `.results.xml` feed keeps working without exposing arbitrary dotfiles.
 
 ## Sources and components
 
@@ -205,7 +228,7 @@ accounts](Docs/how-to/accounts).
 ```json
 "auth": {
   "enabled": true,
-  "allowRegistration": true,
+  "allowRegistration": false,
   "requireApproval": false,
   "publicRead": false,
   "adminGroups": ["admins"],
@@ -229,9 +252,9 @@ accounts](Docs/how-to/accounts).
 | Field | Type | Default | Meaning |
 | ----- | ---- | ------- | ------- |
 | `enabled` | bool | `false` | Master switch. Everything else is inert while this is false. |
-| `allowRegistration` | bool | `true` | Whether visitors may create their own account. |
+| `allowRegistration` | bool | `false` | Whether visitors may create their own account. |
 | `requireApproval` | bool | `false` | Registered accounts start disabled until an administrator enables them. |
-| `firstUserIsAdmin` | bool | `true` | The first account on an empty server becomes an administrator. Without it a fresh install has nobody who can grant anything. |
+| `firstUserIsAdmin` | bool | `false` | Ignored legacy setting. Create the first administrator offline with `bootstrap_admin.py`; registration never grants administrator rights. |
 | `publicRead` | bool | `false` | Unrestricted documents are readable **without** signing in. Restricted ones still are not. |
 | `adminGroups` | string[] | `["admins"]` | Membership of any of these makes an account an administrator. |
 | `aclGroups` | string[] \| null | `null` | Who may create or change an access rule. `null` means the admin groups. This is what stops an author widening their own page's permissions. |
@@ -269,10 +292,30 @@ the accounts panel cannot silently create a group nothing grants.
 | `cookieSecure` | bool | `false` | Marks the session cookie `Secure`. **Set this true whenever the site is served over HTTPS.** |
 | `trustedProxies` | string[] | `[]` | Peers whose `X-Forwarded-For` may be believed, for rate limiting. Empty means never — trusting it from anyone would let a caller mint a new identity per guess. |
 | `securityHeaders` | bool | `true` | Send `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`. |
-| `contentSecurityPolicy` | string | — | Replace the generated CSP wholesale. The default is same-origin only, with a hash for the theme-resolving inline script, so it needs no `unsafe-inline`. |
+| `contentSecurityPolicy` | string | — | Add directives to the required baseline. A conflicting required directive or a script/style element override that weakens it prevents startup. The baseline permits only same-origin scripts/styles and the hashed theme script, with no `unsafe-inline`. |
 
 Sessions live in the server's memory and are never written to disk, so a restart
 signs everyone out — the safe default for a documentation server.
+
+## Global deployment policy
+
+| Top-level field | Default | Meaning |
+| --- | --- | --- |
+| `readOnly` | `false` | Refuse every method except GET/HEAD with 405 before routing; omit mutation/registration and runner modules. Published in `site.json`; the browser omits all mutation controls. `--read-only` also enables it. With accounts enabled, public reading of unrestricted documents is enabled. |
+| `allowedHosts` | loopback names with the listening port | Exact authorities, e.g. `["docs.example:443"]`; IPv6 uses brackets. Configure the Host your reverse proxy forwards. Unknown or duplicated Hosts are refused before routing. |
+| `maxDocBodyBytes` | `2097152` | Document upload ceiling (2 MiB), configurable from 1 byte to 16 MiB. |
+| `servedOverHttps` | `false` | Explicit operator assurance that users access HTTPS; enables HSTS. Never inferred from an untrusted forwarded header. |
+
+COOP, CORP and Permissions-Policy accompany the existing security headers. XML
+results shown to people without run rights omit runner text, paths and arbitrary
+properties. `runTests.env` is the complete explicit runner environment; nothing
+is inherited from the server. Add literal PATH/SystemRoot/tool variables there
+only when the configured runner requires them. Prefer absolute command paths.
+
+The index parser runs in a separate process with a 350 ms parse/IPC deadline and
+a bounded three-second cold worker startup. Timeout, malformed input or marker
+limits produce an administrator-only empty index entry. The watcher uses the
+same parser. Repair and edit the file to reindex it after a limit refusal.
 
 ## The server
 

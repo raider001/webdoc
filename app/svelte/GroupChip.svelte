@@ -17,6 +17,7 @@
   stays theme-controlled and nothing here hardcodes a colour.
 -->
 <script lang="ts">
+  import { color as dotColor } from './actions/color.js';
   import { groupColor, groupLabel } from '/js/auth.js';
 
   /**
@@ -39,4 +40,4 @@
   const label = $derived(groupLabel(name));
 </script>
 
-<span class="group-chip" class:is-small={small} {title}><span class="group-dot" style="background: {color}"></span>{label}</span>
+<span class="group-chip" class:is-small={small} {title}><span class="group-dot" use:dotColor={color}></span>{label}</span>

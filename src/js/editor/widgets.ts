@@ -2,9 +2,10 @@
 // group, test case, and the shared reference-picker (chips + autocomplete) that
 // backs both a requirement's Trace-To and a test case's Verifies.
 import { elem, append } from '../dom.js';
-import { smallBtn } from './ui.js';
+import { smallBtn, mdField } from './ui.js';
+import { tableRow, tableColumn } from './model.js';
 import { editable } from './richtext.js';
-import { plusIcon, minusIcon, closeIcon, lockIcon } from '../icons.js';
+import { plusIcon, closeIcon, lockIcon } from '../icons.js';
 import { auth } from '../auth.js';
 import { groupChip, destroyGroupChip } from '../auth-ui.js';
 import type { AccessStartBlock, AccessEndBlock } from '../editor.js';
@@ -29,15 +30,29 @@ export function tableEditor(b: TableBlock): HTMLElement {
 
   function draw() {
     box.textContent = '';
+    const change = (run: () => void, row = 0, col = 0) => {
+      run(); draw();
+      box.querySelectorAll<HTMLElement>('[contenteditable]')[Math.min(row * b.headers.length + col, (b.rows.length + 1) * b.headers.length - 1)]?.focus();
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const action = (label: string, run: () => void) => elem('button', { type: 'button', class: 'blk-small', 'aria-label': label, title: label, onClick: () => change(run) }, label.startsWith('Delete') ? '×' : label.includes('before') ? '+←' : '+→');
     const table = elem('table', 'blk-table',
-      elem('tr', undefined, b.headers.map((h, ci) => cell(h, v => b.headers[ci] = v, true))),
-      b.rows.map((row, ri) => elem('tr', undefined, row.map((c, ci) => cell(c, v => b.rows[ri][ci] = v, false)))));
+      elem('thead', undefined, elem('tr', undefined, b.headers.map((h, ci) => elem('th', undefined,
+        cell(h, v => b.headers[ci] = v, true),
+        elem('div', 'table-axis-actions',
+          action('Insert column before ' + (ci + 1), () => tableColumn(b, ci)),
+          action('Insert column after ' + (ci + 1), () => tableColumn(b, ci + 1)),
+          b.headers.length > 1 && action('Delete column ' + (ci + 1), () => tableColumn(b, ci, true))))))),
+      elem('tbody', undefined, b.rows.map((row, ri) => elem('tr', undefined,
+        row.map((c, ci) => cell(c, v => b.rows[ri][ci] = v, false)),
+        elem('td', 'table-axis-actions',
+          action('Insert row before ' + (ri + 1), () => tableRow(b, ri)),
+          action('Insert row after ' + (ri + 1), () => tableRow(b, ri + 1)),
+          action('Delete row ' + (ri + 1), () => tableRow(b, ri, true)))))));
     const controls = elem('div', 'blk-table-ctr',
-      smallBtn([plusIcon(), ' Row'], () => { b.rows.push(b.headers.map(() => '')); draw(); }),
-      smallBtn([plusIcon(), ' Column'], () => { b.headers.push('Column ' + (b.headers.length + 1)); b.aligns.push(''); b.rows.forEach(r => r.push('')); draw(); }),
-      b.rows.length > 0 && smallBtn([minusIcon(), ' Row'], () => { b.rows.pop(); draw(); }),
-      b.headers.length > 1 && smallBtn([minusIcon(), ' Column'], () => { b.headers.pop(); b.aligns.pop(); b.rows.forEach(r => r.pop()); draw(); }));
-    append(box, table, controls);
+      smallBtn([plusIcon(), ' Row'], () => change(() => tableRow(b, b.rows.length))),
+      smallBtn([plusIcon(), ' Column'], () => change(() => tableColumn(b, b.headers.length))));
+    append(box, elem('div', 'table-scroll', table), controls);
   }
 
   // Cells are rich text (contenteditable), so they hold inline Markdown - bold,
@@ -48,7 +63,8 @@ export function tableEditor(b: TableBlock): HTMLElement {
    * @param value inline HTML
    */
   function cell(value: string, onChange: (value: string) => void, isHeader: boolean): HTMLElement {
-    return elem(isHeader ? 'th' : 'td', undefined, editable(value || '', 'tablecell', onChange, ''));
+    const field = editable(value || '', 'tablecell', onChange, '');
+    return isHeader ? field : elem('td', undefined, field);
   }
 
   draw();
@@ -98,14 +114,14 @@ export function requirementWidget(b: ReqBlock, getReqs: GetReqs): HTMLElement {
       elem('div', 'req-row req-head', span('No.'), span('Description'), span('Trace to'), span('')),
       b.rows.map((r, i) => elem('div', 'req-row',
         field(r.no, v => r.no = v, 'no'),
-        field(r.description, v => r.description = v, 'wide'),
+        mdField(r.description, v => r.description = v, 'Requirement description ' + (i + 1)),
         traceToField(r, getReqs),
-        smallBtn(closeIcon(), () => { b.rows.splice(i, 1); if (!b.rows.length) b.rows.push({ no: '1', description: '', traceTo: '' }); draw(); }))),
-      elem('button', { class: 'blk-req-add', onClick: () => { b.rows.push({ no: String(b.rows.length + 1), description: '', traceTo: '' }); draw(); } }, plusIcon(), ' Requirement'));
+        elem('button', { type: 'button', class: 'blk-small', 'aria-label': 'Delete requirement ' + (i + 1), onClick: () => { b.rows.splice(i, 1); if (!b.rows.length) b.rows.push({ no: '1', description: '', traceTo: '' }); draw(); box.dispatchEvent(new Event('input', { bubbles: true })); } }, closeIcon()))),
+      elem('button', { type: 'button', class: 'blk-small blk-req-add', onClick: () => { b.rows.push({ no: String(b.rows.length + 1), description: '', traceTo: '' }); draw(); box.dispatchEvent(new Event('input', { bubbles: true })); } }, plusIcon(), ' Requirement'));
   }
 
   function field(value: string, onChange: (value: string) => void, cls: string): HTMLInputElement {
-    const input = elem('input', { class: 'req-f req-f-' + cls, value: value || '', onInput: () => onChange(input.value) });
+    const input = elem('input', { class: 'req-f req-f-' + cls, 'aria-label': 'Requirement number', value: value || '', onInput: () => onChange(input.value) });
     return input;
   }
 
@@ -145,7 +161,7 @@ export function testCaseWidget(b: TestCaseBlock, getReqs: GetReqs, comp?: string
   function labeled(text: string, node: HTMLElement) { append(box, elem('label', 'blk-reqgroup', text + ' ', node)); }
 
   labeled('Test key', input(b.key, v => { b.key = v.trim(); updatePreview(); }, 'e.g. login-valid'));
-  labeled('Name', input(b.name, v => b.name = v, 'e.g. Valid login'));
+  labeled('Name', mdField(b.name, v => b.name = v, 'Test name'));
   append(box, preview);
   updatePreview();
   append(box, elem('label', 'blk-reqgroup blk-tc-verifies', 'Verifies ',
@@ -159,8 +175,8 @@ export function testCaseWidget(b: TestCaseBlock, getReqs: GetReqs, comp?: string
       b.steps.map((s, i) => elem('div', 'req-row tc-erow',
         mdField(s.action, v => s.action = v, 'action (markdown ok)…'),
         mdField(s.expected, v => s.expected = v, 'expected response (markdown ok)…'),
-        smallBtn(closeIcon(), () => { b.steps.splice(i, 1); if (!b.steps.length) b.steps.push({ action: '', expected: '' }); draw(); }))),
-      elem('button', { class: 'blk-req-add', onClick: () => { b.steps.push({ action: '', expected: '' }); draw(); } }, plusIcon(), ' Step'));
+        elem('button', { type: 'button', class: 'blk-small', 'aria-label': 'Delete step ' + (i + 1), onClick: () => { b.steps.splice(i, 1); if (!b.steps.length) b.steps.push({ action: '', expected: '' }); draw(); box.dispatchEvent(new Event('input', { bubbles: true })); } }, closeIcon()))),
+      elem('button', { type: 'button', class: 'blk-small blk-req-add', onClick: () => { b.steps.push({ action: '', expected: '' }); draw(); box.dispatchEvent(new Event('input', { bubbles: true })); } }, plusIcon(), ' Step'));
   }
 
   /**
@@ -173,13 +189,6 @@ export function testCaseWidget(b: TestCaseBlock, getReqs: GetReqs, comp?: string
   /**
    * A multi-line markdown source field (auto-grows to fit its content).
    */
-  function mdField(value: string, onChange: (value: string) => void, placeholder?: string): HTMLTextAreaElement {
-    const textarea = elem('textarea', { class: 'req-f req-f-md', value: value || '', rows: 1, placeholder: placeholder || '' });
-    const grow = () => { textarea.style.height = 'auto'; textarea.style.height = Math.max(30, textarea.scrollHeight) + 'px'; };
-    textarea.addEventListener('input', () => { onChange(textarea.value); grow(); });
-    setTimeout(grow, 0);
-    return textarea;
-  }
 
   draw();
   return box;
@@ -202,15 +211,15 @@ function traceToField(r: RequirementRow, getReqs: GetReqs): HTMLElement {
 function refsField(initial: string[], onChange: (refs: string[]) => void, getReqs: GetReqs, placeholder?: string): HTMLElement {
   let refs = (initial || []).slice();
   const chips = elem('div', 'req-trace-chips');
-  const input = elem('input', { class: 'req-trace-inp', placeholder: refs.length ? '' : (placeholder || '') });
+  const input = elem('input', { class: 'req-trace-inp', 'aria-label': placeholder || 'Requirement references', placeholder: refs.length ? '' : (placeholder || '') });
   const wrap = elem('div', 'req-trace', chips, input);
 
-  function sync() { onChange(refs.slice()); }
+  function sync() { onChange(refs.slice()); wrap.dispatchEvent(new Event('input', { bubbles: true })); }
   function drawChips() {
     chips.textContent = '';
     const known = new Set(getReqs().map(q => q.id));
     refs.forEach((ref, i) => {
-      const remove = elem('button', { title: 'Remove', onClick: () => {
+      const remove = elem('button', { type: 'button', title: 'Remove ' + ref, 'aria-label': 'Remove ' + ref, onClick: () => {
         refs.splice(i, 1); drawChips(); sync(); input.placeholder = refs.length ? '' : (placeholder || '');
       } }, closeIcon());
       append(chips, elem('span', 'req-chip' + (known.has(ref) ? '' : ' req-chip-unknown'), ref, remove));
@@ -241,9 +250,9 @@ function refsField(initial: string[], onChange: (refs: string[]) => void, getReq
         elem('span', 'ac-id', match.id),
         elem('span', 'ac-desc', match.description || ''))));
     const rect = input.getBoundingClientRect();
-    drop.style.left = (window.scrollX + rect.left) + 'px';
+    drop.style.left = (window.scrollX + Math.max(8, Math.min(rect.left, innerWidth - Math.min(360, innerWidth - 16) - 8))) + 'px';
     drop.style.top = (window.scrollY + rect.bottom + 3) + 'px';
-    drop.style.minWidth = Math.max(240, rect.width) + 'px';
+    drop.style.width = Math.min(360, innerWidth - 16) + 'px';
     drop.hidden = false;
   }
   input.addEventListener('focus', () => { acActive = -1; openAc(); });
@@ -306,7 +315,7 @@ export function accessMarker(b: AccessStartBlock | AccessEndBlock, knownGroups?:
   }
 
   const label = elem('input', {
-    class: 'blk-lang', placeholder: 'Section label (optional)', value: b.label || '', disabled: !editableAcl,
+    class: 'blk-lang', 'aria-label': 'Section label (optional)', placeholder: 'Section label (optional)', value: b.label || '', disabled: !editableAcl,
     onInput: (e: Event) => { b.label = (e.target as HTMLInputElement).value; }
   });
 

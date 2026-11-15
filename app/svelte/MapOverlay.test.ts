@@ -45,6 +45,24 @@ it('opens on the current document and follows the reader without fetching a new 
   await waitFor(() => expect(last().controller.focus).toHaveBeenCalledWith('a'));
   expect(last().controller.setCurrent).toHaveBeenCalledWith('a');
 });
+
+it('recentres the current page after split-pane resizes without rebuilding the layout', async () => {
+  let resized!: ResizeObserverCallback;
+  const disconnect = vi.fn();
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) { resized = callback; } observe() {} disconnect = disconnect; });
+  try {
+    state.current = { id: 's', source: 'Docs', rel: 's.md', url: '/docs/Docs/s.md', name: 's.md' };
+    open(); await waitFor(() => expect(last().controller.focus).toHaveBeenCalledWith('s'));
+    const controller = last().controller; vi.mocked(controller.focus).mockClear();
+    resized([{ contentRect: { width: 550, height: 800 } }] as ResizeObserverEntry[], {} as ResizeObserver);
+    await waitFor(() => expect(controller.focus).toHaveBeenCalledWith('s', true));
+    vi.mocked(controller.focus).mockClear();
+    resized([{ contentRect: { width: 480, height: 800 } }] as ResizeObserverEntry[], {} as ResizeObserver);
+    await waitFor(() => expect(controller.focus).toHaveBeenCalledWith('s', true));
+    expect(records).toHaveLength(1);
+    cleanup(); expect(disconnect).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllGlobals(); }
+});
 describe('selected tree display control', () => {
   it('defaults compact layout on, preserves the camera on toggle, and remembers the opt-out', async () => {
     const view = open(); await waitFor(() => expect(records).toHaveLength(1));

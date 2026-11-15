@@ -36,8 +36,10 @@
 </script>
 
 <script lang="ts">
+  import { isReadOnly } from '/js/policy.js';
+  const readOnly = isReadOnly();
   import { onMount } from 'svelte';
-  import RunControls from './RunControls.svelte';
+  import RunControls from './InteractiveRuns.svelte';
   import { state as appState } from '/js/app-shell.js';
   import { requirementList, testList, setCoverageStatus } from '/js/requirements.js';
   import { loadResults, combinedStatus } from '/js/coverage.js';
@@ -209,12 +211,12 @@
   }
 </script>
 
-<div class="cov-run-sources">
+{#if !readOnly}<div class="cov-run-sources">
   {#each appState.site?.sources ?? [] as source (source.name)}
     <RunControls source={source.name} scope="source" />
   {/each}
-</div>
-{#if model.reqs.length}
+</div>{/if}
+{#if model.reqs.length || model.tests.length}
   <!--
     The graph's container. {#key} is the rebuild: a link or unlink replaces the
     element, so the action tears the old controller down (saving its pan/zoom)
@@ -242,5 +244,5 @@
 />
 
 <style>
-  .cov-run-sources { position: absolute; left: 12px; top: 12px; z-index: 4; display: flex; flex-direction: column; gap: 6px; max-width: 60%; max-height: 25%; overflow: auto; background: var(--surface); border-radius: 6px; }
+  .cov-empty { padding: 48px; color: var(--muted); text-align: center; }
 </style>

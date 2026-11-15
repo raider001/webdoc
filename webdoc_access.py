@@ -47,6 +47,7 @@ treated as restricted to nobody but administrators.
 """
 import json
 import re
+from bisect import bisect_right
 
 from webdoc_auth import normalize_groups, normalize_group
 
@@ -115,10 +116,8 @@ def fenced_ranges(body):
 
 
 def _in_fence(ranges, pos):
-    for a, b in ranges:
-        if a <= pos < b:
-            return True
-    return False
+    at = bisect_right(ranges, (pos, float('inf'))) - 1
+    return at >= 0 and ranges[at][0] <= pos < ranges[at][1]
 
 
 # An inline `code span`. Markers mentioned inside one are prose ABOUT the syntax,
@@ -221,13 +220,26 @@ def parse_section_regions(body):
     allowed. An unterminated start runs to the end of the document.
     """
     text = str(body)
-    ranges = fenced_ranges(text) + _code_span_ranges(text)
+    if sum(1 for _ in re.finditer(r'<!--\s*access\b', text, re.I)) > 128:
+        return [{"start": 0, "end": len(text), "inner_start": len(text), "inner_end": len(text), "spec": malformed_access()}]
+    if len(text) > 16 * 1024 * 1024 or text.count('<!--') > 4096:
+        return [{"start": 0, "end": len(text), "inner_start": len(text),
+                 "inner_end": len(text), "spec": malformed_access()}]
+    # Merge fence and inline-code intervals in one pass. They may overlap.
+    import heapq
+    ranges = []
+    for a, b in heapq.merge(fenced_ranges(text), _code_span_ranges(text)):
+        if ranges and a <= ranges[-1][1]:
+            ranges[-1] = (ranges[-1][0], max(b, ranges[-1][1]))
+        else:
+            ranges.append((a, b))
     regions = []
     depth = 0
     open_at = None
     open_spec = None
     open_inner = None
-    for m in ACCESS_TOKEN_RE.finditer(text):
+    from webdoc_index import comment_tokens
+    for m in comment_tokens(text, ACCESS_TOKEN_RE):
         if _in_fence(ranges, m.start()):
             continue
         kind = m.group(1).lower()

@@ -47,7 +47,7 @@ export { mountReqTable, mountTestCase } from './islands/requirements.js';
 // Phase 7 - the two full-screen test surfaces. Both return a teardown handle
 // and both callers must keep it: a coverage view left mounted while hidden keeps
 // a canvas rAF loop and window.__graph alive. See app/svelte/islands/coverage.ts.
-export { mountCoverageOverlay, mountRunner } from './islands/coverage.js';
+export { mountCoverageOverlay, loadRunner } from './islands/coverage.js';
 
 // Phase 8 - the document map. Same handle discipline as the coverage overlay,
 // and for the same reason. The second export is the seam the other way round:

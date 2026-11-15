@@ -88,7 +88,7 @@ class Runs:
             rid=self.pending.get()
             try: self._execute(rid)
             except Exception as exc:
-                with self.lock: self.records[rid].update(state='finished',error=str(exc))
+                with self.lock: self.records[rid].update(state='finished',error='Runner failed')
             finally: self.pending.task_done()
     def _execute(self,rid):
         rec=self.records[rid]; spec=self.specs[rec['source']]; output=spec['output'].with_name(spec['output'].stem+'.'+rid+'.xml')
@@ -98,7 +98,7 @@ class Runs:
         try:
             output.parent.mkdir(parents=True,exist_ok=True)
             cmd=[x.replace('{results}',str(output)) for x in spec['command']]+['--ids']+rec['ids']
-            env=dict(os.environ,**spec['env']); env.update(CUDA_VISIBLE_DEVICES='-1',PYTHONDONTWRITEBYTECODE='1')
+            env=dict(spec['env']); env.update(CUDA_VISIBLE_DEVICES='-1',PYTHONDONTWRITEBYTECODE='1')
             tree=ProcessTree(cmd,spec['cwd'],env)
             def drain():
                 while True:
@@ -133,7 +133,7 @@ class Runs:
                     actual_when = when
             except (ValueError, TypeError): actual_when = when
             nodes[tid]=stamp(node,actual_when,duration,rec['startedBy'])
-            ET.SubElement(nodes[tid].find('properties'),'property',name='webdoc.outputTail',value=rec['output'][-8192:])
+            # Stdout remains in privileged run status only, never in the public feed.
         try: merge_results(spec['feed'],nodes)
         except Exception as exc: problem='Result publication failed: '+str(exc)
         with self.lock:

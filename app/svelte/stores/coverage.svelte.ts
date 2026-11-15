@@ -34,6 +34,7 @@
 // The `.svelte.ts` extension is required - it is what tells the compiler to
 // process runes in a plain module rather than treat $state as an undefined name.
 import { onStatusChange } from '/js/requirements/store.js';
+import { untrack } from 'svelte';
 
 /**
  * The tick itself. One field, deliberately: adding the map here would create a
@@ -61,5 +62,8 @@ export function startCoverageSync(): void {
   subscribed = true;
   // No initial pull. There is nothing to pull - the data is read on demand via
   // statusOf() - and the first render already sees whatever the map holds now.
-  onStatusChange(() => { covStatus.version++; });
+  // A publisher may itself be a Svelte effect (the coverage overlay is one).
+  // Incrementing reads the old value; do not subscribe that publisher to the
+  // counter it is updating, or it repeatedly republishes its own status.
+  onStatusChange(() => { untrack(() => { covStatus.version++; }); });
 }

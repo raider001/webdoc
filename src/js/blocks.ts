@@ -23,6 +23,7 @@
 // ---------------------------------------------------------------------------
 
 import { elem } from './dom.js';
+import { safeUrl } from './sanitize.js';
 
 /**
  * The extra context object passed to a renderer's `render(source, ctx)` call:
@@ -86,23 +87,61 @@ function langOf(code: Element): string | null {
 }
 
 /**
+ * Live components a trusted renderer mounted itself - a plugin library's own
+ * viewer (software-design.ts). They are recorded by reference, which document
+ * content cannot forge the way it could forge a class name, and scrubRendered
+ * leaves their PRESENTATION alone: the component still owns that DOM and works
+ * through attributes a static-SVG allowlist strips (style, data-*, tabindex,
+ * aria-checked, its own SVG vocabulary). Executable content is still removed
+ * inside them: scripts, embedded documents, SVG animation, inline handlers and
+ * unsafe URLs.
+ */
+const liveMounts = new WeakSet<Element>();
+
+/** Mark `el` as the mount point of a live component (see scrubRendered). */
+export function trustLiveMount(el: Element): void { liveMounts.add(el); }
+
+/**
  * Defence-in-depth over renderer output: strip scripts, inline event handlers
  * and script-y URLs, while leaving SVG shapes intact. Never allowed to throw.
  */
 export function scrubRendered(container: HTMLElement): void {
+  const svgTags = new Set(['svg', 'g', 'defs', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'title', 'desc', 'marker', 'clippath', 'mask', 'lineargradient', 'radialgradient', 'stop', 'use']);
+  const attrs = new Set(['id', 'class', 'viewbox', 'xmlns', 'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'd', 'points', 'transform', 'fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray', 'stroke-linecap', 'stroke-linejoin', 'opacity', 'text-anchor', 'dominant-baseline', 'font-size', 'font-family', 'font-weight', 'offset', 'stop-color', 'stop-opacity', 'marker-start', 'marker-mid', 'marker-end', 'markerwidth', 'markerheight', 'refx', 'refy', 'orient', 'clippathunits', 'clip-path', 'gradientunits', 'gradienttransform', 'role', 'aria-label']);
   try {
-    container.querySelectorAll('script').forEach(s => s.remove());
+    const live = [container, ...Array.from(container.querySelectorAll('*'))].filter(el => liveMounts.has(el));
+    const owned = (el: Element) => live.some(root => root !== el && root.contains(el));
     container.querySelectorAll('*').forEach(el => {
+      const tag = el.localName.toLowerCase();
+      if (el.namespaceURI !== 'http://www.w3.org/2000/svg' || owned(el)) return;
+      if (!svgTags.has(tag)) { el.remove(); return; }
       for (const attr of Array.from(el.attributes)) {
         const name = attr.name.toLowerCase();
-        if (name.startsWith('on')) { el.removeAttribute(attr.name); continue; }
-        if ((name === 'href' || name === 'xlink:href' || name === 'src' || name === 'formaction') &&
-            /^\s*(javascript|vbscript|data:text\/html)/i.test(attr.value || '')) {
+        if (name === 'href' || name === 'xlink:href') {
+          // SVG references may only address a shape in this document.
+          if (!/^#[A-Za-z0-9_.:-]+$/.test(attr.value) || !safeUrl(attr.value)) el.removeAttribute(attr.name);
+        } else if (!attrs.has(name) || /url\s*\(/i.test(attr.value) && !/^url\(#[A-Za-z0-9_.:-]+\)$/.test(attr.value)) {
           el.removeAttribute(attr.name);
         }
       }
     });
-  } catch (e) { /* scrubbing must never break rendering */ }
+    // Core widget renderers build live controls and keep references/listeners on
+    // them. Scrub in place: replacing a subtree would detach those live handles.
+    const executable = /^(script|iframe|object|embed|meta|base|animate|animatemotion|animatetransform|set)$/;
+    container.querySelectorAll('script,style,foreignObject,foreignobject,animate,animateMotion,animateTransform,set,iframe,object,embed,form,link,meta,base,template,math,audio,video,source,track').forEach(el => {
+      if (!owned(el) || executable.test(el.localName.toLowerCase())) el.remove();
+    });
+    container.querySelectorAll('*').forEach(el => {
+      const presentation = owned(el);
+      for (const attr of Array.from(el.attributes)) {
+        if (attr.name.toLowerCase().startsWith('on') || (!presentation && attr.name.toLowerCase() === 'style') ||
+            ['srcdoc','formaction','action','srcset','background','ping'].includes(attr.name.toLowerCase()) ||
+            ['href','src','xlink:href','formaction'].includes(attr.name.toLowerCase()) && !safeUrl(attr.value)) el.removeAttribute(attr.name);
+      }
+    });
+  } catch {
+    container.replaceChildren(); // fail closed on any scrub failure
+  }
 }
 
 /**

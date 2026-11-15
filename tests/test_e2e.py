@@ -42,22 +42,55 @@ NESTED_DOCS = [
 ]
 DOC_IDS = TOP_LEVEL_DOCS + NESTED_DOCS
 
+# A cold native-module graph can outlast Playwright's five-second assertion
+# default on the constrained Windows fixture host. Use the same bounded boot
+# budget as the security browser checks; navigation assertions stay unchanged.
+BOOT_TIMEOUT_MS = 30000
+
 
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
 def boot(page):
     """Load the app root and wait until it reports ready."""
-    page.goto("/", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_have_attribute("data-app-ready", "1")
+    _cold_load(page, "/")
     return page
 
 
 def open_doc(page, doc_id):
     """Cold-load a specific document via its hash route and wait for ready."""
-    page.goto(f"/#/{doc_id}", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_have_attribute("data-app-ready", "1")
+    _cold_load(page, f"/#/{doc_id}")
     return page
+
+
+def _cold_load(page, url):
+    """Keep genuine boot failures actionable in the coordinator's text log."""
+    errors, pending = [], set()
+    def started(request):
+        pending.add(request.url)
+    def finished(request):
+        pending.discard(request.url)
+    def failed(request):
+        finished(request)
+        errors.append(f"{request.url}: {request.failure}")
+    def page_error(error):
+        errors.append(str(error))
+    def response_error(response):
+        if response.status >= 400:
+            errors.append(f"HTTP {response.status}: {response.url}")
+    listeners = {"request": started, "requestfinished": finished,
+                 "requestfailed": failed, "pageerror": page_error,
+                 "response": response_error}
+    for event, callback in listeners.items():
+        page.on(event, callback)
+    try:
+        page.goto(url, wait_until="domcontentloaded")
+        expect(page.locator("body")).to_have_attribute("data-app-ready", "1", timeout=BOOT_TIMEOUT_MS)
+    except AssertionError as exc:
+        raise AssertionError(f"{exc}\nBoot errors: {errors}; pending requests: {sorted(pending)}") from exc
+    finally:
+        for event, callback in listeners.items():
+            page.remove_listener(event, callback)
 
 
 # --------------------------------------------------------------------------- #

@@ -4,6 +4,8 @@ import RunControls from '../../app/svelte/RunControls.svelte';
 import TestCase from '../../app/svelte/TestCase.svelte';
 import { sourceRuns } from '/js/automated-runs.js';
 import { groupsByDoc } from '/js/requirements/store.js';
+// jsdom does not fetch link stylesheets; the resource boundary has its own tests.
+vi.mock('/js/styles.js', () => ({ loadStylesheet: vi.fn(async () => {}) }));
 let serial = 0;
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); groupsByDoc.clear(); });
 function server(cases: Record<string, any>, states: string[] = []): string {
@@ -29,10 +31,15 @@ describe('automated case and batch controls', () => {
     const source=server({T_Demo_one:{automated:true,runnable:true,result:'passed',lastRun:'2026-10-12T11:00:00+00:00',duration:.2}});
     const view=render(RunControls,{source,caseId:'T_Demo_one'});
     await view.findByText('Automated');expect(view.getByText('passed')).toBeTruthy();expect(view.getByText('Duration: 0.2s')).toBeTruthy();expect(view.getByText(/Last ran: 2026/)).toBeTruthy();
+    expect(view.getByText('Run now').getAttribute('title')).toBe('Run this test case');
   });
   it('keeps a clearly labelled manual recording event', async () => {
     const source=server({T_Demo_one:{automated:false,runnable:false}});const event=vi.fn();document.addEventListener('webdoc:run-test',event,{once:true});
-    const view=render(RunControls,{source,caseId:'T_Demo_one'});await view.findByText('Manual');await fireEvent.click(view.getByText('Record manual result'));expect(event).toHaveBeenCalled();expect(view.queryByText('Automated')).toBeNull();
+    const view=render(RunControls,{source,caseId:'T_Demo_one'});await view.findByText('Manual');
+    expect(view.getByText('Record manual result').getAttribute('title')).toBe('Run this test case');
+    await fireEvent.click(view.getByText('Record manual result'));expect(event).toHaveBeenCalled();
+    expect(event.mock.calls[0][0].detail).toEqual({testId:'T_Demo_one'});
+    expect(view.queryByText('Automated')).toBeNull();
   });
   it('reports unknown real run time without borrowing a feed timestamp', async () => {
     const source=server({T_Demo_one:{automated:true,runnable:false,result:'failed'}});const view=render(RunControls,{source,caseId:'T_Demo_one'});await view.findByText('Last real run unknown');expect((view.getByText('Run now') as HTMLButtonElement).disabled).toBe(true);expect(view.queryByText(/Last ran:/)).toBeNull();

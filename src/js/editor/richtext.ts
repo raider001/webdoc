@@ -3,12 +3,18 @@
 // popovers (the link one with internal-document URL autocomplete). Everything about
 // editing inline rich text.
 import { elem, append } from '../dom.js';
+import { openDialog } from './dialog.js';
 
 /* ---- editable inline field (contenteditable + inline toolbar) ---- */
 export function editable(html: string, cls: string, onChange: (html: string) => void, placeholder?: string): HTMLElement {
   const ed = elem('div', {
     class: 'blk-edit blk-edit-' + cls, contenteditable: 'true', 'data-ph': placeholder || '',
-    html, onInput: () => onChange(ed.innerHTML)
+    html, role: 'textbox', 'aria-multiline': 'true', 'aria-label': cls === 'tablecell' ? 'Table cell' : (placeholder || cls), onInput: () => onChange(ed.innerHTML)
+  });
+  ed.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    if (cls === 'tablecell' && !e.shiftKey) { e.preventDefault(); return; }
+    if (e.shiftKey) { e.preventDefault(); insertBreak(ed); }
   });
   attachInlineToolbar(ed);
   return ed;
@@ -30,6 +36,7 @@ export function richText(html: string, onChange: (html: string) => void, placeho
 
 // A small floating toolbar (Bold / Italic / Code / Link / Image) shown on selection.
 let sharedBar: HTMLDivElement | null = null;
+export function dismissInlineTools() { closeLinkPop(); if (sharedBar) sharedBar.style.display = 'none'; }
 /**
  * @param ed a contenteditable field
  */
@@ -53,6 +60,9 @@ export function attachInlineToolbar(ed: HTMLElement) {
   });
   ed.addEventListener('blur', () => setTimeout(() => { if (sharedBar && !sharedBar.matches(':hover')) sharedBar.style.display = 'none'; }, 150));
   ed.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); addLink(); }
+    if (e.key === 'Enter' && e.shiftKey && !e.defaultPrevented && !e.isComposing) { e.preventDefault(); insertBreak(ed); }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') { e.preventDefault(); addImage(); }
     if (e.ctrlKey || e.metaKey) {
       if (e.key === 'b') { e.preventDefault(); document.execCommand('bold'); }
       else if (e.key === 'i') { e.preventDefault(); document.execCommand('italic'); }
@@ -60,28 +70,28 @@ export function attachInlineToolbar(ed: HTMLElement) {
   });
   function showBar() {
     const sel = window.getSelection();
-    // Show while the caret is anywhere in this field (not only on a selection), so
-    // Link / Image can be inserted at an empty caret - e.g. into a blank table cell.
-    if (!sel || !sel.rangeCount || !ed.contains(sel.anchorNode)) { if (sharedBar) sharedBar.style.display = 'none'; return; }
+    // Selection tools stay out of the way while typing. Link/image shortcuts
+    // also work at an empty caret, including in table cells.
+    if (!sel || !sel.rangeCount || sel.isCollapsed || !ed.contains(sel.anchorNode)) { if (sharedBar) sharedBar.style.display = 'none'; return; }
     const bar = ensureBar();
     let r = sel.getRangeAt(0).getBoundingClientRect();
     if (!r.width && !r.height && !r.top) r = ed.getBoundingClientRect();   // empty node -> anchor to the field
     bar.style.display = 'flex';
-    bar.style.top = (window.scrollY + r.top - 40) + 'px';
-    bar.style.left = (window.scrollX + r.left) + 'px';
+    bar.style.top = (window.scrollY + (r.top >= 44 ? r.top - 40 : r.bottom + 4)) + 'px';
+    bar.style.left = (window.scrollX + Math.max(8, Math.min(r.left, innerWidth - bar.offsetWidth - 8))) + 'px';
   }
 }
 
 function ensureBar() {
   if (sharedBar) return sharedBar;
   // Buttons preventDefault on mousedown so the field keeps its selection.
-  const button = (label: string, run: () => void, title: string) => elem('button', { title, onMousedown: (e: Event) => { e.preventDefault(); run(); } }, label);
+  const button = (label: string, run: () => void, title: string) => elem('button', { type: 'button', title, 'aria-label': title, onMousedown: (e: Event) => e.preventDefault(), onClick: run }, label);
   sharedBar = elem('div', 'inline-bar',
     button('B', () => document.execCommand('bold'), 'Bold'),
     button('I', () => document.execCommand('italic'), 'Italic'),
     button('<>', wrapCode, 'Inline code'),
-    button('🔗', addLink, 'Link'),
-    button('🖼', addImage, 'Insert image'));
+    button('Link', addLink, 'Link'),
+    button('Image', addImage, 'Insert image'));
   document.body.appendChild(sharedBar);
   return sharedBar;
 }
@@ -159,6 +169,27 @@ function unwrapAnchor(a: Element) {
 }
 function fireInput(host: Element | null) { if (host) host.dispatchEvent(new Event('input', { bubbles: true })); }
 
+export function insertBreak(host: HTMLElement) {
+  const selection = window.getSelection(); if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0); if (!host.contains(range.commonAncestorContainer)) return;
+  range.deleteContents(); const br = document.createElement('br'); range.insertNode(br);
+  // insertNode splits a text node even at its end, leaving an EMPTY text
+  // sibling. That sibling cannot hold the final line's caret in Chromium:
+  // typing would go before the lone trailing br and glue the two lines.
+  // Inspect the remainder of the field (also across inline wrappers), rather
+  // than treating any nextSibling as visible content.
+  // A list item is its own visual line container, even when more items follow
+  // in the shared editable list. Keep its filler within that item.
+  const block = br.parentElement?.closest('li,div,p');
+  const line = block && host.contains(block) ? block : host;
+  const tail = range.cloneRange(); tail.selectNodeContents(line); tail.setStartAfter(br);
+  const remainder = tail.cloneContents();
+  // Keep the filler outside inline formatting so it cannot serialize as an
+  // extra hard break before a closing emphasis marker.
+  if (!remainder.textContent && !remainder.querySelector('br,img')) line.append(document.createElement('br'));
+  range.setStartAfter(br); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); fireInput(host);
+}
+
 // Image button on the inline toolbar: insert an <img> at the caret. Works in any
 // rich-text field, including table cells. A relative src (diagram.png, ../x.png) is
 // resolved for DISPLAY via the editor's image resolver (set by setImageResolver),
@@ -204,12 +235,6 @@ export interface PopoverRect { bottom: number; left: number }
 function popRow(labelText: string, input: HTMLElement) {
   return elem('label', 'link-pop-row', elem('span', undefined, labelText), input);
 }
-function positionPopover(pop: HTMLElement, rect: PopoverRect | null) {
-  const r = rect || { bottom: 80, left: 80 };
-  const width = 300;
-  pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
-  pop.style.left = (window.scrollX + Math.max(8, Math.min(r.left, window.innerWidth - width - 12))) + 'px';
-}
 
 // A minimal image popover (URL + Alt, Insert / Cancel), reusing the link popover's
 // shared state + styling. No doc autocomplete - image paths aren't in the doc index.
@@ -225,12 +250,12 @@ function openImagePopover(o: ImagePopoverOptions) {
     popRow('Image URL', urlInput),
     popRow('Alt text', altInput),
     elem('div', 'link-pop-bar',
-      elem('span', { style: 'flex:1' }),
-      elem('button', { type: 'button', onMousedown: (e: Event) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
-      elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Insert')));
-  document.body.appendChild(pop);
-  linkPop = pop;
-  positionPopover(pop, o.rect);
+      elem('span', { class: 'wd-flex-spacer' }),
+      elem('button', { type: 'button', onClick: closeLinkPop }, 'Cancel'),
+      elem('button', { type: 'submit', class: 'link-pop-apply' }, 'Insert')));
+  pop.className = 'link-fields';
+  const dialog = openDialog('Insert image', pop, { initial: urlInput, onSubmit: commit, onClose: () => { linkClose = null; } });
+  linkClose = dialog.close;
 
   function commit() {
     const url = normalizeImgUrl(urlInput.value);
@@ -238,14 +263,6 @@ function openImagePopover(o: ImagePopoverOptions) {
     o.onApply(altInput.value.trim(), url);
     closeLinkPop();
   }
-  [urlInput, altInput].forEach(i => i.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
-  }));
-  const off = (e: Event) => { if (linkPop && !linkPop.contains(e.target as Node)) closeLinkPop(); };
-  linkOff = off;   // closeLinkPop() unregisters it again through this same reference
-  setTimeout(() => document.addEventListener('mousedown', off), 0);
-  setTimeout(() => urlInput.focus(), 20);
 }
 
 // Image-src acceptance: relative paths are kept AS-IS (a bare "diagram.png" is a
@@ -270,8 +287,7 @@ function normalizeUrl(v: string): string {
 }
 
 /* ---- link popover (Text + URL, Apply / Unlink / Cancel) - replaces window.prompt ---- */
-let linkPop: HTMLDivElement | null = null;
-let linkOff: ((e: Event) => void) | null = null;
+let linkClose: (() => void) | null = null;
 /**
  * One internal-document suggestion in the URL autocomplete: the id is what gets
  * inserted as the link target, the title is what the dropdown shows.
@@ -282,8 +298,7 @@ export function setLinkDocs(docs: LinkDoc[]) { linkDocs = Array.isArray(docs) ? 
 let linkSearch: ((query: string) => Promise<LinkDoc[]>) | null = null;   // server-backed suggestions (scales past a client list)
 export function setLinkSearch(fn: (query: string) => Promise<LinkDoc[]>) { linkSearch = (typeof fn === 'function') ? fn : null; }
 function closeLinkPop() {
-  if (linkOff) { document.removeEventListener('mousedown', linkOff); linkOff = null; } // no leaked global listener
-  if (linkPop) { linkPop.remove(); linkPop = null; }
+  const close = linkClose; linkClose = null; close?.();
   document.querySelectorAll('.link-ac').forEach(n => n.remove());
 }
 
@@ -309,12 +324,12 @@ function openLinkPopover(o: LinkPopoverOptions) {
     popRow('URL', urlInput),
     elem('div', 'link-pop-bar',
       removeBtn,
-      elem('span', { style: 'flex:1' }),
-      elem('button', { type: 'button', onMousedown: (e: Event) => { e.preventDefault(); closeLinkPop(); } }, 'Cancel'),
-      elem('button', { type: 'button', class: 'link-pop-apply', onClick: commit }, 'Apply')));
-  document.body.appendChild(pop);
-  linkPop = pop;
-  positionPopover(pop, o.rect);
+      elem('span', { class: 'wd-flex-spacer' }),
+      elem('button', { type: 'button', onClick: closeLinkPop }, 'Cancel'),
+      elem('button', { type: 'submit', class: 'link-pop-apply' }, 'Apply')));
+  pop.className = 'link-fields';
+  const dialog = openDialog('Edit link', pop, { initial: urlInput, onSubmit: commit, onClose: () => { closeUrlAc(); acSeq++; linkClose = null; } });
+  linkClose = dialog.close;
 
   function commit() {
     const url = normalizeUrl(urlInput.value);
@@ -343,19 +358,16 @@ function openLinkPopover(o: LinkPopoverOptions) {
   function renderUrlAc() {
     if (!acItems.length) { if (acDrop) { acDrop.remove(); acDrop = null; } return; }
     if (acActive >= acItems.length) acActive = acItems.length - 1;
-    if (!acDrop) { acDrop = elem('div', 'ac-drop link-ac'); document.body.appendChild(acDrop); }
+    if (!acDrop) { acDrop = elem('div', { class: 'ac-drop link-ac', role: 'listbox', 'aria-label': 'Documents' }); pop.appendChild(acDrop); }
     // The line above makes it; a const also carries that through the forEach
     // closure below, which a reassignable `let` would not.
     const drop = acDrop;
     drop.textContent = '';
     acItems.forEach((d, idx) => append(drop,
-      elem('div', { class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: Event) => { e.preventDefault(); pickDoc(d); } },
+      elem('button', { type: 'button', role: 'option', 'aria-selected': idx === acActive, class: 'ac-opt' + (idx === acActive ? ' is-active' : ''), onMousedown: (e: Event) => e.preventDefault(), onClick: () => pickDoc(d) },
         elem('span', 'ac-id', d.title || d.id),
         elem('span', 'ac-desc', d.id))));
-    const rc = urlInput.getBoundingClientRect();
-    drop.style.left = (window.scrollX + rc.left) + 'px';
-    drop.style.top = (window.scrollY + rc.bottom + 3) + 'px';
-    drop.style.minWidth = Math.max(220, rc.width) + 'px';
+    drop.style.position = 'static'; drop.style.width = '100%';
   }
   function openUrlAc() {
     const raw = urlInput.value.trim();
@@ -395,11 +407,4 @@ function openLinkPopover(o: LinkPopoverOptions) {
     else if (e.key === 'Escape') { e.preventDefault(); closeLinkPop(); }
   });
 
-  const off = function (e: Event) {
-    const t = e.target as Element;
-    if (linkPop && !linkPop.contains(t) && !(t.closest && t.closest('.link-ac'))) closeLinkPop();
-  };
-  linkOff = off;   // closeLinkPop() unregisters it again through this same reference
-  setTimeout(() => document.addEventListener('mousedown', off), 0);
-  setTimeout(() => ((o.canText && !textInput.value) ? textInput : urlInput).focus(), 20);
 }

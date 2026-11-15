@@ -23,6 +23,10 @@ function context(): GraphContext {
 }
 
 describe('map viewport', () => {
+  it('recentres after a pane resize while preserving the reader zoom', () => {
+    const g = context(); g.k = 2.5; g.focus('open', true);
+    expect(g.k).toBe(2.5); expect(920 * g.k + g.tx).toBeCloseTo(500); expect(840 * g.k + g.ty).toBeCloseTo(350);
+  });
   it('centres and zooms an open page even after fitting a very large map', () => {
     const g = context(); g.fit(); expect(g.k).toBeLessThan(0.1);
     g.focus('open'); expect(g.k).toBeGreaterThanOrEqual(1);

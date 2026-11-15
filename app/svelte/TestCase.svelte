@@ -27,7 +27,9 @@
   run recolours it in place; see app/svelte/stores/coverage.svelte.ts.
 -->
 <script lang="ts">
-  import RunControls from './RunControls.svelte';
+  import { isReadOnly } from '/js/policy.js';
+  const readOnly = isReadOnly();
+  import RunControls from './InteractiveRuns.svelte';
   import { groupsByDoc } from '/js/requirements/store.js';
   import { warningIcon } from '/js/icons.js';
   import { statusOf, index } from '/js/requirements/store.js';
@@ -93,11 +95,11 @@
 
 <!-- Keyed by index throughout; see ReqTable.svelte for why an authored id is the
      wrong key for a list that is a parsed snapshot and never reorders. -->
-{#if groupsByDoc.get(rec.docId)?.filter(b => b.kind === 'test')[0]?.rec.id === rec.id}
+{#if !readOnly && groupsByDoc.get(rec.docId)?.filter(b => b.kind === 'test')[0]?.rec.id === rec.id}
   <RunControls source={rec.docId.split('/')[0]} ids={groupsByDoc.get(rec.docId)?.filter(b => b.kind === 'test').map(b => b.rec.id) || []} scope="page" />
 {/if}
 <figure class="req-group test-case" id={figId}>
-  <figcaption class="req-cap tc-cap">Test case — {rec.name} <span class="tc-id">{rec.id}</span><span class="tc-result tc-result-{st}">{resultLabel}</span>{#if addressable}<RunControls source={rec.docId.split('/')[0]} caseId={rec.id} />{/if}</figcaption>
+  <figcaption class="req-cap tc-cap">Test case — {rec.name} <span class="tc-id">{rec.id}</span><span class="tc-result tc-result-{st}">{resultLabel}</span>{#if addressable && !readOnly}<RunControls source={rec.docId.split('/')[0]} caseId={rec.id} />{/if}</figcaption>
   {#if block.error}<p class="req-error"><span class="wd-mounted" use:icon={warningIcon}></span> {block.error}</p>{/if}
   <p class="tc-verifies">Verifies: {#if rec.verifies.length}{#each rec.verifies as id, i (i)}{#if i}, {/if}<a class="req-link" href={reqHref(id)}>{id}</a>{/each}{:else}<span class="req-none">—</span>{/if}</p>
   <div class="req-scroll">

@@ -69,9 +69,9 @@ class Client:
                 # fast, and a spurious timeout in a security suite is worse than
                 # a slow one.
                 with self.opener.open(req, timeout=60) as resp:
-                    return Response(resp.status, resp.read(), dict(resp.headers))
+                    return Response(resp.status, resp.read(), resp.headers)
             except urllib.error.HTTPError as e:
-                return Response(e.code, e.read(), dict(e.headers))
+                return Response(e.code, e.read(), e.headers)
             except (urllib.error.URLError, http.client.HTTPException, OSError):
                 if attempt:
                     raise
@@ -115,7 +115,8 @@ class Response:
     def __init__(self, status, body, headers):
         self.status = status
         self.body = body
-        self.headers = headers
+        self.headers = dict(headers)
+        self.set_cookies = headers.get_all("Set-Cookie", [])
 
     def json(self):
         try:
@@ -239,6 +240,20 @@ class Server:
             json.dump(cfg, fh)
         self.proc = None
 
+    def bootstrap_admin(self, username="rootadmin", password="correct-horse-battery"):
+        """Exercise the offline CLI while the fixture server is stopped."""
+        assert self.proc is None or self.proc.poll() is not None
+        # Windows getpass reads the console even with redirected stdin. Adapt
+        # only the prompt; run the actual command's argument/config/store path.
+        entry = ("import sys,getpass,bootstrap_admin; "
+                 "getpass.getpass=lambda prompt:sys.stdin.readline().rstrip(chr(10)); "
+                 "bootstrap_admin.main()")
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", entry, "--config", self.config_path,
+             "--username", username], cwd=ROOT, input=password + "\n" + password + "\n",
+            capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+
     def start(self):
         # Log to a FILE, not a pipe. serve.py prints a line per request, and an
         # unread pipe fills at ~64 KB and blocks the server mid-response - which
@@ -309,16 +324,20 @@ def secured(tmp_path_factory):
         "groups": {"staff": {"label": "Staff", "color": "#3355ff"},
                    "ops": {"label": "Operations"},
                    "admins": {"label": "Administrators"}},
-    }).start()
-    yield s
-    s.stop()
+    })
+    s.bootstrap_admin()
+    try:
+        s.start()
+        yield s
+    finally:
+        s.stop()
 
 
 @pytest.fixture(scope="module")
 def accounts(secured):
     """One admin (the bootstrap account), one staff member, one plain reader."""
     admin = secured.client()
-    r = admin.register("rootadmin", "correct-horse-battery")
+    r = admin.login("rootadmin", "correct-horse-battery")
     assert r.status == 200, r.text()
     assert r.json()["user"]["admin"] is True
 
@@ -369,8 +388,22 @@ class TestAuthDisabled:
 # 2. registration + sign-in
 # --------------------------------------------------------------------------- #
 class TestAccounts:
-    def test_first_account_becomes_administrator(self, accounts):
+    def test_explicitly_bootstrapped_account_is_administrator(self, accounts):
         assert accounts["rootadmin"].get("/api/auth/me").json()["user"]["admin"] is True
+
+    def test_first_registration_never_becomes_administrator(self, tmp_path):
+        s = Server(tmp_path, {
+            "enabled": True, "allowRegistration": True, "firstUserIsAdmin": True,
+            "defaultGroups": ["admins"], "groups": {"admins": {"label": "Administrators"}},
+        })
+        try:
+            s.start()
+            r = s.client().register("firstvisitor", "correct-horse-battery")
+            assert r.status == 200, r.text()
+            assert r.json()["user"]["admin"] is False
+            assert "admins" not in r.json()["user"]["groups"]
+        finally:
+            s.stop()
 
     def test_later_accounts_are_not_administrators(self, accounts):
         assert accounts["plain"].get("/api/auth/me").json()["user"]["admin"] is False
@@ -392,16 +425,17 @@ class TestAccounts:
         assert "passwordHash" not in body
         assert "pbkdf2" not in body
 
-    def test_session_cookie_is_httponly_and_samesite(self, secured):
+    def test_session_cookie_is_httponly_and_samesite(self, secured, accounts):
         c = secured.client()
         c.bootstrap_csrf()
         r = c.post("/api/auth/login", {"username": "staffer", "password": "correct-horse-battery"})
-        setc = r.headers.get("Set-Cookie", "")
-        raw = "\n".join(v for k, v in r.headers.items() if k.lower() == "set-cookie") or setc
-        assert "HttpOnly" in raw
-        assert "SameSite=Strict" in raw
+        assert r.status == 200, r.text()
+        session_cookies = [value for value in r.set_cookies if value.startswith("wd_session=")]
+        assert len(session_cookies) == 1, r.set_cookies
+        assert "HttpOnly" in session_cookies[0]
+        assert "SameSite=Strict" in session_cookies[0]
 
-    def test_logout_ends_the_session(self, secured):
+    def test_logout_ends_the_session(self, secured, accounts):
         c = secured.client()
         assert c.login("plain", "correct-horse-battery").status == 200
         assert c.post("/api/auth/logout").status == 200
@@ -965,13 +999,15 @@ class TestAuditRegressions:
         # Disable rootadmin, leaving groupadmin as the only administrator. This
         # also revokes rootadmin's session - a privilege change biting at once.
         assert ga.post("/api/auth/users/update", {"username": "rootadmin", "disabled": True}).status == 200
-        r = ga.post("/api/auth/users/update", {"username": "groupadmin", "groups": []})
-        assert r.status == 400
-        assert "last administrator" in r.json()["error"]
-
-        # Put the fixture back the way we found it.
-        assert ga.post("/api/auth/users/update", {"username": "rootadmin", "disabled": False}).status == 200
-        assert root.login("rootadmin", "correct-horse-battery").status == 200
+        try:
+            r = ga.post("/api/auth/users/update", {"username": "groupadmin", "groups": []})
+            assert r.status == 400
+            assert "last administrator" in r.json()["error"]
+        finally:
+            # A failed assertion must not leave later tests using a disabled
+            # administrator or a revoked session.
+            assert ga.post("/api/auth/users/update", {"username": "rootadmin", "disabled": False}).status == 200
+            assert root.login("rootadmin", "correct-horse-battery").status == 200
 
 
 # --------------------------------------------------------------------------- #
@@ -1002,9 +1038,13 @@ class TestCriticRegressions:
     def test_a_malformed_meta_header_fails_closed(self, accounts):
         """We cannot know whether the header carried an access rule, so treating
         it as "no rule" means a typo publishes a locked page."""
-        assert accounts["plain"].get("/docs/Lib/broken.md").status == 403
-        assert accounts["staffer"].get("/docs/Lib/broken.md").status == 403
-        assert accounts["rootadmin"].get("/docs/Lib/broken.md").status == 200
+        for name in ("plain", "staffer"):
+            response = accounts[name].get("/docs/Lib/broken.md")
+            assert response.status == 403
+            assert "keyword_broken" not in response.text()
+        response = accounts["rootadmin"].get("/docs/Lib/broken.md")
+        assert response.status == 200
+        assert "keyword_broken" in response.text()
 
     def test_an_asset_beside_no_document_inherits_from_its_ancestors(self, accounts):
         """A folder of nothing but images has no ACL of its own. Falling back to

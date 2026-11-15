@@ -71,7 +71,7 @@
 
   const hint = $derived(
     authView.needsBootstrap
-      ? 'This server has no accounts yet. The first account created becomes the administrator.'
+      ? 'Create the first administrator offline with bootstrap_admin.py.'
       : !registering ? ''
         : authView.requireApproval
           ? 'New accounts must be approved by an administrator before they can sign in.'

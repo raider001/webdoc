@@ -21,6 +21,8 @@
   a link that a failed write never made.
 -->
 <script lang="ts">
+  import { isReadOnly } from '/js/policy.js';
+  const readOnly = isReadOnly();
   import { closeIcon, checkIcon, circleIcon } from '/js/icons.js';
   import { app } from '/js/app-shell.js';
   import { uniqueStrings, uniqueBy } from '/js/lists.js';
@@ -154,17 +156,18 @@
           <span class="cov-vtest-name">{nameOf(tid)}</span>
           <span class="cov-vtest-id">{tid}</span>
         </button>
-        <button
+        {#if !readOnly}<button
           type="button"
           class="cov-vtest-rm"
           title="Unlink this test from the requirement"
           disabled={busy === tid}
           onclick={() => unlink(tid)}
           use:icon={closeIcon}
-        ></button>
+        ></button>{/if}
       </div>
     {/each}
   </div>
+  {#if !readOnly}
   <div class="cov-vtest-add">
     <input
       class="cov-vtest-search"
@@ -185,4 +188,5 @@
       </div>
     {/each}
   </div>
+  {/if}
 </div>

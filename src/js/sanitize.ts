@@ -44,7 +44,7 @@ const SAFE_URL = /^(https?:|mailto:|tel:|\/|\.\/|\.\.\/|#)/i;
  * other explicit scheme (e.g. "javascript:", "data:") after stripping
  * control characters/whitespace that could otherwise hide a scheme.
  */
-function safeUrl(value: string): boolean {
+export function safeUrl(value: string): boolean {
   // Remove control chars / whitespace that can hide a scheme (e.g. "java\tscript:").
   const v = String(value).replace(/[\u0000-\u0020\u007f-\u009f]+/g, '').trim();
   if (SAFE_URL.test(v)) return true;

@@ -36,7 +36,7 @@
 
 /* ---- the sign-in wall --------------------------------------------------- */
 /* Rendered by app/svelte/SignInWall.svelte (host: a body-level .wd-mounted div).
-   .modal-field is borrowed from editor.css, which is why the form rule below
+   .modal-field is shared in app.css, which is why the form rule below
    reaches for it rather than declaring a field style of its own. */
 .auth-wall {
   position: fixed; inset: 0; z-index: 200;

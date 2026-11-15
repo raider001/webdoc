@@ -251,9 +251,8 @@ class UserStore:
                disabled=False, first_only_admin=False):
         """-> (record, None) or (None, message).
 
-        `first_only_admin` makes the bootstrap decision INSIDE the lock: two
-        concurrent registrations on an empty server both read count()==0 and both
-        became administrators otherwise.
+        `first_only_admin` is an ignored compatibility argument. Administrative
+        grants must be explicit (the offline bootstrap or an existing admin).
         """
         ok, msg = validate_username(username)
         if not ok:
@@ -265,8 +264,6 @@ class UserStore:
         with self._lock:
             if lc in self._users:
                 return None, "That username is already taken."
-            if first_only_admin:
-                admin = not self._users
             rec = {
                 "username": str(username).strip(),
                 "displayName": clean_display_name(display_name, str(username).strip()),
@@ -573,9 +570,9 @@ class AuthConfig:
     def __init__(self, raw, here):
         raw = raw if isinstance(raw, dict) else {}
         self.enabled = bool(raw.get("enabled", False))
-        self.allow_registration = bool(raw.get("allowRegistration", True))
+        self.allow_registration = bool(raw.get("allowRegistration", False))
         self.require_approval = bool(raw.get("requireApproval", False))
-        self.first_user_is_admin = bool(raw.get("firstUserIsAdmin", True))
+        self.first_user_is_admin = False  # HTTP registration never bootstraps an administrator
         # Unrestricted documents readable without signing in.
         self.public_read = bool(raw.get("publicRead", False))
 

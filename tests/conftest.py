@@ -17,6 +17,8 @@ degraded to a plain static server was testing the app under a policy no real
 user ever gets.
 """
 import os
+from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -88,7 +90,23 @@ def _require_build():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def static_server(base_url, request):
+def clean_editor_scratch():
+    """Recover only this editor suite's pages after a forcibly killed run.
+
+    Normal teardown uses an independent API context in editor_doc. A killed
+    process cannot execute finally, so recover before ANY corpus/count tests.
+    Check both the UUID filename and our fixture's unique body marker.
+    """
+    folder = Path(HERE) / 'fixtures'
+    for path in folder.glob('editor-151-*.md'):
+        if (not path.is_symlink() and not path.is_junction() and path.is_file()
+                and re.fullmatch(r'editor-151-[0-9a-f]{32}\.md', path.name)
+                and '<!--meta start {"requirement-group":"edit151"}-->' in path.read_text(encoding='utf-8')):
+            path.unlink()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def static_server(base_url, request, clean_editor_scratch):
     """Serve the fixture corpus with the real serve.py for the whole session."""
     # API/unit tests own their own servers (or need none). Starting an unused
     # browser server holds a port for the entire session unnecessarily.

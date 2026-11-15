@@ -289,7 +289,7 @@ export interface GraphViewCtx {
   zoomAround: (px: number, py: number, factor: number) => void;
   zoomCenter: (factor: number) => void;
   flash: (id: string) => void;
-  focus: (id: string) => boolean;
+  focus: (id: string, preserveZoom?: boolean) => boolean;
   setCurrent: (id: string | null) => void;
   search: (query: string) => (string | null);
   buildMinimap: () => void;
@@ -400,7 +400,7 @@ export interface GraphController {
   updateData: (docs: GraphInputDoc[], data: Pick<GraphOptions, 'traceEdges' | 'pageLinks' | 'externalNodes'>) => boolean;
   destroy: () => void;
   fit: () => void;
-  focus: (id: string) => boolean;
+  focus: (id: string, preserveZoom?: boolean) => boolean;
   search: (query: string) => (string | null);
   setCurrent: (id: string | null) => void;
   setEditMode: (on: boolean) => void;
@@ -594,7 +594,7 @@ export function createGraphController(canvasEl: HTMLElement, docs: GraphInputDoc
       if (testWindow.__graph === hook) testWindow.__graph = null;
     },
     fit: function () { g.fit(); },
-    focus: function (id) { return g.focus(id); },
+    focus: function (id, preserveZoom) { return g.focus(id, preserveZoom); },
     search: function (query) { return g.search(query); },
     setCurrent: function (id) { g.setCurrent(id); },
     setEditMode: function (on) { g.setEditMode(on); },

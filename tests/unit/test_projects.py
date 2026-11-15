@@ -107,6 +107,24 @@ class ProjectTests(unittest.TestCase):
 
     def test_legacy(self): legacy_config_keeps_ids_default_and_index(self.folder)
 
+    def test_project_card_metadata_is_optional_and_published(self):
+        a, b = project(self.folder, 'Alpha'), project(self.folder, 'Beta')
+        a['description'] = 'Alpha documentation'
+        cfg = config(self.folder, [a, b], siteTitle='Kalynx')
+        class Handler(serve.DocHandler):
+            config = cfg
+        handler = object.__new__(Handler)
+        handler.path = '/site.json'
+        handler._select_project()
+        replies = []
+        handler._json = lambda status, body: replies.append(body)
+        handler._site_json()
+        self.assertEqual(replies[0]['siteTitle'], 'Kalynx')
+        cards = replies[0]['projects']
+        self.assertEqual(cards[0]['description'], 'Alpha documentation')
+        self.assertEqual(cards[0]['defaultDoc'], 'Alpha/overview')
+        self.assertIsNone(cards[1]['description'])
+
     def test_fixture_site_identifies_legacy_urls_without_changing_project_scope(self):
         cfg = serve.load_config(str(Path(__file__).resolve().parents[1] / 'fixtures-config.json'))
         class Handler(serve.DocHandler):
@@ -151,7 +169,7 @@ class ProjectTests(unittest.TestCase):
     def test_read_only_sources_refuse_document_result_and_run_writes(self):
         p = project(self.folder, 'LM'); p['sources'][0]['readOnly'] = True
         cfg = config(self.folder, [p])
-        h = object.__new__(serve.DocHandler); h.config = cfg
+        h = object.__new__(serve.handler_class()); h.config = cfg
         h._json = lambda status, body: (status, body)
         assert not h._can_write_source('LM')
         assert h._check_write('LM/overview', '', b'# Changed')[0] == 403

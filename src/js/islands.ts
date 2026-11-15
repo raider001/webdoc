@@ -73,7 +73,7 @@ export interface IslandModule {
   /** the Test Coverage view, into #covOverlay's stage; destroy it on close so the canvas rAF loop stops */
   mountCoverageOverlay: (target: Element, opts: { results: CoverageResults, onResults: (r: CoverageResults) => void, onExport: () => void, onClose: () => void }) => { destroy: () => void };
   /** the full-screen test runner, into a `.wd-mounted` host it appends to the target */
-  mountRunner: (target: Element, opts: { tests: TestCaseEntry[], results: CoverageResults, sources: SourceConfig[], onSaved: () => void, onClose: () => void }) => { destroy: () => void };
+  loadRunner: () => Promise<{ mountRunner: (target: Element, opts: { tests: TestCaseEntry[], results: CoverageResults, sources: SourceConfig[], onSaved: () => void, onClose: () => void }) => { destroy: () => void } }>;
   /** the document map, into #graphOverlay's stage; destroy it on close so the canvas rAF loop stops and window.__graph is released */
   mountMapOverlay: (target: Element, opts: { onClose: () => void, onRebuild: (animate?: boolean) => Promise<void> }) => { destroy: () => void };
   /** hand the map a freshly fetched server graph model and relayout; safe before the overlay is mounted, which is how the first open seeds it */

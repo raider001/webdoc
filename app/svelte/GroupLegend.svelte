@@ -21,6 +21,7 @@
   unnetted.
 -->
 <script lang="ts">
+  import { color as dotColor } from './actions/color.js';
   import { groupColor, groupLabel } from '/js/auth.js';
   import { uniqueStrings } from '/js/lists.js';
 
@@ -49,7 +50,7 @@
       aria-pressed={hidden.has(name) ? 'false' : 'true'}
       title="Dim the pages only this group can read"
       onclick={() => onToggle(name)}
-    ><span class="group-dot" style="background: {groupColor(name)}"></span>{groupLabel(name)}</button>
+    ><span class="group-dot" use:dotColor={groupColor(name)}></span>{groupLabel(name)}</button>
   {/each}
   <p class="graph-groups-note">A locked page shows a padlock: it exists, but your account cannot open it.</p>
 </div>
