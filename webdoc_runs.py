@@ -5,8 +5,34 @@ from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 from webdoc_result_store import ID, read_cases, details, stamp, merge_results
 
+_children_job=None; _children_lock=threading.Lock()
+
+def _contain_children(kernel,limits):
+    """Join this server, once, to a kill-on-close job that only it holds.
+
+    A runner is created suspended and only then moved into its run's job. A server
+    stopped in between (Stop-Process, a fixture's terminate(): no Python clean-up
+    runs) left that runner suspended for good. A child is born in its parent's job,
+    so with the server in this one the system ends every child, at any point of its
+    start-up, once the server is gone. Each run's job nests inside it as before.
+    The handle is never closed: closing it would end the server itself.
+    """
+    global _children_job
+    with _children_lock:
+        if _children_job is None:
+            kernel.GetCurrentProcess.restype=ctypes.c_void_p
+            job=kernel.CreateJobObjectW(None,None); info=limits(); info.basic.flags=0x2000
+            if job and kernel.SetInformationJobObject(job,9,ctypes.byref(info),ctypes.sizeof(info)) and kernel.AssignProcessToJobObject(job,kernel.GetCurrentProcess()):
+                _children_job=job
+            else:
+                if job: kernel.CloseHandle(job)
+                _children_job=False
+                print('  ! runners: cannot join a kill-on-close job; a runner starting as the server stops may be left behind')
+        return bool(_children_job)
+
 class ProcessTree:
-    """Suspend before assigning the Windows kill-on-close Job Object."""
+    """Suspend before assigning the Windows kill-on-close Job Object; the server's
+    own job (_contain_children) covers the gap between the two."""
     def __init__(self,command,cwd,env):
         self.job=None
         if os.name!='nt':
@@ -25,13 +51,18 @@ class ProcessTree:
         self.job=self.kernel.CreateJobObjectW(None,None); info=Extended(); info.basic.flags=0x2000
         if not self.job or not self.kernel.SetInformationJobObject(self.job,9,ctypes.byref(info),ctypes.sizeof(info)):
             self.close(); raise ctypes.WinError(ctypes.get_last_error())
+        _contain_children(self.kernel,Extended)
         try:
             self.process=subprocess.Popen(command,cwd=cwd,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,creationflags=0x4|0x08000000)
             if not self.kernel.AssignProcessToJobObject(self.job,w.HANDLE(int(self.process._handle))):
                 self.process.kill(); self.process.wait(); raise ctypes.WinError(ctypes.get_last_error())
             nt=ctypes.WinDLL('ntdll'); nt.NtResumeProcess.argtypes=[w.HANDLE]
             if nt.NtResumeProcess(w.HANDLE(int(self.process._handle)))!=0: raise RuntimeError('cannot resume owned process')
-        except BaseException: self.close(); raise
+        except BaseException:
+            # Not yet in its run's job, a suspended runner would wait out the whole server.
+            started=getattr(self,'process',None)
+            if started is not None and started.poll() is None: started.kill()
+            self.close(); raise
     def close(self):
         if os.name=='nt':
             if self.job: self.kernel.CloseHandle(self.job); self.job=None

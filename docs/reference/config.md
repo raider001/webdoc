@@ -311,6 +311,9 @@ results shown to people without run rights omit runner text, paths and arbitrary
 properties. `runTests.env` is the complete explicit runner environment; nothing
 is inherited from the server. Add literal PATH/SystemRoot/tool variables there
 only when the configured runner requires them. Prefer absolute command paths.
+On Windows a runner and everything it starts end with the server, even a runner
+that is still starting when the server is stopped: before its first run the
+server joins a kill-on-close job of its own, which every child is born into.
 
 The index parser runs in a separate process with a 350 ms parse/IPC deadline and
 a bounded three-second cold worker startup. Timeout, malformed input or marker
