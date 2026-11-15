@@ -14,7 +14,8 @@ body.is-editing .app-footer { display: none; }
 .editor-status { color: var(--muted); font-size: 12.5px; }
 .editor-cols { flex: 1; display: grid; grid-template-columns: minmax(0,1fr) auto; min-height: 0; }
 .editor-canvas { overflow: auto; padding: 26px 28px 140px; }
-.editor-blocks { max-width: 760px; margin: 0 auto; }
+/* Blocks fill the canvas width beside the metadata panel, matching the reading view. */
+.editor-blocks { min-width: 0; }
 .editor-meta { overflow: auto; border-left: 1px solid var(--border); background: var(--surface); padding: 20px 20px; }
 
 /* Blocks */

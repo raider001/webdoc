@@ -216,7 +216,9 @@ body.is-map-split #graphOverlay { left:calc(var(--split-reader, 50vw) + 8px); }
 #tocList .lvl-5 a, #tocList .lvl-6 a { padding-left:70px; }
 
 .content-pane { overflow:auto; padding:0 0 100px; scrollbar-gutter:stable; }
-.doc { max-width:var(--content-max); margin:0 auto; padding:8px 32px 0; }
+/* The document fills whatever width the content pane has left after the
+   tree/TOC columns; no fixed reading measure. */
+.doc { padding:8px 32px 0; }
 
 /* ---- Footer --------------------------------------------------------------- */
 .app-footer {
