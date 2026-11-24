@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 
 const authoring = vi.hoisted(() => ({ imports: 0, forbidden: false }));
 vi.mock('/js/authoring.js', async original => {
@@ -58,7 +58,9 @@ it('keeps authoring and run assets outside the complete static entry and reader 
   function visit(path: string): void {
     if (seen.has(path)) return;
     seen.add(path);
-    expect(path).not.toMatch(/(?:[\\/](?:authoring|editor|runner|automated-runs)(?:[.\\/-])|RunControls-)/);
+    // Match the path inside the repository only: the checkout's own location can
+    // contain these words (GitHub's runners check out under /home/runner/).
+    expect('/' + relative(resolve('.'), path)).not.toMatch(/(?:[\\/](?:authoring|editor|runner|automated-runs)(?:[.\\/-])|RunControls-)/);
     const code = readFileSync(path, 'utf8');
     for (const match of code.matchAll(/(?:^|\n)\s*import\s+(?:[^;\n]*?\s+from\s+)?['"]([^'"]+)['"]/g)) {
       const dep = match[1];
