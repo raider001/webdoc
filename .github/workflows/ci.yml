@@ -25,9 +25,11 @@ jobs:
 
       # The components import app modules as /js/*.js, which resolve to the
       # COMPILED app/js/ (jsconfig paths, and the vitest alias). A fresh clone has
-      # no app/js/, so compile it before type-checking or testing anything.
-      - name: Compile app/js
-        run: npm run build:js
+      # no app/js/, so build before type-checking or testing anything. The full
+      # build, not just build:js: some unit tests (security-154, lazy-editor-154e)
+      # read the Vite bundle in app/build/, which build:js does not produce.
+      - name: Build app/js and app/build
+        run: npm run build
 
       # tsc over src/** at strict, then svelte-check over the components.
       - name: Type-check
