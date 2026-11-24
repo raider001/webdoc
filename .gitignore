@@ -59,3 +59,6 @@ app/thirdpartyrenderer/model-viewer.d.ts
 # and stays tracked.
 app/thirdpartyrenderer/model-viewer/*.js
 app/thirdpartyrenderer/model-viewer/*.d.ts
+
+# Release archives built by scripts/make-release.sh
+dist/
