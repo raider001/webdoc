@@ -68,19 +68,19 @@ human-readable `title`, its own `sources`, `defaultDoc` and `indexDir`:
   "siteTitle": "Documentation",
   "projects": [
     {
-      "name": "LM",
-      "title": "LM programme",
+      "name": "Platform",
+      "title": "Platform programme",
       "description": "Programme requirements and test documentation.",
-      "defaultDoc": "LM/overview",
-      "indexDir": ".webdoc-index/LM",
-      "sources": [{"name":"LM", "path":"E:/documents/lm", "component":"LM"}]
+      "defaultDoc": "Platform/overview",
+      "indexDir": ".webdoc-index/Platform",
+      "sources": [{"name":"Platform", "path":"../platform/docs", "component":"PL"}]
     },
     {
-      "name": "FAF-CLONE",
-      "title": "FAF Clone",
-      "defaultDoc": "FAF-CLONE/overview",
-      "indexDir": ".webdoc-index/FAF-CLONE",
-      "sources": [{"name":"FAF-CLONE", "path":"E:/documents/faf", "component":"FAF"}]
+      "name": "Mobile-App",
+      "title": "Mobile app",
+      "defaultDoc": "Mobile-App/overview",
+      "indexDir": ".webdoc-index/Mobile-App",
+      "sources": [{"name":"Mobile-App", "path":"../mobile/docs", "component":"MA"}]
     }
   ]
 }
@@ -105,21 +105,21 @@ discard dialog before either navigation.
 
 With two or more projects, a bare URL (no `?project=` and no page hash) opens
 the start page, headed by `siteTitle`, with a card and indexed page count per
-project. Selecting a card navigates to `/?project=LM#/LM/overview`. A single
+project. Selecting a card navigates to `/?project=Platform#/Platform/overview`. A single
 project still opens directly from a bare URL. **All projects** can explicitly
 open its start page using `?view=projects`. Legacy top-level `sources` keep
 their direct document entry behavior.
 
 Each project has a separate navigation tree, search index, requirement and test
-catalog, coverage and map. Index APIs take `?project=LM` (append with `&` when
-there are other parameters). `/site.json?project=LM` returns that project's
+catalog, coverage and map. Index APIs take `?project=Platform` (append with `&` when
+there are other parameters). `/site.json?project=Platform` returns that project's
 sources and default document, plus all projects' names, titles, optional
 descriptions, default documents and source names. The server API still defaults
 to the first project when its project parameter is omitted; the browser leaves
 the URL unselected when showing the start page.
 
-Document ids and source mounts remain unchanged: `LM/overview` and
-`/docs/LM/overview.md` still resolve. Direct source URLs infer their project;
+Document ids and source mounts remain unchanged: `Platform/overview` and
+`/docs/Platform/overview.md` still resolve. Direct source URLs infer their project;
 an explicit, conflicting project parameter returns 404. Old hash links without
 a project parameter select the project owning their source when the app boots.
 Legacy configs with top-level `sources` retain their hash-only page URLs; the

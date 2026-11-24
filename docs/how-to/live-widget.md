@@ -4,7 +4,7 @@
 
 # Refresh a Section in Place
 
-1. Identify the source's document id, such as `LM/live/queue`. Open it as the
+1. Identify the source's document id, such as `Ops/live/queue`. Open it as the
    intended reader and confirm the heading's exact text, such as **Running**.
 2. In the dashboard editor, choose **+ Add widget → Auto-update section**.
 3. Choose **⚙ Edit**. Browse **Source document**, pick **Section** from its
@@ -17,7 +17,7 @@
 The equivalent Markdown is:
 
 ```text
-<!--meta start {"widget":"live","src":"LM/live/queue","section":"Running","interval":60}-->
+<!--meta start {"widget":"live","src":"Ops/live/queue","section":"Running","interval":60}-->
 Waiting for the queue.
 <!--meta end {"widget":"live"}-->
 ```

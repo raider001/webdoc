@@ -9,7 +9,7 @@
 2. Choose **⚙ Edit** on its preview. Select a source format:
    **Markdown table**, **CSV file**, or **JSON file**.
 3. For Markdown, browse to a document and choose the heading containing its
-   table. For example, choose `LM/live/queue` and **Running**. The first table
+   table. For example, choose `Ops/live/queue` and **Running**. The first table
    in that section supplies the data. Empty section selects the first table
    in the whole document.
 4. For CSV or JSON, browse to a file inside a configured document root. CSV
@@ -33,7 +33,7 @@
 Markdown example:
 
 ```text
-<!--meta start {"widget":"live-table","source":{"kind":"markdown","src":"LM/live/queue","section":"Running"},"columns":[{"key":"Job","label":"Job","format":"text"},{"key":"Minutes so far","label":"Minutes","format":"number"}],"sortBy":"Minutes so far","sortDirection":"desc","maxRows":20,"interval":60}-->
+<!--meta start {"widget":"live-table","source":{"kind":"markdown","src":"Ops/live/queue","section":"Running"},"columns":[{"key":"Job","label":"Job","format":"text"},{"key":"Minutes so far","label":"Minutes","format":"number"}],"sortBy":"Minutes so far","sortDirection":"desc","maxRows":20,"interval":60}-->
 The queue will appear here when the source is available.
 <!--meta end {"widget":"live-table"}-->
 ```
@@ -65,7 +65,7 @@ write-back destination: a generator updates the chosen source on disk.
 
 The parser accepts at most 10,000 rows and 128 columns. Display is limited by
 **Maximum rows** (1–10,000, default 100). JSON cells containing objects display
-as text, except link objects `{ "label": "Plan", "href": "#/LM/overview" }`.
+as text, except link objects `{ "label": "Plan", "href": "#/Ops/overview" }`.
 Link format allows site links, HTTP(S) and mailto; script links remain plain
 text. Status colours recognise done/complete/pass/ok/success, running/active/
 pending/queued, and failed/fail/error/blocked; other values use a neutral badge.

@@ -8,14 +8,14 @@ The `live` widget fetches another document and refreshes its own body. The rest
 of the page, its scroll position and neighbouring widgets remain in place.
 
 ```text
-<!--meta start {"widget":"live","src":"LM/live/queue","section":"Running","interval":60}-->
+<!--meta start {"widget":"live","src":"Ops/live/queue","section":"Running","interval":60}-->
 The queue will appear here when the source is available.
 <!--meta end {"widget":"live"}-->
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `src` | Required document id, including its configured source name, such as `LM/live/queue`. An optional `.md` suffix is accepted. |
+| `src` | Required document id, including its configured source name, such as `Ops/live/queue`. An optional `.md` suffix is accepted. |
 | `section` | Exact visible heading text. Omit or leave empty to include the whole document body. |
 | `interval` | Seconds between updates; default 60, minimum 1, maximum 86400. |
 

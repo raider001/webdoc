@@ -35,7 +35,7 @@ the project's start-page card, for example:
 
 ```json
 {
-  "siteTitle": "Kalynx",
+  "siteTitle": "Team docs",
   "projects": [
     {
       "name": "Guides",

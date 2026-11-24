@@ -31,10 +31,22 @@ Read them in order for a tour, or jump straight to the job at hand:
   code highlighting, and embedded HTML.
 - [Add a diagram](Docs/how-to/diagrams) — turn a fenced block into a rendered,
   pannable diagram.
-- [Add a collapsible section](Docs/how-to/collapsible),
-  [add a widget plugin](Docs/how-to/widget-plugins), and
-  [refresh a section in place](Docs/how-to/live-widget), and
-  [add an auto-update table](Docs/how-to/live-table).
+- Add a widget — the blocks you insert from **+ Add widget** in the editor:
+  - [Collapsible section](Docs/how-to/collapsible) (`collapse`) — a heading
+    readers open and close.
+  - [Auto-update section](Docs/how-to/live-widget) (`live`) — part of another
+    document, refreshed in place.
+  - [Auto-update table](Docs/how-to/live-table) (`live-table`) — a table fed
+    from a document, CSV or JSON file, refreshed in place.
+  - [Panel, and widgets of your own](Docs/how-to/widget-plugins) (`panel`) — a
+    framed container, and how to register a new widget type.
+  - [3D model viewer](Docs/features/model-viewer) (`model-viewer` plugin) — an
+    interactive glTF `.glb` model with LODs, animations and a rig test dock.
+  - [Software designs](Docs/how-to/diagrams) (`software-design` plugin) — UML,
+    sequence, activity and wireframe diagrams you edit by drawing.
+
+  The first four are built in. The two plugins load only when they are named in
+  `config.json`'s `plugins` list.
 - [Trace requirements](Docs/how-to/requirements) — author requirement tables that
   trace to and from one another.
 - [Check test coverage](Docs/how-to/coverage) — see which requirements are
