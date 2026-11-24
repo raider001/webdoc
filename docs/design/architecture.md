@@ -8,8 +8,9 @@ WebDocs is two cooperating halves that share almost no responsibility. A tiny
 Python server *serves* documents and hands them to the browser as files. The
 browser application *renders* them. Nothing on the server side ever transforms
 Markdown; nothing on the client side ever touches the filesystem. Keeping that
-line sharp is what lets the whole thing stay static, dependency-free, and easy to
-reason about.
+line sharp is what lets the whole thing stay static, easy to reason about, and
+almost free of dependencies — the one it does carry is described at the end of
+this page.
 
 ## The rendering pipeline
 
@@ -115,13 +116,48 @@ Because discovery is just "list the files as JSON", the server stays a thin
 stdlib script. See [Configuration](Docs/reference/config) for the `config.json`
 fields and how a source maps a name and component onto a folder.
 
-## The zero-dependency principle
+## The dependency principle
 
-There is no framework and no third-party runtime code anywhere in the browser
-application. The parser, sanitizer, highlighters, the optional block-renderer
-plugin system, map renderer, search index, and theming layer are all
-hand-written vanilla JavaScript. `serve.py` uses only the
-Python standard library. The single development dependency, Playwright, exists
-purely to drive the automated tests and never ships to a reader. This is a
-constraint, not an accident: it keeps the tool auditable, portable, and free of
-the supply chain that a documentation reader has no reason to carry.
+The browser application carries exactly one piece of third-party code: a compiled
+Svelte 5 runtime, which the interactive chrome — the drawer, the header controls,
+the edit controls, the map mode selector, the coverage panels — was moved onto
+after hand-wiring DOM updates across those views became the largest single source
+of the reader's state bugs. Nothing else came with it. The parser, sanitizer,
+highlighters, the optional block-renderer plugin system, map renderer, search
+client, WYSIWYG editor, and theming layer are all still hand-written, and no
+library replaced any of them. They are written in TypeScript now rather than
+JavaScript, but that is a change of language, not of authorship: the same
+from-scratch code, with its types finally stated.
+
+That runtime is compiled in rather than fetched. `app/build/islands.js` — around
+142 kB raw, 40 kB gzipped, built from the components in `app/svelte/` — is
+**generated, not committed**, and so is `app/js/`. What ships instead is a
+release archive: CI builds on tag, proves the result serves with Node removed
+from `PATH`, and attaches a tarball that needs only a Python interpreter — no
+Node.js, no `npm install`, no network. Download it, unpack it, `python serve.py`.
+
+A `git clone` is the contributor's entry point rather than the user's, and it
+does need a build: `npm ci && npm run build` before the app will serve. Both halves of that arrangement are held in place by
+the test suite, which fails if the committed bundle drifts from its sources or if
+the package manifest's runtime `dependencies` object stops being empty; see
+[the system requirements](Docs/requirements/system) for the rows those tests
+verify.
+
+The same arrangement covers the rest of the browser code. The modules live in
+`src/js/` as TypeScript and are compiled into `app/js/` as JavaScript, which is
+what `app/index.html` actually loads — one source file becomes exactly one served
+module at the same path, with its import specifiers untouched, so the browser
+resolves the same module graph it always did.
+
+Neither generated tree is in version control, and it is worth being blunt about
+the consequence: a fresh clone will not serve until it has been built, and
+`app/js/` is not somewhere to edit. Changing browser behaviour means editing
+`src/js/` and rebuilding. Markdown, CSS and the server are unaffected — those are
+still edit-and-refresh, with no toolchain in sight.
+
+`serve.py` keeps the original rule outright: the Python standard library, with no
+package to install. Playwright, driven from Python, exists purely to run the
+automated tests and never ships to a reader. This is a constraint, not an
+accident — it keeps the tool auditable, portable, and free of the supply chain
+that a documentation reader has no reason to carry — and the single exception
+above was made once, deliberately, rather than by drift.

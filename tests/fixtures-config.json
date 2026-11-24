@@ -1,0 +1,11 @@
+{
+  "siteTitle": "WebDocs Fixtures",
+  "sources": [
+    { "name": "Guides", "path": "tests/fixtures", "component": "FX" }
+  ],
+  "defaultDoc": "Guides/getting-started",
+  "theme": "auto",
+  "plugins": [],
+  "indexDir": ".webdoc-index-test",
+  "watchIntervalSec": 0
+}

@@ -1,13 +1,42 @@
 # Web Document Tool — dev test harness
 
+## Widget unit checks
+
+Build first (`npm run build`), then run `npm test`, `npm run check` and
+`npm run lint`. Vitest includes `tests/unit/` alongside the Svelte component
+tests. The widget tests cover nested/malformed metadata, real requirement/test
+component rendering, plugin lifecycle failures, mocked live fetches, session
+changes, polling/cancellation, typed/custom editors, CSV/JSON/Markdown tables,
+column formats and editor round-trips. They exercise the compiled
+`app/js/` modules served to readers, so rebuild after changing `src/`.
+
+The server index/redaction/validator and data access/containment tests need only
+Python's standard library:
+
+```powershell
+python -m unittest discover -s tests/unit -p 'test_*.py' -v
+```
+
+Vite/Vitest use the runner config loader and worktree-local `.cache/` directories
+so a shared read-only `node_modules` junction is supported. Vitest uses one
+worker. For a separate preview of a site with an external `indexDir`, set
+`WEBDOC_INDEX_DIR` to a worktree-local folder and `WEBDOC_INDEX_WORKERS=1`
+before starting `serve.py`. These variables affect that process only.
+
 Playwright end-to-end tests **and** the true CommonMark conformance measurement,
 driven entirely through Playwright's **Python** binding (`pytest-playwright`).
 
-> This is the project's **only** third-party dependency, and it is **dev-time
-> only**. There is **no Node.js, no npm, no `package.json`** anywhere — Playwright
-> runs its own bundled Chromium, launched from Python. The tests never touch any
-> shared / in-app browser, and they never modify application source: they live in
-> `tests/` and use two additional harness files under `app/dev/`.
+> Playwright is **dev-time only** — it runs its own bundled Chromium, launched
+> from Python, with no Node involved in the test run itself.
+>
+> The repository does now carry a `package.json` and a `tsconfig.json`. They are
+> **build-time only**: the sole entry is `typescript`, the runtime `dependencies`
+> object is empty, and `serve.py` remains Python-standard-library-only and runs
+> with no Node installed. See `SVELTE_UPLIFT_PLAN.md`.
+>
+> The tests never touch any shared / in-app browser, and they never modify
+> application source: they live in `tests/` and use four harness files under
+> `app/dev/`.
 
 ## What is here
 
@@ -15,7 +44,9 @@ driven entirely through Playwright's **Python** binding (`pytest-playwright`).
 |------|---------|
 | `requirements-dev.txt` | pinned dev deps: `pytest`, `pytest-playwright` |
 | `pytest.ini` | config; sets `base_url = http://127.0.0.1:8017` |
-| `conftest.py` | session fixture that ensures the server is up; pins viewport 1280×900 |
+| `conftest.py` | starts `serve.py` on the fixture corpus for the session; pins viewport 1280×900 |
+| `fixtures-config.json` | test-only config: mounts `tests/fixtures/` as the single source `Guides` |
+| `fixtures/` | the suite's own 8-document corpus, including live XSS payloads |
 | `test_conformance.py` | measures TRUE CommonMark compliance against the official `spec.json` |
 | `test_e2e.py` | stable, renderer-agnostic UI behaviours |
 
@@ -27,18 +58,30 @@ per-section breakdown.
 ## Prerequisites
 
 * **Python 3.9+** on `PATH` (`python --version`).
-* The app served at **http://127.0.0.1:8017**. Normally that is `serve.py`
-  (it also answers `/site.json` and the `/docs/` JSON listings the app needs).
-  From the project root:
+* **A built browser app.** The compiled output (`app/js/`, `app/build/`) is
+  generated and gitignored, so a fresh clone has none of it and every end-to-end
+  test would fail on the same `data-app-ready` timeout. Run this once:
 
   ```powershell
-  python serve.py --port 8017
+  npm ci
+  npm run build
   ```
 
-  If nothing is listening on 8017, `conftest.py` will start a plain
-  `python -m http.server 8017 --directory app` for the session as a fallback.
-  That fallback is enough for the **conformance** test, but the **e2e** tests
-  need `serve.py` (only it emits `/site.json` and `/docs/`).
+  `conftest.py` checks for it and exits immediately with that instruction rather
+  than letting a hundred tests time out on one missing build.
+* Nothing else. `conftest.py` starts `serve.py` itself, on port 8017, with
+  `tests/fixtures-config.json` — you do not need a server running in another
+  terminal.
+
+  That config mounts one source, `Guides`, from `tests/fixtures/`, so the suite
+  asserts against a corpus it owns rather than against the product's own
+  documentation in `docs/`. It also writes its index to `.webdoc-index-test/`, so
+  a test run never clobbers the real one.
+
+  If something is already listening on 8017, `conftest.py` checks whether it is
+  serving the fixture corpus. If it is, it is reused; if it is not (typically a
+  `serve.py` running the product docs), the run **fails immediately with an
+  explanation** rather than asserting fixture ids against the wrong corpus.
 
 ## Setup (Windows, PowerShell)
 
@@ -55,10 +98,7 @@ python -m playwright install chromium
 ## Run
 
 ```powershell
-# make sure the app server is up in another terminal first:
-#   python serve.py --port 8017
-
-# whole suite
+# whole suite (conftest starts and stops the server for you)
 python -m pytest tests
 
 # see the TRUE CommonMark number and per-section gap printed live:
@@ -79,6 +119,14 @@ python -m pytest tests --junitxml=tests\report.xml
 
 ## Notes
 
+The built-module and Svelte widget/metadata regressions run with `npm run build`
+followed by `npm test`. Server extraction, duplicate relation rows and document
+ETag/access checks also have a stdlib-only suite:
+
+```powershell
+python -m unittest discover -s tests/unit -p 'test_*.py'
+```
+
 * `test_conformance.py` is **non-gating on 100%**. The engine was validated
   against a curated 120-case subset, so the official number is expected to be
   below 100%. The test asserts only that the parser clears an observed baseline
@@ -91,6 +139,6 @@ python -m pytest tests --junitxml=tests\report.xml
 Intentionally left out until the map and requirements features settle:
 
 * map / graph overlay interactions (`#graphBtn`, `.graph-overlay`, node select-and-stay)
-* requirement cards + traceability matrix / coverage dashboard (`#reqBtn`, `requirements.js`)
+* requirement cards + traceability matrix / coverage dashboard (`requirements.js`)
 * in-document search highlighting (`#docSearch`)
 * all-documents search index / tree filter (`#treeSearch`)

@@ -1,7 +1,7 @@
 <!--meta
 {
   "title": "Diagrams & Renderer Plugins",
-  "description": "The extension point that turns a fenced code block into rich DOM — how to enable a diagram renderer, and how the core stays dependency-free.",
+  "description": "The extension point that turns a fenced code block into rich DOM — how to enable a diagram renderer, and how the core avoids depending on one.",
   "assumes": ["Docs/features/markdown"],
   "next": ["Docs/reference/config"]
 }
@@ -10,18 +10,18 @@
 # Diagrams & Renderer Plugins
 
 WebDocs renders every document with a from-scratch, zero-dependency engine, and
-that rule is deliberately strict: nothing but hand-written vanilla JavaScript
-ships to the browser. Diagram engines like Mermaid or PlantUML are large
-third-party libraries, so they cannot be baked into the core without breaking
-that promise.
+that rule is deliberately strict: beyond the compiled UI runtime in the browser
+bundle, no third-party library ships to the browser. Diagram engines like Mermaid
+or PlantUML are large third-party libraries, so they cannot be baked into the
+core without breaking that promise.
 
 The renderer plugin system is how the two are reconciled. The **core** provides a
 small extension point — a registry that maps a fenced code block's language to a
 renderer. **Plugins** live in a quarantined folder, are opt-in, and adapt an
 external library to that registry. Enable one and ` ```mermaid ` blocks become
 diagrams — the shipped `config.json` enables `mermaid` out of the box; enable
-none and the tool behaves exactly as its dependency-free core always
-has.
+none and the tool behaves exactly as it always has, rendering the block as
+plain code with no diagram engine involved.
 
 ## Enabling a renderer
 
@@ -68,9 +68,9 @@ described below.
 ## Bring your own library
 
 The heavy third-party library itself is **never committed to this repository** —
-that is what keeps a default checkout dependency-free. A plugin is only the thin
-*facade*; you supply the engine it wraps. The Mermaid facade looks for its
-library in three places, in order:
+that is what keeps a default checkout free of vendored third-party libraries. A
+plugin is only the thin *facade*; you supply the engine it wraps. The Mermaid
+facade looks for its library in three places, in order:
 
 1. `window.mermaid`, if you have already loaded it in `index.html`;
 2. a URL you set as `LIB_URL` inside the facade (a CDN or a self-hosted copy) — a
@@ -93,9 +93,9 @@ URL. It is the same contract as the Mermaid facade with a different body, which
 is exactly the point of the extension system: the core never changes.
 
 Because such a plugin reaches a network service, it trades one of the tool's
-guarantees (no third-party code ships) for a different cost (a request leaves the
-browser when a diagram renders). That is a conscious choice you make per plugin,
-not something the core decides for you.
+guarantees (no third-party rendering library ships) for a different cost (a
+request leaves the browser when a diagram renders). That is a conscious choice
+you make per plugin, not something the core decides for you.
 
 ## How it fits the pipeline
 

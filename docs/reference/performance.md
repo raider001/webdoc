@@ -16,8 +16,9 @@ search index, the map's links, and the requirement/test traceability entirely on
 the client. That is simple and works beautifully for hundreds of documents — but
 it is also a wall: at a few thousand files the tab is holding the whole library in
 memory and the graph views try to create one SVG element per node. Two changes
-removed the wall, both staying inside the project's constraints (zero third-party
-runtime dependencies, no Node, a standard-library-only server, no build step):
+removed the wall, both staying inside the project's constraints (a
+standard-library-only server, no Node.js needed to run it, no build step for a
+document, and no new third-party code in the browser):
 
 - **A server-side index.** `serve.py` now builds a **SQLite (FTS5) index** of each
   document's metadata, headings, in-body links, and requirement/test blocks.
@@ -102,7 +103,7 @@ Reach for a **comfortable few tens of thousands of documents** for the full
 experience — reading, search, the map, and traceability all snappy. Push toward
 **hundreds of thousands** and search and reading stay excellent while the whole-map
 view becomes the limiting factor. The architecture — a standard-library SQLite
-index plus a culled canvas renderer — is what carries it there without breaking the
-zero-dependency promise. See [Configuration](Docs/reference/config) for how the
-index and server fit together, and [Architecture](Docs/design/architecture) for the
-rendering pipeline.
+index plus a culled canvas renderer — is what carries it there without adding a
+single dependency on either side. See [Configuration](Docs/reference/config) for
+how the index and server fit together, and
+[Architecture](Docs/design/architecture) for the rendering pipeline.

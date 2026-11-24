@@ -161,7 +161,7 @@ resolves to `/docs/Docs/.results.xml`. A top-level `testResults` may be set as a
 one — so it never surfaces as a global results URL in `/site.json`. Automated
 results are always attached to the source whose component owns the ids.
 
-`parseXUnit` (`app/js/coverage.js`) walks every `<testcase>`. A `<failure>` or
+`parseXUnit` (`src/js/coverage.ts`) walks every `<testcase>`. A `<failure>` or
 `<error>` child marks the case failed and captures its `message` attribute (or its
 text, first 240 characters); anything else is a pass. It then links the case to one
 or more ids by **all three** of these rules — they are not exclusive, and the id a

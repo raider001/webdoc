@@ -6,6 +6,15 @@
   --cov-pass: #3fb950; --cov-fail: #f85149; --cov-partial: #d29922; --cov-untested: #58a6ff;
 }
 
+/* The overlay's stage - overlays.js builds it, coverage-view.js labels it, and
+   app/svelte/CoverageOverlay.svelte is mounted into it. It used to BE the graph
+   container (which the engine sizes itself); now it holds the graph, the legend,
+   the export button and the report panel, so it has to fill the overlay for
+   .graph-root's height:100% to resolve against anything. Left static-positioned
+   on purpose: the three absolutely-positioned chrome pieces inside it are placed
+   against .cov-overlay, exactly as they were when they were its children. */
+.cov-stage { height: 100%; }
+
 /* Test-case report panel (clicking a test node). */
 .tc-report-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tc-report-sub code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
@@ -49,7 +58,6 @@
 .cov-report-sec h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
 .cov-report-empty { color: var(--faint); font-size: 12.5px; margin: 0; }
 .cov-report-note { margin-top: 12px; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; font-size: 12.5px; color: var(--muted); }
-.cov-empty { padding: 48px; color: var(--muted); text-align: center; }
 
 .cov-medit-bar { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .cov-medit-status { font-size: 12px; color: var(--muted); }
@@ -96,47 +104,6 @@
 .cov-overlay[hidden] .cov-export-btn { display: none; }
 /* When the minimap is hidden (narrow screens) reclaim the top-right corner. */
 @media (max-width: 600px) { .cov-export-btn { top: 12px; } }
-
-/* ---- Test runner (full-screen checklist grid) --------------------------- */
-body.is-running { overflow: hidden; }
-.runner-overlay { position: fixed; inset: 0; z-index: 40; background: var(--bg); display: flex; flex-direction: column; }
-.runner-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
-.runner-title { font-weight: 600; font-size: 14px; }
-.runner-progress { font-size: 12.5px; color: var(--muted); }
-.runner-by-l { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
-.runner-by { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
-.runner-status { font-size: 12.5px; color: var(--muted); min-width: 60px; }
-.runner-body { flex: 1; overflow: auto; }
-.runner-inner { max-width: 1040px; margin: 0 auto; padding: 22px 24px 80px; }
-.runner-empty { color: var(--muted); text-align: center; padding: 60px; }
-
-.run-test { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 16px 0; background: var(--surface); }
-.run-test-head { display: flex; align-items: center; gap: 10px; }
-.run-test-head h3 { margin: 0; font-size: 15px; }
-.run-test-head .tc-id { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--faint); }
-.run-test-pill { margin-left: auto; }
-.run-verifies { font-size: 12.5px; color: var(--muted); margin: 6px 0 10px; }
-
-.run-grid { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-.run-grid th, .run-grid td { border: 1px solid var(--border); padding: 7px 9px; text-align: left; vertical-align: top; }
-.run-grid th { background: var(--surface-2); font-size: 12.5px; white-space: nowrap; }
-.run-grid .run-no { width: 30px; text-align: center; color: var(--faint); }
-.run-grid .run-action { width: 26%; }
-.run-grid .run-expected { width: 26%; color: var(--muted); }
-.run-grid .run-result-cell { width: 84px; }
-.run-actual .wysiwyg { min-height: 30px; background: var(--bg); }
-
-.run-pf { display: inline-flex; gap: 4px; }
-.run-pf-btn { width: 30px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--faint); cursor: pointer; font-weight: 700; font-size: 13px; }
-.run-pf-pass.is-on { color: var(--cov-pass); border-color: var(--cov-pass); background: color-mix(in srgb, var(--cov-pass) 14%, var(--bg)); }
-.run-pf-fail.is-on { color: var(--cov-fail); border-color: var(--cov-fail); background: color-mix(in srgb, var(--cov-fail) 14%, var(--bg)); }
-.run-notes-l { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin: 12px 0 4px; }
-.run-notes { min-height: 34px; }
-
-/* Per-test "Run" button on a test-case block in a document. */
-.tc-run { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg); color: var(--muted); cursor: pointer; font-size: 12px; }
-.tc-run:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Requirement id badges in the rendered tables, coloured by rolled-up test status. */
 .req-badge.req-badge-st-pass     { background: color-mix(in srgb, var(--cov-pass) 16%, transparent); color: var(--cov-pass); }

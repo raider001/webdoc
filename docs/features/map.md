@@ -1,5 +1,5 @@
 <!--meta
-{ "title": "The Map View", "description": "A pannable, zoomable graph of how documents and requirements relate.", "assumes": ["Docs/overview"], "next": [] }
+{ "title": "The Map View", "description": "A pannable, zoomable graph of how documents and requirements relate.", "assumes": ["Docs/overview"], "next": ["Docs/features/access-control"] }
 -->
 
 # The Map View
@@ -41,6 +41,27 @@ Each category has a **legend toggle**, so you can show or hide prerequisite,
 recommended-next, requirement-trace or page-link edges independently to
 declutter the view and focus on one kind of relationship at a time.
 
+## Display selected tree only
+
+The bottom display bar includes **Display selected tree only**, off by default.
+Turn it on to show the selected page, its entire prerequisite chain (`assumes`)
+and its entire recommended-next chain (`next`). These chains are followed
+independently: a prerequisite's other recommendations do not enter the view.
+Only requirement traces and page links directly touching the selected page are
+included, in either direction. Links from those neighbours are not followed.
+The existing edge legend keeps the relationship types distinguishable.
+
+Selecting another page recomputes and animates the smaller layout using the
+already-loaded graph. Click empty canvas space or press Escape to clear the
+selection; the full graph returns with the hint **Select a page to show its
+tree**. Switching the option off also returns to the full graph and restores
+its earlier pan/zoom during the same map session. Edge visibility and access
+group settings remain in place. Radial Focus is disabled while this option is
+on. The option is keyboard accessible and remembered per site in localStorage.
+
+Cycles are handled without recursion. Missing prerequisite or next targets
+retain the map's existing missing-page placeholders.
+
 ## External links become boxes
 
 Not every link points at another document. When the prose links to an outside
@@ -53,6 +74,30 @@ document set's outbound references without pretending an external site is one of
 your own pages.
 
 ## Interacting with the canvas
+
+**Compact layout** in the bottom bar is on by default and remembered per site.
+It wraps long, ordered runs of leaf pages into additional columns when the area
+to their right is clear, then closes the vertical gap. Node sizes and spacing
+stay the same. Column count accounts for the viewport's aspect ratio, and reading
+order runs top to bottom in each column, then left to right. Parent links use
+the column gutters. Short runs, shared children and blocked subtrees stay in
+their original arrangement; non-leaf pages never move sideways.
+
+Turn the option off to compare with the original layered layout, and use **Fit**
+to frame either arrangement. It also applies to selected-tree subsets. Radial
+Focus uses its own layout and disables this toggle. Compaction runs only when a
+layout is requested: background updates keep the compacted nodes in place.
+
+Background index updates keep the open map's zoom, pan, selection, selected-tree
+filter and legend settings. Title and metadata changes update labels without
+rearranging the map. Added pages appear near their neighbours, surviving pages
+stay in place, and removed pages fade out. The selected tree is recomputed from
+the fresh relationships while keeping its camera and existing positions.
+
+Use **Re-layout** in the bottom display bar to deliberately rearrange the
+displayed nodes. **Fit** changes the camera to frame the current arrangement;
+it does not rearrange it. Changing Map by, Focus or the selected-tree selection
+still requests a new layout.
 
 The map is meant to be roamed:
 

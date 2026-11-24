@@ -12,7 +12,7 @@ there are no fixed sleeps.
 
 Deliberately NOT covered yet (features still in flux — see module TODO):
   * map / graph overlay interactions (#graphBtn, .graph-overlay, node select)
-  * requirement cards + traceability matrix (#reqBtn, requirements.js)
+  * requirement cards + traceability matrix (requirements.js)
   * in-document search highlighting (#docSearch)
   * all-documents search index / tree filter (#treeSearch)
 """
@@ -21,18 +21,31 @@ import re
 import pytest
 from playwright.sync_api import expect
 
-# Real document ids (source folder "Guides" + path, no extension).
+# Fixture document ids. The corpus lives in tests/fixtures/ and is mounted as the
+# single source "Guides" by tests/fixtures-config.json, so these ids are owned by
+# the suite - not by the product's own documentation under docs/.
+#
+# TOP_LEVEL_DOCS is what the lazy tree renders before any folder is expanded;
+# NESTED_DOCS arrive only when "concepts" is opened. See the drawer test.
 DEFAULT_DOC = "Guides/getting-started"
-DOC_IDS = [
+TOP_LEVEL_DOCS = [
     "Guides/Requirements",
     "Guides/Verification",
-    "Guides/concepts/graph-model",
-    "Guides/concepts/metadata-tags",
     "Guides/dafu-was-here",
     "Guides/getting-started",
     "Guides/markdown-kitchen-sink",
     "Guides/security-and-html",
 ]
+NESTED_DOCS = [
+    "Guides/concepts/graph-model",
+    "Guides/concepts/metadata-tags",
+]
+DOC_IDS = TOP_LEVEL_DOCS + NESTED_DOCS
+
+# A cold native-module graph can outlast Playwright's five-second assertion
+# default on the constrained Windows fixture host. Use the same bounded boot
+# budget as the security browser checks; navigation assertions stay unchanged.
+BOOT_TIMEOUT_MS = 30000
 
 
 # --------------------------------------------------------------------------- #
@@ -40,16 +53,44 @@ DOC_IDS = [
 # --------------------------------------------------------------------------- #
 def boot(page):
     """Load the app root and wait until it reports ready."""
-    page.goto("/", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_have_attribute("data-app-ready", "1")
+    _cold_load(page, "/")
     return page
 
 
 def open_doc(page, doc_id):
     """Cold-load a specific document via its hash route and wait for ready."""
-    page.goto(f"/#/{doc_id}", wait_until="domcontentloaded")
-    expect(page.locator("body")).to_have_attribute("data-app-ready", "1")
+    _cold_load(page, f"/#/{doc_id}")
     return page
+
+
+def _cold_load(page, url):
+    """Keep genuine boot failures actionable in the coordinator's text log."""
+    errors, pending = [], set()
+    def started(request):
+        pending.add(request.url)
+    def finished(request):
+        pending.discard(request.url)
+    def failed(request):
+        finished(request)
+        errors.append(f"{request.url}: {request.failure}")
+    def page_error(error):
+        errors.append(str(error))
+    def response_error(response):
+        if response.status >= 400:
+            errors.append(f"HTTP {response.status}: {response.url}")
+    listeners = {"request": started, "requestfinished": finished,
+                 "requestfailed": failed, "pageerror": page_error,
+                 "response": response_error}
+    for event, callback in listeners.items():
+        page.on(event, callback)
+    try:
+        page.goto(url, wait_until="domcontentloaded")
+        expect(page.locator("body")).to_have_attribute("data-app-ready", "1", timeout=BOOT_TIMEOUT_MS)
+    except AssertionError as exc:
+        raise AssertionError(f"{exc}\nBoot errors: {errors}; pending requests: {sorted(pending)}") from exc
+    finally:
+        for event, callback in listeners.items():
+            page.remove_listener(event, callback)
 
 
 # --------------------------------------------------------------------------- #
@@ -118,12 +159,29 @@ def test_drawer_opens_lists_docs_and_closes_by_escape_and_scrim(page):
     expect(scrim).to_be_visible()
     expect(hamburger).to_have_attribute("aria-expanded", "true")
 
-    # Lists every document.
+    # Lists one folder level at a time. renderTree auto-opens the FIRST source
+    # ("Guides"), so its six documents are present on boot - but "concepts" is a
+    # collapsed <details> whose children are only fetched from
+    # GET /api/index/tree?path= when it is opened. Asserting a flat count of the
+    # whole corpus would assert behaviour renderTree deliberately does not have.
     links = page.locator("#treeList a.doc-link")
-    expect(links).to_have_count(len(DOC_IDS))
+    expect(links).to_have_count(len(TOP_LEVEL_DOCS))
     expect(page.locator("#treeList a.doc-link[data-id='Guides/getting-started']")).to_have_text(
         "Getting Started"
     )
+    for doc_id in NESTED_DOCS:
+        expect(page.locator(f"#treeList a.doc-link[data-id='{doc_id}']")).to_have_count(0)
+
+    # Expanding the folder fetches its children, and only then do they exist.
+    # Target the nested folder by data-path: the FIRST summary is the source
+    # folder "Guides", which renderTree already auto-opened, so clicking that
+    # would collapse the tree rather than expand anything. Click the CHEVRON:
+    # the folder's label is a link to the folder's own page.
+    page.click('#treeList details[data-path="Guides/concepts"] > summary > .tree-chevron')
+    expect(page).to_have_url(re.compile(re.escape(f"#/{DEFAULT_DOC}") + r"$"))   # expanding is not navigating
+    expect(links).to_have_count(len(DOC_IDS))
+    for doc_id in NESTED_DOCS:
+        expect(page.locator(f"#treeList a.doc-link[data-id='{doc_id}']")).to_have_count(1)
 
     # Escape closes.
     page.keyboard.press("Escape")
@@ -144,6 +202,7 @@ def test_tree_item_navigates(page):
     expect(page.locator("#doc-tree")).to_be_visible()
 
     target = "Guides/concepts/metadata-tags"
+    page.click('#treeList details[data-path="Guides/concepts"] > summary > .tree-chevron')  # lazy tree
     page.click(f"#treeList a.doc-link[data-id='{target}']")
 
     # URL hash, main content and document title all update; drawer closes.
@@ -151,6 +210,65 @@ def test_tree_item_navigates(page):
     expect(page.locator("#content .doc h1")).to_contain_text("Metadata Tags")
     expect(page).to_have_title(re.compile(r"^Metadata Tags\b"))
     expect(page.locator("#doc-tree")).to_be_hidden()
+
+
+# --------------------------------------------------------------------------- #
+# folder pages  (every folder is a page at its own path)
+# --------------------------------------------------------------------------- #
+@pytest.mark.e2e
+def test_folder_label_opens_the_folders_page(page):
+    boot(page)
+    page.click("#hamburger")
+    page.click('#treeList details[data-path="Guides/concepts"] > summary > a.folder-link')
+
+    # "concepts" has no page file, so its page is generated from its contents.
+    expect(page).to_have_url(re.compile(re.escape("#/Guides/concepts") + r"$"))
+    expect(page.locator("#doc-tree")).to_be_hidden()
+    expect(page.locator("#content .folder-page h1")).to_have_text("Concepts")
+    expect(page).to_have_title(re.compile(r"^Concepts\b"))
+    for doc_id in NESTED_DOCS:
+        expect(page.locator(f"#content a.folder-entry[data-id='{doc_id}']")).to_have_count(1)
+    # Not a file: nothing to edit or delete, and no "On this page" pane.
+    expect(page.locator("#editBtn")).to_be_hidden()
+    expect(page.locator("#deleteBtn")).to_be_hidden()
+    expect(page.locator("#toc")).to_be_hidden()
+
+    # The tree marks the folder as the page being read, and opened it.
+    page.click("#hamburger")
+    folder = page.locator('#treeList details[data-path="Guides/concepts"]')
+    expect(folder.locator("> summary > a.folder-link")).to_have_attribute("aria-current", "page")
+    expect(folder).to_have_attribute("open", "")
+
+
+@pytest.mark.e2e
+def test_folder_page_entries_navigate(page):
+    open_doc(page, "Guides/concepts")
+    page.click("#content a.folder-entry[data-id='Guides/concepts/metadata-tags']")
+    expect(page).to_have_url(re.compile(re.escape("#/Guides/concepts/metadata-tags") + r"$"))
+    expect(page.locator("#content .doc h1")).to_contain_text("Metadata Tags")
+
+
+@pytest.mark.e2e
+def test_source_root_is_a_folder_page(page):
+    open_doc(page, "Guides")
+    expect(page.locator("#content .folder-page h1")).to_have_text("Guides")
+    expect(page.locator("#content a.folder-entry.is-folder[data-path='Guides/concepts']")).to_have_count(1)
+    expect(page.locator("#content a.folder-entry:not(.is-folder)")).to_have_count(len(TOP_LEVEL_DOCS))
+
+
+@pytest.mark.e2e
+def test_breadcrumb_folders_link_to_their_pages(page):
+    open_doc(page, "Guides/concepts/graph-model")
+    crumbs = page.locator("#crumbs a")
+    expect(crumbs).to_have_count(2)
+    page.click("#crumbs a[href='#/Guides/concepts']")
+    expect(page.locator("#content .folder-page h1")).to_have_text("Concepts")
+
+
+@pytest.mark.e2e
+def test_unknown_path_is_still_an_error(page):
+    open_doc(page, "Guides/no-such-thing")
+    expect(page.locator("#content .doc-error")).to_contain_text("Guides/no-such-thing")
 
 
 # --------------------------------------------------------------------------- #
@@ -252,33 +370,29 @@ def test_footer_shows_multiple_assumes(page):
 
 
 @pytest.mark.e2e
-def test_missing_footer_reference_is_flagged_non_link(page):
-    """A dangling assumes/next id must render as .foot-missing (a span, not <a>).
+def test_dangling_footer_reference_still_links(page):
+    """A dangling assumes/next id renders as an ordinary link, by design.
 
-    No document currently ships a dangling footer reference, so we scan the whole
-    library: if one exists we assert it renders correctly; otherwise we skip
-    honestly rather than fabricate a fixture (this suite may not edit docs/).
+    This test used to assert a `.foot-missing` span. That contract is dead: the
+    class appears nowhere in app/ or docs/, and buildFootGroup (reader.js) always
+    emits an <a>. Its own comment explains why - under the lazy server-backed
+    architecture the client no longer holds every id, so it cannot cheaply prove a
+    target is absent, and a dead link simply lands on the not-found view.
+
+    So this pins the behaviour that actually exists. If a dangling-reference
+    affordance is ever reinstated, this test is the one that should fail and be
+    rewritten - which is the whole point of asserting it rather than skipping.
     """
-    found = False
-    for doc_id in DOC_IDS:
-        open_doc(page, doc_id)
-        missing = page.locator("#content ~ .app-footer .foot-missing, .app-footer .foot-missing")
-        # Footer lives outside #content; locate globally.
-        missing = page.locator(".foot-missing")
-        if missing.count() > 0:
-            found = True
-            first = missing.first
-            # It is a flagged NON-link: a <span>, never an <a>.
-            tag = first.evaluate("e => e.tagName.toLowerCase()")
-            assert tag == "span", f".foot-missing should be a <span>, got <{tag}>"
-            expect(first).to_contain_text("⚠")
-            break
-    if not found:
-        pytest.skip(
-            "No document currently declares a dangling assumes/next reference, so "
-            "the .foot-missing code path has no live fixture. Add a doc whose "
-            "metadata references a non-existent id to exercise it."
-        )
+    open_doc(page, "Guides/dafu-was-here")
+    foot_next = page.locator("#footNext")
+    expect(foot_next).to_be_visible()
+    link = foot_next.locator("a")
+    expect(link).to_have_count(1)
+    expect(link).to_have_attribute("href", "#/Guides/no-such-document")
+    assert page.locator(".foot-missing").count() == 0, (
+        "A .foot-missing element appeared. The dangling-reference affordance has "
+        "been reinstated - update this test to assert the new contract."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -292,3 +406,151 @@ def test_skip_link_targets_content(page):
     expect(skip).to_have_attribute("href", "#content")
     # The target actually exists.
     expect(page.locator("#content")).to_have_count(1)
+
+
+# --------------------------------------------------------------------------- #
+# TOC behaviour  (Phase 4: the TOC is a Svelte component; these pin its contract)
+# --------------------------------------------------------------------------- #
+@pytest.mark.e2e
+def test_toc_click_focuses_its_heading(page):
+    """Clicking an entry scrolls to the heading AND focuses it.
+
+    The focus half is the accessibility half: a keyboard user who activates a TOC
+    entry must land ON the heading, not merely have it scrolled into view with
+    focus still back in the list.
+    """
+    open_doc(page, "Guides/getting-started")
+    entries = page.locator("#tocList a[data-target]")
+    expect(entries).to_have_count(6)
+
+    third = entries.nth(2)
+    target = third.get_attribute("data-target")
+    third.click()
+
+    focused_id = page.evaluate("() => document.activeElement && document.activeElement.id")
+    assert focused_id == target, f"expected focus on #{target}, got #{focused_id}"
+
+
+@pytest.mark.e2e
+def test_toc_scroll_spy_marks_active(page):
+    """Scrolling the content pane marks the heading in view.
+
+    This is the phase's designated SILENT failure. setupScrollSpy reads
+    `tocList.querySelectorAll('a[data-target]')` in the same tick the TOC is
+    populated, but Svelte applies rune writes on a microtask - so without a
+    flushSync the map is empty, no entry is ever marked, and NOTHING THROWS.
+    Asserting on .active is the only thing that catches it.
+    """
+    open_doc(page, "Guides/markdown-kitchen-sink")
+    expect(page.locator("#tocList a[data-target]").first).to_be_visible()
+
+    # Scroll far enough down that a later heading is inside the spy's band.
+    page.evaluate("""() => {
+        const c = document.getElementById('content');
+        c.scrollTop = Math.floor(c.scrollHeight * 0.5);
+    }""")
+    expect(page.locator("#tocList a.active")).to_have_count(1)
+
+
+@pytest.mark.e2e
+def test_find_in_page_leaves_the_article_structurally_intact(page):
+    """Typing in #docSearch must not restructure the article.
+
+    clearHighlights used to call root.normalize() over the WHOLE article, which
+    merges adjacent text nodes anywhere in the subtree - including inside DOM a
+    mounted component is holding references into. It now normalizes only the
+    parents it actually un-wrapped. This asserts the element count is unchanged
+    across a highlight/clear cycle on a document that carries a requirement block.
+    """
+    open_doc(page, "Guides/Requirements")
+    count = lambda: page.evaluate("() => document.querySelectorAll('#content .doc *').length")
+    before = count()
+
+    box = page.locator("#docSearch")
+    box.fill("requirement")
+    expect(page.locator("#content .doc mark.find").first).to_be_visible()
+
+    box.fill("")
+    expect(page.locator("#content .doc mark.find")).to_have_count(0)
+    assert count() == before, "find-in-page changed the article's element count"
+
+
+@pytest.mark.e2e
+def test_toc_pane_hides_for_a_document_with_no_headings(page):
+    """A document whose only heading is its title still has a TOC; one with none
+    should not show an empty 'On this page' panel."""
+    open_doc(page, "Guides/getting-started")
+    expect(page.locator("#tocList a")).to_have_count(6)
+    expect(page.locator("#toc")).to_be_visible()
+
+
+# --------------------------------------------------------------------------- #
+# the mounted-subtree contract  (Phase 4, for Phase 6 to rely on)
+# --------------------------------------------------------------------------- #
+@pytest.mark.e2e
+def test_mounted_components_are_torn_down_before_the_article_is_replaced(page):
+    """Anything mounted inside the article must be destroyed when it is replaced.
+
+    The registry is EMPTY today - Phase 6 is what fills it. It is tested now, and
+    deliberately, because the failure it guards against is invisible: detaching a
+    node does not stop a component's effects, so a missed teardown leaks a live
+    component per navigation and the symptom appears much later, somewhere else.
+    Landing the hook untested would mean Phase 6 discovering all of that at once.
+
+    Drives the real registry through its real export, on all three paths that
+    replace the article: a normal navigation, an error screen, and a re-render of
+    the same document.
+    """
+    boot(page)
+    page.goto("/#/Guides/getting-started", wait_until="domcontentloaded")
+    expect(page.locator("body")).to_have_attribute("data-app-ready", "1")
+
+    # Register a fake mounted component against a real node inside the article.
+    page.evaluate("""async () => {
+        const reader = await import('/js/reader.js');
+        window.__torn = [];
+        const host = document.createElement('span');
+        host.className = 'wd-mounted';
+        host.id = 'probe-host';
+        document.querySelector('#content .doc').appendChild(host);
+        reader.registerMounted(host, () => window.__torn.push('probe'));
+    }""")
+    assert page.evaluate("() => !!document.getElementById('probe-host')")
+
+    # Navigating replaces the article, which must tear it down exactly once.
+    # By hash rather than by clicking the tree: the drawer is closed here, so its
+    # links are present but not visible, and this test is about teardown rather
+    # than about how the navigation was triggered.
+    page.evaluate("() => { location.hash = '#/Guides/markdown-kitchen-sink'; }")
+    expect(page.locator("#content .doc h1")).to_contain_text("Markdown Kitchen Sink")
+    assert page.evaluate("() => window.__torn") == ["probe"], (
+        "teardownMounted did not destroy a component registered inside the article"
+    )
+    assert page.evaluate("() => !!document.getElementById('probe-host')") is False
+
+
+@pytest.mark.e2e
+def test_teardown_is_idempotent_and_scoped(page):
+    """A second replacement must not re-destroy an already-destroyed component,
+    and a host outside the article must be left alone."""
+    open_doc(page, "Guides/getting-started")
+    page.evaluate("""async () => {
+        const reader = await import('/js/reader.js');
+        window.__torn = [];
+        const inside = document.createElement('span');
+        inside.className = 'wd-mounted';
+        document.querySelector('#content .doc').appendChild(inside);
+        reader.registerMounted(inside, () => window.__torn.push('inside'));
+        // A host that is NOT inside #content: teardownMounted(content) must skip it.
+        const outside = document.createElement('span');
+        outside.className = 'wd-mounted';
+        document.querySelector('.app-footer').appendChild(outside);
+        reader.registerMounted(outside, () => window.__torn.push('outside'));
+    }""")
+    page.goto("/#/Guides/Verification", wait_until="domcontentloaded")
+    expect(page.locator("#content .doc h1")).to_contain_text("Verification")
+    page.goto("/#/Guides/Requirements", wait_until="domcontentloaded")
+    expect(page.locator("#content .doc h1")).to_contain_text("Requirements")
+
+    torn = page.evaluate("() => window.__torn")
+    assert torn == ["inside"], f"expected exactly one scoped teardown, got {torn}"

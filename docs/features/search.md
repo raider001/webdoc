@@ -55,6 +55,5 @@ search result is just as shareable as any other view.
 
 Full-text search would mean shipping and querying a much larger index for every
 reader, on every load, for a corpus that is already well-structured by its
-headings. WebDocs favours the lighter path: index the outline, search it
-instantly in the browser, and keep the zero-dependency, no-backend promise
-intact.
+headings. WebDocs favours the lighter path: index the outline rather than the
+bodies, so nothing beyond that outline has to be built, stored or searched.

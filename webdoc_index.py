@@ -22,40 +22,57 @@ import time
 import sqlite3
 import threading
 import hashlib
+from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
+from fnmatch import fnmatchcase
 
-SCHEMA_VERSION = 3
+import webdoc_access
+
+SCHEMA_VERSION = 11  # rebuild once: preserve missing authored test names for run validation
 
 # ---- extraction regexes (ported from the client) ---------------------------
-META_RE = re.compile(r'^﻿?\s*<!--\s*meta\b(.*?)-->\s*', re.I | re.S)
+META_RE = re.compile(r'^﻿?\s*<!--\s*meta\b(?!\s+(?:start|end)\b)(.*?)-->\s*', re.I | re.S)
 FENCE_OPEN = re.compile(r'^ {0,3}([`~]{3,})')
 FENCE_CLOSE = re.compile(r'^ {0,3}([`~]{3,})[ \t]*$')
 HEADING_RE = re.compile(r'^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$', re.M)
 LINK_RE = re.compile(r'\[(?:[^\]\\]|\\.)*\]\(\s*(<[^>]*>|[^()\s]+)')
-META_BLOCK_RE = re.compile(r'<!--\s*meta\s+start\s*(\{.*?\})\s*-->(.*?)<!--\s*meta\s+end\b.*?-->', re.I | re.S)
-FENCED_STRIP = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*$', re.M | re.S)
+META_TOKEN_RE = re.compile(r'<!--\s*meta\s+(start|end)\b\s*(.*?)-->', re.I | re.S)
+FENCED_STRIP = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t\r]*$', re.M | re.S)  # \r: CRLF
 INLINE_CODE = re.compile(r'`[^`]*`')
-META_REGION_STRIP = re.compile(r'<!--\s*meta\s+start.*?<!--\s*meta\s+end\b.*?-->', re.I | re.S)
 HAS_SCHEME = re.compile(r'^(?:[a-z][a-z0-9+.-]*:)', re.I)
 INLINE_MD = re.compile(r'[*_`~]')
 
 
 def split_meta(text):
     """Reproduce catalog.splitMeta: a leading <!--meta ...--> (JSON in an HTML
-    comment) is stripped to metadata; the rest is the body. Note this also matches
-    <!--meta start ...-->, matching the client's behaviour exactly (a doc opening
-    with a requirement block loses that first block from body - intentional parity)."""
+    comment) is stripped to metadata; paired block openers remain in the body."""
+    meta, body, _ok = split_meta_ex(text)
+    return meta, body
+
+
+def split_meta_ex(text):
+    """split_meta plus whether the header actually PARSED.
+
+    The distinction matters for access control: a header with a stray comma
+    parses to {}, which used to read as "this document declares no access rule" -
+    so a typo in a locked page's header silently published it. Callers that care
+    treat `ok=False` as a reason to restrict, not a reason to relax.
+    -> (meta, body, ok)
+    """
     m = META_RE.match(text)
     if not m:
-        return {}, text
-    meta = {}
+        return {}, text, True          # no header at all is not an error
     try:
         meta = json.loads(m.group(1).strip())
-        if not isinstance(meta, dict):
-            meta = {}
     except Exception:
-        meta = {}
-    return meta, text[m.end():]
+        return {}, text[m.end():], False
+    if not isinstance(meta, dict):
+        return {}, text[m.end():], False
+    for field in ('assumes', 'next'):
+        if field in meta:
+            items = meta[field] if isinstance(meta[field], list) else []
+            meta[field] = list(dict.fromkeys(item for item in items if isinstance(item, str)))
+    return meta, text[m.end():], True
 
 
 def fenced_ranges(body):
@@ -64,9 +81,11 @@ def fenced_ranges(body):
     ranges = []
     offset = 0
     open_f = None
-    for line in body.split('\n'):
+    for raw in body.split('\n'):
         start = offset
-        end = offset + len(line)
+        end = offset + len(raw)
+        # A CRLF body keeps "\r" on each line, which `[ \t]*$` would reject.
+        line = raw[:-1] if raw.endswith('\r') else raw
         if open_f is None:
             o = FENCE_OPEN.match(line)
             if o:
@@ -83,15 +102,111 @@ def fenced_ranges(body):
 
 
 def in_fence(ranges, pos):
-    for a, b in ranges:
-        if a <= pos < b:
-            return True
-    return False
+    at = bisect_right(ranges, (pos, float('inf'))) - 1
+    return at >= 0 and ranges[at][0] <= pos < ranges[at][1]
+
+
+def comment_tokens(text, pattern):
+    # Search once for each comment terminator. A regex with .*? retried from
+    # every unterminated opener otherwise rescans the entire remaining file.
+    pos = 0
+    while True:
+        start = text.find('<!--', pos)
+        if start < 0:
+            return
+        end = text.find('-->', start + 4)
+        if end < 0:
+            return
+        match = pattern.fullmatch(text, start, end + 3)
+        if match:
+            yield match
+        pos = end + 3
+
+
+def remove_spans(text, spans):
+    # Spans arrive in document order, with parents preceding their children.
+    chunks, end = [], 0
+    for a, b in spans:
+        if a < end:
+            continue
+        chunks.append(text[end:a])
+        end = b
+    chunks.append(text[end:])
+    return ''.join(chunks)
+
+
+def strip_fences(text):
+    return remove_spans(text, fenced_ranges(text))
+
+
+def meta_blocks(body):
+    """Paired, nested, whole-line metadata; mirrors src/js/meta-blocks.ts."""
+    ranges = fenced_ranges(body)
+    blocks, stack = [], []
+
+    def identity(meta):
+        if 'widget' in meta:
+            return 'widget:' + str(meta['widget'])
+        return str(meta.get('test') or meta.get('test-case') or
+                   meta.get('requirement-group') or meta.get('group') or '')
+
+    line_start, line_end, fence = 0, body.find('\n'), 0
+    if line_end < 0:
+        line_end = len(body)
+    for match in comment_tokens(body, META_TOKEN_RE):
+        start, end = match.span()
+        while start > line_end:
+            line_start = line_end + 1
+            line_end = body.find('\n', line_start)
+            if line_end < 0:
+                line_end = len(body)
+        while fence < len(ranges) and ranges[fence][1] <= start:
+            fence += 1
+        in_code = fence < len(ranges) and ranges[fence][0] <= start < ranges[fence][1]
+        # Once another token occupies this line, reject in constant time before
+        # slicing or scanning its prefix/suffix again.
+        if in_code or start - line_start > 3 or not re.fullmatch(r' {0,3}', body[line_start:start]):
+            continue
+        tail_end = line_end if end <= line_end else body.find('\n', end)
+        if tail_end < 0:
+            tail_end = len(body)
+        if not re.fullmatch(r'[ \t\r]*', body[end:tail_end]):
+            continue
+        error = False
+        try:
+            options = json.loads(match.group(2) or '{}')
+            if not isinstance(options, dict):
+                raise ValueError('Expected object')
+        except (ValueError, TypeError):
+            options, error = {}, True
+        widget = 'widget' in options or bool(re.search(r'["\']widget["\']\s*:', match.group(2)))
+        if match.group(1).lower() == 'start':
+            block = {'start': start, 'end': end, 'inner_start': end, 'inner_end': end,
+                     'options': options, 'widget': widget, 'error': error}
+            blocks.append(block)
+            stack.append(block)
+            if len(stack) > 64:
+                return []  # fixed nesting limit bounds nested table extraction
+        elif stack:
+            block = stack.pop()
+            block.update(end=end, inner_end=start)
+            block['error'] = block['error'] or error or (block['widget'] and 'widget' not in options) \
+                or bool(identity(options) and identity(options) != identity(block['options']))
+    for block in stack:
+        block['error'] = True
+    return blocks
+
+
+def strip_meta_blocks(body):
+    """Index ordinary prose inside widgets while excluding requirement/test data."""
+    spans = [(b['start'], b['end']) for b in meta_blocks(body) if not b['widget']]
+    body = remove_spans(body, spans)
+    return remove_spans(body, (m.span() for m in comment_tokens(body, META_TOKEN_RE)))
 
 
 def extract_headings(body):
-    s = FENCED_STRIP.sub('', body)
-    s = META_REGION_STRIP.sub('', s)
+    s = strip_fences(body)
+    s = strip_meta_blocks(s)
     out = []
     for m in HEADING_RE.finditer(s):
         t = INLINE_MD.sub('', m.group(1)).strip()
@@ -103,9 +218,9 @@ def extract_headings(body):
 def extract_links(body):
     """In-body [text](target) links -> list of (raw_target, is_scheme). Mirrors
     doclinks.documentLinks pre-classification (fences / inline code / meta stripped)."""
-    s = FENCED_STRIP.sub('', body)
+    s = strip_fences(body)
     s = INLINE_CODE.sub('', s)
-    s = META_REGION_STRIP.sub('', s)
+    s = strip_meta_blocks(s)
     out = []
     for m in LINK_RE.finditer(s):
         target = m.group(1).strip()
@@ -114,7 +229,14 @@ def extract_links(body):
         if not target or target[0] == '#':
             continue
         out.append((target, bool(HAS_SCHEME.match(target))))
-    return out
+    # A table source is an asset reference even without an inline Markdown link.
+    for block in meta_blocks(body):
+        options = block['options']
+        source = options.get('source')
+        if not block['error'] and options.get('widget') == 'live-table' and isinstance(source, dict) \
+                and source.get('kind') in ('csv', 'json') and isinstance(source.get('src'), str):
+            out.append(('/docs/' + source['src'], False))
+    return list(dict.fromkeys(out))
 
 
 def _split_row(line):
@@ -161,22 +283,18 @@ def _pick(rec, names):
 
 
 def _split_refs(raw):
-    return [s.strip() for s in str(raw).split(',') if s.strip()] if raw else []
+    return list(dict.fromkeys(s.strip() for s in str(raw).split(',') if s.strip())) if raw else []
 
 
 def extract_blocks(body, component):
     """Requirement groups + test cases (fence-aware), matching requirements.extractGroups.
     Returns (requirements, tests). Requirement id upper-cased; test id NOT (client parity)."""
     reqs, tests = [], []
-    ranges = fenced_ranges(body)
-    for m in META_BLOCK_RE.finditer(body):
-        if in_fence(ranges, m.start()):
+    for block in meta_blocks(body):
+        if block['widget']:
             continue
-        try:
-            meta = json.loads(m.group(1))
-        except Exception:
-            meta = None
-        rows = _parse_table(m.group(2))
+        meta = None if block['error'] else block['options']
+        rows = _parse_table(body[block['inner_start']:block['inner_end']])
         is_test = bool(meta and (meta.get('test') or meta.get('test-case')))
         if is_test:
             key = meta.get('test') or meta.get('test-case')
@@ -196,11 +314,11 @@ def extract_blocks(body, component):
                     e = _pick(row, ['expected-response', 'expected', 'response', 'result', 'then'])
                     if a or e:
                         steps.append({'action': a, 'expected': e})
-            verifies = [str(v) for v in meta['verifies']] if isinstance(meta.get('verifies'), list) \
+            verifies = list(dict.fromkeys(str(v) for v in meta['verifies'])) if isinstance(meta.get('verifies'), list) \
                 else _split_refs(meta.get('verifies') or meta.get('verify') or '')
             tests.append({
                 'id': 'T_' + component + '_' + key, 'component': component, 'key': key,
-                'name': meta.get('name') or key, 'steps': steps, 'verifies_raw': verifies,
+                'name': meta.get('name') or '', 'steps': steps, 'verifies_raw': verifies,
             })
         else:
             group = meta and (meta.get('requirement-group') or meta.get('group'))
@@ -217,6 +335,11 @@ def extract_blocks(body, component):
                     'trace_to': _split_refs(_pick(row, ['trace-to', 'traceto', 'trace'])),
                 })
     return reqs, tests
+
+
+# A folder's own page, after a sibling `<folder>.md`: the first of these files found
+# INSIDE the folder (lower-cased; see Index._level). Order is precedence.
+FOLDER_PAGE_NAMES = ('index', 'readme')
 
 
 def fallback_title(doc_id):
@@ -283,14 +406,75 @@ def resolve_req_ref(raw, component, group, req_ids_upper):
     return None
 
 
+# ---- access-control row (de)serialisation ---------------------------------
+def _spec_row(spec):
+    """A normalised access spec as JSON-safe plain types (tuples -> lists)."""
+    if not spec:
+        return None
+    return {'read': list(spec['read']) if spec['read'] is not None else None,
+            'write': list(spec['write']) if spec['write'] is not None else None,
+            'hidden': bool(spec['hidden']), 'propagate': bool(spec.get('propagate', True)),
+            'inherit': bool(spec.get('inherit', True))}
+
+
+def _row_spec(raw):
+    """Inverse of _spec_row, back to the tuple-based shape compute_effective wants."""
+    if not raw:
+        return None
+    return {'read': tuple(raw['read']) if raw.get('read') is not None else None,
+            'write': tuple(raw['write']) if raw.get('write') is not None else None,
+            'hidden': bool(raw.get('hidden')), 'propagate': bool(raw.get('propagate', True)),
+            'inherit': bool(raw.get('inherit', True)), 'label': '', 'malformed': False}
+
+
+def parse_document(doc_id, component, text):
+    meta, body, header_ok = split_meta_ex(text)
+    title = (meta.get('title') if isinstance(meta, dict) else None) or fallback_title(doc_id)
+    # Access control: the document's own `access` block, plus every group named
+    # by an in-body <!--access start--> section. `public_body` is the document
+    # with all restricted sections REMOVED - it is the ONLY form that reaches
+    # the headings table, the link graph, the requirement/test index and the
+    # full-text index, so restricted content can never surface as a search hit,
+    # a heading, a map edge or a requirement row for anyone. The trade (and it
+    # is documented): requirement groups and test cases written INSIDE a
+    # restricted section are not indexed at all.
+    doc_acl = webdoc_access.doc_access_from_meta(meta)
+    if not header_ok:
+        # The header did not parse, so we cannot know whether it carried an
+        # access rule. Treating that as "no rule" would mean a stray comma in
+        # a locked page's header publishes it. Restrict instead: the failure
+        # is loud, an administrator can still read and repair the page, and it
+        # errs toward less access rather than more.
+        doc_acl = webdoc_access.malformed_access()
+    public_body = webdoc_access.strip_all_sections(body)
+    reqs, tests = extract_blocks(public_body, component) if component else ([], [])
+    return {
+        'title': title,
+        'description': (meta.get('description') if isinstance(meta, dict) else '') or '',
+        'assumes': meta.get('assumes') or [] if isinstance(meta, dict) else [],
+        'next': meta.get('next') or [] if isinstance(meta, dict) else [],
+        'headings': extract_headings(public_body),
+        'links': extract_links(public_body),
+        'requirements': reqs, 'tests': tests, 'body': public_body,
+        'access': doc_acl,
+        'access_groups': webdoc_access.groups_mentioned(meta, body),
+    }
+
 class Index:
     """The SQLite-backed site index. Thread-safe: one connection per thread (WAL),
     a single write lock. Reconcile is incremental (mtime,size + config hash)."""
 
-    def __init__(self, here, sources, index_body=False, index_dir=None):
+    def __init__(self, here, sources, index_body=False, index_dir=None, propagate_via=('next',)):
         self.here = here
         self.sources = sources           # [{name, path, component}]
         self.index_body = index_body
+        # Which meta relations an access lock travels along. 'next' (Recommended
+        # next) is the default and the one the feature is specified around;
+        # 'assumes' can be added so a lock also follows prerequisite edges.
+        self.propagate_via = tuple(k for k in propagate_via if k in ('next', 'assumes')) or ('next',)
+        self._acl_lock = threading.RLock()
+        self._acl_cache = None           # {doc_id: eff}, rebuilt after any write
+        self._owner_cache = None         # (generation, {req/test id: doc id})
         # index_dir lets a second site (e.g. a big demo) keep its own DB instead of
         # sharing/clobbering the default one when configs differ.
         self.dir = index_dir if index_dir else os.path.join(here, '.webdoc-index')
@@ -299,6 +483,8 @@ class Index:
         self._wlock = threading.RLock()
         self.state = 'building'          # building | ready | error
         self.progress = {'done': 0, 'total': 0}
+        self.generation = 0               # bumped on any write (own or externally-detected), for client polling
+        self.epoch = str(time.time_ns())   # distinguish a restarted server with the same counter
         os.makedirs(self.dir, exist_ok=True)
         self._ensure_schema()
 
@@ -316,7 +502,8 @@ class Index:
 
     def _config_hash(self):
         payload = json.dumps([[s['name'], s.get('component'), s['path']] for s in self.sources], sort_keys=True)
-        return hashlib.sha1((payload + '|body=' + str(self.index_body)).encode('utf-8')).hexdigest()
+        return hashlib.sha1((payload + '|body=' + str(self.index_body)
+                             + '|acl=' + ','.join(self.propagate_via)).encode('utf-8')).hexdigest()
 
     def _ensure_schema(self):
         c = self._conn()
@@ -337,6 +524,8 @@ class Index:
                 DROP TABLE IF EXISTS test; DROP TABLE IF EXISTS test_verifies;
                 DROP TABLE IF EXISTS req_trace_edge; DROP TABLE IF EXISTS req_verified_by;
                 DROP TABLE IF EXISTS doc_link_edge; DROP TABLE IF EXISTS doc_fts;
+                DROP TABLE IF EXISTS doc_access; DROP TABLE IF EXISTS doc_access_eff;
+                DROP TABLE IF EXISTS doc_asset;
             """)
             c.executescript("""
                 CREATE TABLE schema_meta(k TEXT PRIMARY KEY, v TEXT);
@@ -373,6 +562,21 @@ class Index:
                 CREATE VIRTUAL TABLE doc_fts USING fts5(
                   title, description, headings, body,
                   tokenize='unicode61 remove_diacritics 2');
+                -- Access control. doc_access holds what a document DECLARES;
+                -- doc_access_eff holds what it EFFECTIVELY has once `next`
+                -- propagation has run (rebuilt wholesale by _relink, like the
+                -- other resolved-edge tables).
+                CREATE TABLE doc_access(
+                  doc_id TEXT PRIMARY KEY, spec_json TEXT, groups_json TEXT);
+                CREATE TABLE doc_access_eff(
+                  doc_id TEXT PRIMARY KEY, read_json TEXT, write_json TEXT,
+                  hidden INTEGER NOT NULL DEFAULT 0, explicit INTEGER NOT NULL DEFAULT 0,
+                  inherited_json TEXT);
+                -- Which documents REFERENCE each non-document file (an image, a
+                -- report). A file carries no metadata of its own, so the pages
+                -- that use it are the only honest signal of who it belongs to.
+                CREATE TABLE doc_asset(path_lc TEXT, doc_id TEXT);
+                CREATE INDEX doc_asset_path ON doc_asset(path_lc);
             """)
             c.execute("INSERT INTO schema_meta(k,v) VALUES('version',?)", (str(SCHEMA_VERSION),))
             c.execute("INSERT INTO schema_meta(k,v) VALUES('config_hash',?)", (self._config_hash(),))
@@ -380,18 +584,8 @@ class Index:
 
     # -- parsing one file --
     def _parse(self, doc_id, component, text):
-        meta, body = split_meta(text)
-        title = (meta.get('title') if isinstance(meta, dict) else None) or fallback_title(doc_id)
-        reqs, tests = extract_blocks(body, component) if component else ([], [])
-        return {
-            'title': title,
-            'description': (meta.get('description') if isinstance(meta, dict) else '') or '',
-            'assumes': meta.get('assumes') or [] if isinstance(meta, dict) else [],
-            'next': meta.get('next') or [] if isinstance(meta, dict) else [],
-            'headings': extract_headings(body),
-            'links': extract_links(body),
-            'requirements': reqs, 'tests': tests, 'body': body,
-        }
+        from webdoc_parse_worker import bounded_parse
+        return bounded_parse(doc_id, component, text)
 
     def _write_doc(self, c, doc_id, source, rel, component, text, mtime_ns, size):
         self._write_parsed(c, doc_id, source, rel, component, self._parse(doc_id, component, text), mtime_ns, size)
@@ -403,9 +597,16 @@ class Index:
             c.execute('DELETE FROM %s WHERE %s=?' % (tbl, col), (doc_id,))
         old_reqs = [r['id'] for r in c.execute('SELECT id FROM requirement WHERE doc_id=?', (doc_id,))]
         old_tests = [r['id'] for r in c.execute('SELECT id FROM test WHERE doc_id=?', (doc_id,))]
-        for rid in old_reqs:
+        # Raw trace/verifies rows are keyed by requirement/test id, NOT by document,
+        # so also clear the ids this document is ABOUT to define. One of them may
+        # still belong to another document: a requirement that moved between files
+        # is indexed from its new file before the old file's rows are dropped. The
+        # INSERT OR REPLACE below takes the row over, and from then on nothing
+        # would delete the previous owner's references - that document no longer
+        # owns the id - so they would be resolved alongside the new ones for good.
+        for rid in dict.fromkeys(old_reqs + [r['id'] for r in p['requirements']]):
             c.execute('DELETE FROM req_trace_to WHERE req_id=?', (rid,))
-        for tid in old_tests:
+        for tid in dict.fromkeys(old_tests + [t['id'] for t in p['tests']]):
             c.execute('DELETE FROM test_verifies WHERE test_id=?', (tid,))
         c.execute('DELETE FROM requirement WHERE doc_id=?', (doc_id,))
         c.execute('DELETE FROM test WHERE doc_id=?', (doc_id,))
@@ -434,6 +635,10 @@ class Index:
             + [(doc_id, 'next', str(n), i) for i, n in enumerate(p['next'])]
         if edges:
             c.executemany('INSERT INTO meta_edge(from_id,kind,to_raw,ord) VALUES(?,?,?,?)', edges)
+        c.execute('DELETE FROM doc_access WHERE doc_id=?', (doc_id,))
+        if p.get('access') or p.get('access_groups'):
+            c.execute('INSERT INTO doc_access(doc_id,spec_json,groups_json) VALUES(?,?,?)',
+                      (doc_id, json.dumps(_spec_row(p.get('access'))), json.dumps(list(p.get('access_groups') or []))))
         for i, r in enumerate(p['requirements']):
             c.execute('INSERT OR REPLACE INTO requirement(id,doc_id,component,grp,no,description,block_ord) VALUES(?,?,?,?,?,?,?)',
                       (r['id'], doc_id, r['component'], r['group'], r['no'], r['description'], i))
@@ -450,6 +655,7 @@ class Index:
         c.execute('DELETE FROM req_trace_edge')
         c.execute('DELETE FROM req_verified_by')
         c.execute('DELETE FROM doc_link_edge')
+        c.execute('DELETE FROM doc_asset')
         ids = set()
         ids_lc = {}
         for r in c.execute('SELECT id, id_lc FROM doc'):
@@ -490,6 +696,67 @@ class Index:
                 tgt = resolve_doc_id(clean, r['from_id'], ids, ids_lc)
                 if tgt and tgt != r['from_id']:
                     c.execute('INSERT INTO doc_link_edge(from_id,to_id,ext_url) VALUES(?,?,?)', (r['from_id'], tgt, None))
+                elif not tgt:
+                    # Not another document: an image, a report, some other file in
+                    # the library. Record WHICH page points at it, resolved the same
+                    # way the browser resolves an <img src> (doclinks.resolveResourceUrl),
+                    # so a request for the file can be judged by the pages that use it.
+                    ref = raw[:hi] if hi >= 0 else raw
+                    if ref and (not ref.startswith('/') or ref.startswith('/docs/')):
+                        path = ref[len('/docs/'):] if ref.startswith('/docs/') else join_doc_path(r['from_id'], ref)
+                        if path:
+                            c.execute('INSERT INTO doc_asset(path_lc,doc_id) VALUES(?,?)',
+                                      (path.lower(), r['from_id']))
+        self._recompute_access(c, ids)
+
+    # -- effective access: propagate declared ACLs down the `next` graph --
+    def _recompute_access(self, c, ids):
+        """Rebuild doc_access_eff from doc_access + the `next` edges.
+
+        Runs inside _relink because it needs the same global view: a lock on one
+        document reaches every document downstream of it, so a single edited file
+        can change the effective ACL of a whole chapter.
+        """
+        c.execute('DELETE FROM doc_access_eff')
+        explicit = {}
+        for r in c.execute('SELECT doc_id, spec_json FROM doc_access'):
+            if r['doc_id'] not in ids:
+                continue
+            try:
+                explicit[r['doc_id']] = _row_spec(json.loads(r['spec_json'] or 'null'))
+            except ValueError:
+                # An unreadable ACL row must not silently unlock the page.
+                explicit[r['doc_id']] = _row_spec({'read': [], 'write': []})
+        edges = []
+        for r in c.execute("SELECT from_id, kind, to_raw FROM meta_edge WHERE kind IN (%s)"
+                           % ','.join('?' * len(self.propagate_via)), tuple(self.propagate_via)):
+            # `next` targets are authored as ids; resolve nothing here - the graph
+            # endpoint already treats an unresolvable target as a missing node.
+            if r['from_id'] not in ids or r['to_raw'] not in ids:
+                continue
+            if r['kind'] == 'assumes':
+                # A row (D, 'assumes', P) means "D assumes P", so the reading order
+                # is P -> D. Propagating D -> P would run the lock BACKWARDS: it
+                # would lock the prerequisite and leave everything that depends on
+                # it open, which is the opposite of what an author asked for.
+                edges.append((r['to_raw'], r['from_id']))
+            else:
+                edges.append((r['from_id'], r['to_raw']))
+        eff = webdoc_access.compute_effective(explicit, edges, ids)
+        rows = [(d, json.dumps(list(v['read'])) if v['read'] is not None else None,
+                 json.dumps(list(v['write'])) if v['write'] is not None else None,
+                 1 if v['hidden'] else 0, 1 if v['explicit'] else 0,
+                 json.dumps(list(v['inheritedFrom'])) if v['inheritedFrom'] else None)
+                for d, v in eff.items()
+                if v['read'] is not None or v['write'] is not None or v['hidden']]
+        if rows:
+            c.executemany('INSERT INTO doc_access_eff(doc_id,read_json,write_json,hidden,explicit,inherited_json)'
+                          ' VALUES(?,?,?,?,?,?)', rows)
+        # NOTE: the in-memory ACL cache is deliberately NOT dropped here. These
+        # rows are not committed yet, so a reader that refilled the cache now
+        # would read the OLD rows and re-cache them - a stale, possibly more
+        # permissive answer that outlives the write. Every caller invalidates
+        # after its commit instead (see _invalidate_acl).
 
     # -- reconcile: incremental walk (mtime,size), then relink --
     def reconcile(self):
@@ -511,9 +778,11 @@ class Index:
                     if not os.path.isdir(root):
                         continue
                     for dirpath, dirnames, filenames in os.walk(root):
-                        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+                        excluded = [str(pattern).lower() for pattern in s.get('excludeDirectories', [])]
+                        dirnames[:] = [d for d in dirnames if not d.startswith('.')
+                                       and not any(fnmatchcase(d.lower(), pattern) for pattern in excluded)]
                         for fn in filenames:
-                            if not fn.lower().endswith('.md'):
+                            if fn.startswith('.') or any(fnmatchcase(fn.lower(), pattern) for pattern in excluded) or not fn.lower().endswith('.md'):
                                 continue
                             files.append((s, os.path.join(dirpath, fn)))
                 self.progress = {'done': 0, 'total': len(files)}
@@ -536,12 +805,13 @@ class Index:
                         return ('skip', doc_id)
                     try:
                         with open(fp, 'r', encoding='utf-8-sig', errors='replace') as fh:
-                            text = fh.read()
+                            text = fh.read(16 * 1024 * 1024 + 1)
                     except OSError:
                         return ('skip', doc_id)
                     return ('doc', doc_id, s['name'], rel, s.get('component'),
                             self._parse(doc_id, s.get('component'), text), st.st_mtime_ns, st.st_size)
-                with ThreadPoolExecutor(max_workers=16) as ex:
+                workers = 1  # bounded parser process handles CPU work; keep scan concurrency bounded
+                with ThreadPoolExecutor(max_workers=workers) as ex:
                     for res in ex.map(read_parse, files, chunksize=64):
                         self.progress['done'] += 1
                         if not res:
@@ -559,12 +829,17 @@ class Index:
                     if doc_id not in seen:
                         self._delete_doc_rows(c, doc_id)
                         changed += 1
-                self._relink(c)
+                if changed:
+                    self._relink(c)
+                    self.generation += 1   # something changed on disk (incl. external edits) - clients watching /api/index/status pick this up
                 c.commit()
-                try:
-                    c.execute('PRAGMA wal_checkpoint(TRUNCATE)')   # fold the WAL back, reset synchronous
-                except Exception:
-                    pass
+                if changed:
+                    self._invalidate_acl()
+                if changed:
+                    try:
+                        c.execute('PRAGMA wal_checkpoint(TRUNCATE)')   # fold the WAL back, reset synchronous
+                    except Exception:
+                        pass
                 c.execute('PRAGMA synchronous=NORMAL')
                 self.state = 'ready'
         except Exception as e:
@@ -580,7 +855,8 @@ class Index:
         for tid in [r['id'] for r in c.execute('SELECT id FROM test WHERE doc_id=?', (doc_id,))]:
             c.execute('DELETE FROM test_verifies WHERE test_id=?', (tid,))
         for tbl, col in (('doc', 'id'), ('heading', 'doc_id'), ('page_link', 'from_id'),
-                         ('meta_edge', 'from_id'), ('requirement', 'doc_id'), ('test', 'doc_id')):
+                         ('meta_edge', 'from_id'), ('requirement', 'doc_id'), ('test', 'doc_id'),
+                         ('doc_access', 'doc_id'), ('doc_access_eff', 'doc_id')):
             c.execute('DELETE FROM %s WHERE %s=?' % (tbl, col), (doc_id,))
 
     # -- write-path (called from serve.py do_PUT / do_DELETE) --
@@ -598,7 +874,9 @@ class Index:
                 mtime_ns, size = time.time_ns(), len(text)
             self._write_doc(c, doc_id, source, rel, src.get('component'), text, mtime_ns, size)
             self._relink(c)
+            self.generation += 1
             c.commit()
+            self._invalidate_acl()
 
     def delete_doc(self, source, rel):
         with self._wlock:
@@ -606,14 +884,138 @@ class Index:
             doc_id = source + '/' + re.sub(r'\.md$', '', rel, flags=re.I)
             self._delete_doc_rows(c, doc_id)
             self._relink(c)
+            self.generation += 1
             c.commit()
+            self._invalidate_acl()
+
+    # -- access control --
+    def _invalidate_acl(self):
+        """Drop the cached effective-ACL map. Call AFTER the commit that changed
+        it, never before: dropping it while the write is still uncommitted lets a
+        concurrent reader refill it from the pre-write rows and keep serving the
+        old, more permissive answer."""
+        with self._acl_lock:
+            self._acl_cache = None
+            self._owner_cache = None
+
+    def access_map(self):
+        """{doc_id: effective ACL} for every RESTRICTED document, cached in memory.
+
+        Documents absent from the map are unrestricted, which is the overwhelming
+        majority - so the cache stays small even on a 50k-document library, and a
+        permission check is a dict lookup rather than a query per request.
+        """
+        with self._acl_lock:
+            if self._acl_cache is not None:
+                return self._acl_cache
+            seen_generation = self.generation
+        m = {}
+        try:
+            c = self._conn()
+            for r in c.execute('SELECT doc_id,read_json,write_json,hidden,explicit,inherited_json FROM doc_access_eff'):
+                m[r['doc_id']] = {
+                    'read': tuple(json.loads(r['read_json'])) if r['read_json'] else None,
+                    'write': tuple(json.loads(r['write_json'])) if r['write_json'] else None,
+                    'hidden': bool(r['hidden']), 'explicit': bool(r['explicit']),
+                    'inheritedFrom': tuple(json.loads(r['inherited_json'])) if r['inherited_json'] else (),
+                }
+        except (sqlite3.DatabaseError, ValueError):
+            return m          # a broken ACL table must not become "everything is public"
+        with self._acl_lock:
+            # Only cache if nothing was written while we were reading. Storing a
+            # map built from rows a concurrent write has already superseded would
+            # pin the OLD, more permissive answer until the next write.
+            if self.generation == seen_generation:
+                self._acl_cache = m
+        return m
+
+    def declared_access(self, doc_id):
+        """The access block a document DECLARES (not the inherited result), for
+        the editor's access panel."""
+        c = self._conn()
+        r = c.execute('SELECT spec_json FROM doc_access WHERE doc_id=?', (doc_id,)).fetchone()
+        if not r or not r['spec_json']:
+            return None
+        try:
+            return json.loads(r['spec_json'])
+        except ValueError:
+            return None
+
+    def canonical_id(self, doc_id):
+        """The id EXACTLY as the index stores it, matched case-insensitively.
+
+        Windows and macOS open files case-insensitively, so `/docs/Docs/Ref/Cfg.md`
+        and `/docs/Docs/ref/cfg.md` are the same bytes - but they are different
+        dictionary keys, and an ACL looked up under the wrong key comes back
+        "unrestricted". Every permission decision goes through this first.
+        """
+        c = self._conn()
+        r = c.execute('SELECT id FROM doc WHERE id=? LIMIT 1', (doc_id,)).fetchone()
+        if r:
+            return r['id']
+        r = c.execute('SELECT id FROM doc WHERE id_lc=? LIMIT 1', (str(doc_id).lower(),)).fetchone()
+        return r['id'] if r else None
+
+    def asset_referrers(self, path):
+        """Every document that links to one non-document file, by its
+        source-relative path ("Docs/features/image.png"). Empty when nothing in
+        the library points at it."""
+        c = self._conn()
+        return [r['doc_id'] for r in
+                c.execute('SELECT DISTINCT doc_id FROM doc_asset WHERE path_lc=?', (str(path).lower(),))]
+
+    def docs_in_folder(self, prefix):
+        """Document ids directly inside one folder (no deeper). Used to decide
+        whether a non-Markdown asset - an image, an XML report - may be served:
+        an asset is exactly as restricted as the most restricted document sitting
+        beside it."""
+        c = self._conn()
+        pre = (prefix.rstrip('/') + '/') if prefix else ''
+        out = []
+        for r in c.execute('SELECT id FROM doc WHERE id LIKE ?', (pre + '%',)):
+            if '/' not in r['id'][len(pre):]:
+                out.append(r['id'])
+        return out
+
+    def result_key_owner(self):
+        """{requirement-or-test id: owning doc id}, cached per index generation.
+
+        Lets the results sidecar be filtered: a stored pass/fail keyed by a test in
+        a restricted document must not come back to a reader who cannot open it.
+        """
+        with self._acl_lock:
+            cached = self._owner_cache
+            if cached is not None and cached[0] == self.generation:
+                return cached[1]
+        m = {}
+        c = self._conn()
+        for r in c.execute('SELECT id, doc_id FROM requirement'):
+            m[r['id']] = r['doc_id']
+        for r in c.execute('SELECT id, doc_id FROM test'):
+            m[r['id']] = r['doc_id']
+        with self._acl_lock:
+            self._owner_cache = (self.generation, m)
+        return m
+
+    def access_groups(self):
+        """Every group name mentioned by any document, so the map legend can list
+        groups that exist in the content but not in config.json."""
+        out = set()
+        for r in self._conn().execute('SELECT groups_json FROM doc_access'):
+            try:
+                for g in json.loads(r['groups_json'] or '[]'):
+                    out.add(g)
+            except ValueError:
+                continue
+        return sorted(out)
 
     # -- read queries --
     def status(self):
         c = self._conn()
         n = c.execute('SELECT COUNT(*) n FROM doc').fetchone()['n'] if self.state == 'ready' else self.progress['done']
         pct = 100 if self.state == 'ready' else (round(100 * self.progress['done'] / self.progress['total']) if self.progress['total'] else 0)
-        return {'state': self.state, 'docs': n, 'pct': pct}
+        return {'state': self.state, 'docs': n, 'pct': pct, 'generation': self.generation,
+                'version': self.epoch + ':' + str(self.generation)}
 
     @staticmethod
     def _fts_query(q):
@@ -622,11 +1024,21 @@ class Index:
             return None
         return ' '.join('"%s"*' % t for t in terms[:12])
 
-    def search(self, q, limit=50, offset=0):
+    def search(self, q, limit=50, offset=0, gate=None):
+        """Full-text search. With a gate, hidden documents are dropped from the
+        result set BEFORE paging, so the caller can never infer their existence
+        from a short page or a gap in the ranking."""
         c = self._conn()
         mq = self._fts_query(q)
         if not mq:
             return []
+        limit, offset = max(0, int(limit)), max(0, int(offset))
+        filtering = bool(gate) and not gate.unrestricted
+        # Over-fetch when filtering: rows are dropped after ranking, so ask for
+        # enough that a page can still be filled. Capped so a wide query on a huge
+        # library cannot be turned into an expensive request.
+        want = min(2000, (offset + limit) * 4 + 100) if filtering else limit
+        skip = 0 if filtering else offset
         try:
             rows = c.execute(
                 """SELECT d.id AS id, d.title AS title,
@@ -634,31 +1046,169 @@ class Index:
                           bm25(doc_fts, 10.0, 4.0, 2.0, 1.0) AS rank
                    FROM doc_fts JOIN doc d ON d.intid = doc_fts.rowid
                    WHERE doc_fts MATCH ? ORDER BY rank LIMIT ? OFFSET ?""",
-                (mq, int(limit), int(offset))).fetchall()
+                (mq, want, skip)).fetchall()
         except sqlite3.OperationalError:
             return []
-        return [{'id': r['id'], 'title': r['title'], 'snippet': r['snip']} for r in rows]
+        out = []
+        for r in rows:
+            if filtering:
+                vis = gate.visibility(r['id'])
+                if vis == webdoc_access.HIDDEN:
+                    continue
+                if vis == webdoc_access.LOCKED:
+                    # The title is already visible on the map for a locked page, but
+                    # the snippet is body text - withhold it.
+                    out.append({'id': r['id'], 'title': r['title'], 'snippet': '', 'locked': True})
+                    continue
+            out.append({'id': r['id'], 'title': r['title'], 'snippet': r['snip']})
+        return out[offset:offset + limit] if filtering else out
 
-    def tree(self, path):
-        """Children of one folder path ('' or 'Source' or 'Source/sub'): immediate
-        sub-folders + docs. Lets the client render the tree lazily, one level at a time."""
+    def _level(self, path, gate=None):
+        """One folder level, with every folder's own PAGE worked out. Shared by
+        tree() and folder() so the drawer and the folder page can never disagree
+        about which document stands for a folder.
+
+        A folder's page is the first of these that exists and that this reader can
+        see: a sibling document with the folder's own path (`how-to.md` beside
+        `how-to/`, so the page id IS the folder path), then `index.md` inside the
+        folder, then `README.md` inside it (both matched case-insensitively). That
+        document stops being listed as an ordinary child: the folder is the way to
+        reach it.
+
+        Returns None when the folder holds no document this reader may see - a
+        folder of hidden pages does not exist for them, exactly as in the tree.
+        """
         c = self._conn()
-        prefix = (path.rstrip('/') + '/') if path else ''
-        folders, docs = set(), []
-        for r in c.execute('SELECT id, title FROM doc WHERE id LIKE ? ORDER BY id_lc', (prefix + '%',)):
+        filtering = bool(gate) and not gate.unrestricted
+        path = (path or '').strip('/')
+        prefix = (path + '/') if path else ''
+        folders, docs = {}, []
+        # LIKE treats _ and % as wildcards; the startswith() test below is the real
+        # filter, the LIKE only narrows the scan.
+        for r in c.execute('SELECT id, title, description FROM doc WHERE id LIKE ? ORDER BY id_lc', (prefix + '%',)):
+            if not r['id'].startswith(prefix):
+                continue
+            locked = False
+            if filtering:
+                vis = gate.visibility(r['id'])
+                if vis == webdoc_access.HIDDEN:
+                    continue
+                locked = vis == webdoc_access.LOCKED
+            entry = {'id': r['id'], 'title': r['title'],
+                     # A locked page shows its title and nothing else, as on the map.
+                     'description': '' if locked else (r['description'] or '')}
+            if locked:
+                entry['locked'] = True
             rest = r['id'][len(prefix):]
             if '/' in rest:
-                folders.add(rest.split('/', 1)[0])
+                head, tail = rest.split('/', 1)
+                f = folders.setdefault(head, {'name': head, 'path': prefix + head, 'docs': 0, 'inner': {}})
+                f['docs'] += 1
+                low = tail.lower()
+                if low in FOLDER_PAGE_NAMES and low not in f['inner']:
+                    f['inner'][low] = entry
             else:
-                docs.append({'id': r['id'], 'title': r['title']})
-        return {'folders': sorted(folders, key=str.lower), 'docs': docs}
+                docs.append(entry)
+        if path and not folders and not docs:
+            return None
+        def named(page, folder_name):
+            # An index.md / README.md with no `title` of its own would be called
+            # "Index" or "README" - its file name - which says nothing about the
+            # folder. Name it after the folder instead.
+            if page is not None and page['title'] == fallback_title(page['id']):
+                page = dict(page, title=fallback_title(folder_name))
+            return page
+        by_name = {d['id'][len(prefix):]: d for d in docs}
+        claimed = set()
+        out_folders = []
+        for name in sorted(folders, key=str.lower):
+            f = folders[name]
+            page = by_name.get(name) or next((f['inner'][n] for n in FOLDER_PAGE_NAMES if n in f['inner']), None)
+            if page is not None and page['id'] == f['path']:
+                claimed.add(page['id'])       # the sibling file now lives in the folder's row
+            out_folders.append({'name': name, 'path': f['path'], 'docs': f['docs'], 'page': named(page, name)})
+        # This folder's OWN page, when it is an index/README inside it - unless a
+        # sibling file outranks it, in which case that inner file is just a page.
+        own = None
+        if path:
+            sib = c.execute('SELECT id, title, description FROM doc WHERE id=?', (path,)).fetchone()
+            sib_vis = sib is not None and not (filtering and gate.visibility(sib['id']) == webdoc_access.HIDDEN)
+            if sib_vis:
+                locked = filtering and gate.visibility(sib['id']) == webdoc_access.LOCKED
+                own = {'id': sib['id'], 'title': sib['title'], 'description': '' if locked else (sib['description'] or '')}
+                if locked:
+                    own['locked'] = True
+            else:
+                lows = {d['id'][len(prefix):].lower(): d for d in docs}
+                own = next((lows[n] for n in FOLDER_PAGE_NAMES if n in lows), None)
+                if own is not None:
+                    claimed.add(own['id'])
+                    own = named(own, path.rsplit('/', 1)[-1])
+        return {'path': path, 'page': own, 'folders': out_folders,
+                'docs': [d for d in docs if d['id'] not in claimed]}
 
-    def resolve(self, base, paths):
+    def tree(self, path, gate=None):
+        """Children of one folder path ('' or 'Source' or 'Source/sub'): immediate
+        sub-folders + docs. Lets the client render the tree lazily, one level at a time.
+        Hidden documents are omitted entirely, and a folder that contains nothing but
+        hidden documents does not appear either.
+
+        `pages` maps a child folder's name to the document that is its page (see
+        _level); that document is not repeated in `docs`."""
+        level = self._level(path, gate) or {'folders': [], 'docs': []}
+        pages = {}
+        for f in level['folders']:
+            if f['page']:
+                p = {'id': f['page']['id'], 'title': f['page']['title']}
+                if f['page'].get('locked'):
+                    p['locked'] = True
+                pages[f['name']] = p
+        docs = [{k: v for k, v in d.items() if k != 'description'} for d in level['docs']]
+        return {'folders': [f['name'] for f in level['folders']], 'docs': docs, 'pages': pages}
+
+    def folder(self, path, gate=None):
+        """Everything a folder's page needs: its own page document (or None, for a
+        folder WebDocs generates a page for), its sub-folders with their page and
+        document count, and its documents with their descriptions. None when the
+        folder does not exist for this reader - the caller answers 404, the same as
+        for a missing document, so a folder of hidden pages cannot be detected."""
+        path = (path or '').strip('/')
+        if not path:
+            return None
+        level = self._level(path, gate)
+        if level is None:
+            return None
+        name = path.rsplit('/', 1)[-1]
+        own = level['page']
+        return {
+            'path': path,
+            'name': name,
+            # A locked page's title is public (it is on the map), so it still names the folder.
+            'title': own['title'] if own else fallback_title(name),
+            'page': own,
+            'folders': [{'name': f['name'], 'path': f['path'], 'docs': f['docs'],
+                         'title': f['page']['title'] if f['page'] else fallback_title(f['name']),
+                         'description': f['page']['description'] if f['page'] else '',
+                         'page': f['page']['id'] if f['page'] else None}
+                        for f in level['folders']],
+            'docs': level['docs'],
+        }
+
+    def resolve(self, base, paths, gate=None):
         """Resolve in-body link targets to doc ids against the FULL index (the client
         no longer holds every id under lazy boot). Mirrors doclinks.resolveDocId:
-        relative-to-base, then as-is, then last-path-segment fallback; case-insensitive."""
+        relative-to-base, then as-is, then last-path-segment fallback; case-insensitive.
+        A target the caller may not even know exists resolves to None, so a link to a
+        hidden document renders as an ordinary dangling link."""
         c = self._conn()
-        return {p: self._resolve_one(c, base, p) for p in paths}
+        out = {}
+        filtering = bool(gate) and not gate.unrestricted
+        for p in paths:
+            hit = self._resolve_one(c, base, p)
+            if hit and filtering and gate.is_hidden(hit):
+                hit = None
+            out[p] = hit
+        return out
 
     def _resolve_one(self, c, base, path):
         if not path:
@@ -684,15 +1234,55 @@ class Index:
                       (lower,)).fetchone()
         return r['id'] if r else None
 
-    def graph(self):
+    def graph(self, gate=None):
         """Whole-graph payload for the map: nodes once + integer-indexed edges (assumes/
-        next resolved, requirement-trace doc edges, page links + external URLs)."""
+        next resolved, requirement-trace doc edges, page links + external URLs).
+
+        With a gate: a HIDDEN document is omitted along with every edge that touches
+        it, so it leaves no trace on the map. A LOCKED document is kept - the map is
+        exactly where a reader is meant to see that a page exists and is restricted -
+        but only its id and title travel; its description is withheld, it carries a
+        `locked` flag, and each node reports the groups that could open it.
+        """
         c = self._conn()
+        filtering = bool(gate) and not gate.unrestricted
+        acl = self.access_map()
+        group_idx = {}
+        group_names = []
+
+        def gi(name):
+            i = group_idx.get(name)
+            if i is None:
+                i = len(group_names)
+                group_idx[name] = i
+                group_names.append(name)
+            return i
         idx = {}
         nodes = []
         for r in c.execute('SELECT id,title,description,source FROM doc ORDER BY id'):
-            idx[r['id']] = len(nodes)
-            nodes.append([r['id'], r['title'], r['description'] or ''])
+            locked = False
+            if filtering:
+                vis = gate.visibility(r['id'])
+                if vis == webdoc_access.HIDDEN:
+                    continue
+                locked = vis == webdoc_access.LOCKED
+            eff = acl.get(r['id'])
+            # [id, title, description, flags, groupIdx[]] - fields 3 and 4 are
+            # appended, so an older client reading only [0..2] still works.
+            flags = 1 if locked else 0
+            if eff and eff.get('explicit'):
+                flags |= 2                      # declares its own ACL (vs inherited)
+            groups = [gi(g) for g in (eff.get('read') or ())] if eff else []
+            nodes.append([r['id'], r['title'], '' if locked else (r['description'] or ''), flags, groups])
+            idx[r['id']] = len(nodes) - 1
+        # Ids that exist but were withheld. An edge touching one is dropped whole
+        # rather than emitted with a -1 endpoint: even "this page links to something
+        # you cannot see" is information a hidden page should not give away.
+        withheld = set()
+        if filtering:
+            for r in c.execute('SELECT id FROM doc'):
+                if r['id'] not in idx:
+                    withheld.add(r['id'])
         ext_idx = {}
         ext = []
 
@@ -700,6 +1290,8 @@ class Index:
             return idx.get(i, -1)
         edges = []            # [fromIdx, toIdx, type]  type: 0 prereq,1 recnext
         for r in c.execute('SELECT from_id, kind, to_raw FROM meta_edge'):
+            if r['from_id'] in withheld or r['to_raw'] in withheld:
+                continue
             f = ni(r['from_id'])
             t = ni(r['to_raw'])
             if f < 0:
@@ -711,6 +1303,8 @@ class Index:
         traces = []
         seen_tr = set()
         for r in c.execute('SELECT DISTINCT src_doc, dst_doc FROM req_trace_edge'):
+            if r['src_doc'] in withheld or r['dst_doc'] in withheld:
+                continue
             if r['src_doc'] == r['dst_doc']:
                 continue
             key = r['src_doc'] + ' ' + r['dst_doc']
@@ -730,6 +1324,8 @@ class Index:
         plinks = []           # [fromIdx, toIdx or -1, extIndex or -1]
         seen_pl = set()
         for r in c.execute('SELECT from_id, to_id, ext_url FROM doc_link_edge'):
+            if r['from_id'] in withheld or (r['to_id'] and r['to_id'] in withheld):
+                continue        # never hint that a withheld page is linked from here
             f = ni(r['from_id'])
             if f < 0:
                 continue
@@ -753,35 +1349,46 @@ class Index:
                     ext.append(r['ext_url'])
                 plinks.append([f, -1, ei])
         return {'nodes': nodes, 'edges': edges, 'traces': [t for t in traces if t[0] >= 0 and t[1] >= 0],
-                'pageLinks': plinks, 'externals': ext}
+                'pageLinks': plinks, 'externals': ext, 'groups': group_names}
 
-    def coverage(self):
+    def coverage(self, gate=None):
         """Requirements + tests with resolved trace-from / verified-by / verifies,
-        mirroring the client's requirementList()/testList() for the coverage view."""
+        mirroring the client's requirementList()/testList() for the coverage view.
+
+        Gated by DOCUMENT read rights, not merely by visibility: a requirement row
+        carries its description, so a locked page's requirements are withheld the
+        same way its body is."""
         c = self._conn()
+        filtering = bool(gate) and not gate.unrestricted
+        readable = (lambda doc_id: True) if not filtering else gate.can_read
         reqs = {}
         for r in c.execute('SELECT id,doc_id,component,grp,no,description FROM requirement'):
+            if not readable(r['doc_id']):
+                continue
             reqs[r['id']] = {'id': r['id'], 'docId': r['doc_id'], 'component': r['component'],
                              'group': r['grp'], 'no': r['no'], 'description': r['description'] or '',
                              'traceTo': [], 'traceFrom': [], 'verifiedBy': []}
+        # Only reference ids that survived the filter above: a trace-to pointing
+        # at a requirement in a restricted document would name it, and the id
+        # carries its component and group.
         for r in c.execute('SELECT src_req,dst_req FROM req_trace_edge'):
-            if r['src_req'] in reqs:
+            if r['src_req'] in reqs and r['dst_req'] in reqs:
                 reqs[r['src_req']]['traceTo'].append(r['dst_req'])
-            if r['dst_req'] in reqs:
                 reqs[r['dst_req']]['traceFrom'].append(r['src_req'])
-        for r in c.execute('SELECT req_id,test_id FROM req_verified_by'):
-            if r['req_id'] in reqs:
-                reqs[r['req_id']]['verifiedBy'].append(r['test_id'])
+        verified = list(c.execute('SELECT req_id,test_id FROM req_verified_by'))
         tests = {}
         for r in c.execute('SELECT id,doc_id,component,key,name,steps_json FROM test'):
+            if not readable(r['doc_id']):
+                continue
             try:
                 steps = json.loads(r['steps_json'] or '[]')
             except Exception:
                 steps = []
             tests[r['id']] = {'id': r['id'], 'docId': r['doc_id'], 'component': r['component'],
                               'key': r['key'], 'name': r['name'] or '', 'steps': steps, 'verifies': []}
-        for r in c.execute('SELECT req_id,test_id FROM req_verified_by'):
-            if r['test_id'] in tests:
+        for r in verified:
+            if r['req_id'] in reqs and r['test_id'] in tests:
+                reqs[r['req_id']]['verifiedBy'].append(r['test_id'])
                 tests[r['test_id']]['verifies'].append(r['req_id'])
         return {'requirements': sorted(reqs.values(), key=lambda x: x['id']),
                 'tests': sorted(tests.values(), key=lambda x: x['id'])}

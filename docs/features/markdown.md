@@ -13,11 +13,11 @@
 
 # Markdown & GFM
 
-Every document you read in WebDocs is plain Markdown. There is no build step and
-no third-party Markdown library: the text is fetched as-is and rendered in the
-browser by a hand-written CommonMark 0.31.2 engine, extended with the parts of
-GitHub-Flavored Markdown that documentation actually needs. If you can write a
-README, you can author for WebDocs.
+Every document you read in WebDocs is plain Markdown. There is no build step for
+a document and no third-party Markdown library: the text is fetched as-is and
+rendered in the browser by a hand-written CommonMark 0.31.2 engine, extended
+with the parts of GitHub-Flavored Markdown that documentation actually needs. If
+you can write a README, you can author for WebDocs.
 
 This page is written to be read *and* rendered — it is a working sample. Every
 construct below is live output from the same engine, so what you see is exactly

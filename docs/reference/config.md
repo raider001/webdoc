@@ -7,11 +7,12 @@
 WebDocs has exactly one configuration file, `config.json`, and one program that
 reads it, `serve.py`. Between them they decide what the site is called, which
 folders of Markdown make up the library, what component each folder belongs to,
-which document opens first, and the default theme. There is no build step: the
-server is a thin static file host that also maintains a lightweight search index
-(standard-library `sqlite3`), and everything about *how* the documents render is
-decided in the browser. See [Performance & Scale](Docs/reference/performance) for
-that index and the library sizes it supports.
+which document opens first, and the default theme. Neither needs a build step:
+the server is a thin static file host that also maintains a lightweight search
+index (standard-library `sqlite3`), and everything about *how* the documents
+render is decided in the browser. See
+[Performance & Scale](Docs/reference/performance) for that index and the library
+sizes it supports.
 
 This page is the reference for both files. It assumes you know how to write a
 document; if not, start with the [Authoring Reference](Docs/reference/authoring).
@@ -37,11 +38,12 @@ The fields:
 
 | Field | Type | Default | Meaning |
 | ----- | ---- | ------- | ------- |
-| `siteTitle` | string | `"Documentation"` | The site name, shown in the header and the browser tab. |
+| `siteTitle` | string | `"Documentation"` | The site name, shown on the start page and its browser tab. Within a project, the header shows the project's title. |
 | `sources` | object[] | `[]` | The library: one entry per mounted folder of documents (see below). |
 | `defaultDoc` | string | — | The document id opened when no deep-link is present. |
 | `theme` | string | `"auto"` | Passed through into `/site.json` but **not currently read** by the browser, so it has no effect on the rendered theme. The live theme is `light` or `dark`, chosen from `localStorage["wd-theme"]` (the reader's remembered choice) or, when nothing is stored, the OS `prefers-color-scheme`. |
 | `plugins` | string[] | `[]` | Renderer plugins to enable for rich fenced blocks such as diagrams. Each name loads `app/thirdpartyrenderer/<name>.js`. See [Diagrams & renderer plugins](Docs/features/diagrams). Optional. |
+| `auth` | object | — | Accounts and access groups. Absent, or `"enabled": false`, leaves the server open exactly as it was before accounts existed. See [Accounts and access groups](#accounts-and-access-groups). |
 
 Automated test results are configured **per source** with a `testResults` field
 on each `sources` entry (see [Sources and components](#sources-and-components)); a
@@ -55,6 +57,91 @@ rendered theme. The first-paint theme is resolved entirely in the browser from
 when nothing is stored, the OS `prefers-color-scheme` — applied as the
 `data-theme` attribute on `<html>` before the page renders so there is no flash.
 See [Theming](Docs/design/theming) for how the full palette is resolved.
+
+## Projects
+
+A server can host independent projects. Each project has a unique `name`, a
+human-readable `title`, its own `sources`, `defaultDoc` and `indexDir`:
+
+```json
+{
+  "siteTitle": "Documentation",
+  "projects": [
+    {
+      "name": "Platform",
+      "title": "Platform programme",
+      "description": "Programme requirements and test documentation.",
+      "defaultDoc": "Platform/overview",
+      "indexDir": ".webdoc-index/Platform",
+      "sources": [{"name":"Platform", "path":"../platform/docs", "component":"PL"}]
+    },
+    {
+      "name": "Mobile-App",
+      "title": "Mobile app",
+      "defaultDoc": "Mobile-App/overview",
+      "indexDir": ".webdoc-index/Mobile-App",
+      "sources": [{"name":"Mobile-App", "path":"../mobile/docs", "component":"MA"}]
+    }
+  ]
+}
+```
+
+Project and source names allow ASCII letters, digits, hyphens and underscores.
+Source names must be unique across the entire server; project names must also
+be unique. Component ids allow letters and digits only. A project may contain
+several sources, and those sources can reference one another. References to
+another project's documents or requirements remain unresolved.
+
+`description` is an optional string on each project, shown as plain text on its
+start-page card. Omit it to show just the title, name and page count. No new
+keys are required.
+
+The project title in the header is a button: click it or press Enter or Space
+to open the Projects menu. Arrow keys move through the projects; Home and End
+move to the first and last entries. Escape closes it and returns focus to the
+button. The current project is marked. Choose a project to open its default
+page, or **All projects** to open the start page. Unsaved edits trigger the
+discard dialog before either navigation.
+
+With two or more projects, a bare URL (no `?project=` and no page hash) opens
+the start page, headed by `siteTitle`, with a card and indexed page count per
+project. Selecting a card navigates to `/?project=Platform#/Platform/overview`. A single
+project still opens directly from a bare URL. **All projects** can explicitly
+open its start page using `?view=projects`. Legacy top-level `sources` keep
+their direct document entry behavior.
+
+Each project has a separate navigation tree, search index, requirement and test
+catalog, coverage and map. Index APIs take `?project=Platform` (append with `&` when
+there are other parameters). `/site.json?project=Platform` returns that project's
+sources and default document, plus all projects' names, titles, optional
+descriptions, default documents and source names. The server API still defaults
+to the first project when its project parameter is omitted; the browser leaves
+the URL unselected when showing the start page.
+
+Document ids and source mounts remain unchanged: `Platform/overview` and
+`/docs/Platform/overview.md` still resolve. Direct source URLs infer their project;
+an explicit, conflicting project parameter returns 404. Old hash links without
+a project parameter select the project owning their source when the app boots.
+Legacy configs with top-level `sources` retain their hash-only page URLs; the
+app does not add a `project` query to those URLs. Their API calls still use the
+server's single default project.
+The write and per-source result APIs retain their existing paths and ACL checks.
+
+Each project uses a separate SQLite directory. If `indexDir` is omitted, it
+defaults to `.webdoc-index/<project-name>`. Relative paths remain relative to
+the server directory. `WEBDOC_INDEX_DIR`, when set, overrides the index root
+and places multi-project indexes in a separate child directory per project.
+The old configuration with top-level `sources` and no `projects` still works
+as a single project and retains its original index location.
+
+Sources can additionally set `readOnly: true` to refuse document PUT/DELETE,
+result writes and test runs for that source, even when accounts are disabled.
+`excludeDirectories` is an optional list of case-insensitive directory-name glob
+patterns excluded from indexing and HTTP access. Any matching path component
+returns 404 for reads and writes; matching entries are omitted from listings.
+Dotfiles and dot directories are also inaccessible on the raw document mount.
+Configured result feeds remain available through `/api/results/<source>` so a
+private `.results.xml` feed keeps working without exposing arbitrary dotfiles.
 
 ## Sources and components
 
@@ -127,6 +214,111 @@ reads and writes each source's sidecar through a small JSON API:
 
 Both `.results.xml` and `.webdoc-tests.json` are dotfiles, so neither shows up in
 the directory listings the browser builds from a source folder.
+
+## Accounts and access groups
+
+The optional `auth` block turns the library from open to private. **It is off
+unless you switch it on**: with no `auth` key, or `"enabled": false`, there is no
+sign-in, no CSRF token and no filtering, and anonymous callers read *and* write
+everything — the behaviour every earlier version had. For the model these
+settings drive, see [Accounts & Access
+Control](Docs/features/access-control); for the steps, [Set up
+accounts](Docs/how-to/accounts).
+
+```json
+"auth": {
+  "enabled": true,
+  "allowRegistration": false,
+  "requireApproval": false,
+  "publicRead": false,
+  "adminGroups": ["admins"],
+  "aclGroups": null,
+  "writeGroups": null,
+  "defaultGroups": [],
+  "propagateVia": ["next"],
+  "groups": {
+    "staff": { "label": "Staff", "color": "#0ea5e9", "description": "Everyone on the team" },
+    "ops":   { "label": "Operations" },
+    "admins":{ "label": "Administrators" }
+  },
+  "usersFile": ".webdoc-auth/users.json",
+  "cookieSecure": false,
+  "trustedProxies": []
+}
+```
+
+### Who may do what
+
+| Field | Type | Default | Meaning |
+| ----- | ---- | ------- | ------- |
+| `enabled` | bool | `false` | Master switch. Everything else is inert while this is false. |
+| `allowRegistration` | bool | `false` | Whether visitors may create their own account. |
+| `requireApproval` | bool | `false` | Registered accounts start disabled until an administrator enables them. |
+| `firstUserIsAdmin` | bool | `false` | Ignored legacy setting. Create the first administrator offline with `bootstrap_admin.py`; registration never grants administrator rights. |
+| `publicRead` | bool | `false` | Unrestricted documents are readable **without** signing in. Restricted ones still are not. |
+| `adminGroups` | string[] | `["admins"]` | Membership of any of these makes an account an administrator. |
+| `aclGroups` | string[] \| null | `null` | Who may create or change an access rule. `null` means the admin groups. This is what stops an author widening their own page's permissions. |
+| `writeGroups` | string[] \| null | `null` | Who may modify a document that carries no explicit `write` rule. `null` means any signed-in account. |
+| `defaultGroups` | string[] | `[]` | Groups a newly registered account joins. |
+| `anonymousGroups` | string[] | `[]` | Groups a *signed-out* visitor is treated as holding. Only meaningful with `publicRead`. |
+| `propagateVia` | string[] | `["next"]` | Which metadata relations an access rule is inherited along. Add `"assumes"` to follow prerequisite edges too — a rule then travels from a prerequisite to the pages that assume it, i.e. in reading order, the same direction `next` runs. |
+
+### Declaring groups
+
+`groups` maps a group name to its presentation. The name — the map key — is what
+you write in a document's `access` rule and what an administrator ticks in the
+accounts panel; it is matched case-insensitively.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `label` | string | The human-readable name shown in the app. Defaults to the group name. |
+| `description` | string | Optional note, shown to administrators. |
+| `color` | string | A `#rgb` or `#rrggbb` colour for this group's band on the map. Anything that is not a literal hex colour is ignored — the value reaches the browser and is used in CSS. Omit it and a stable colour is derived from the name. |
+
+A group that is not declared here cannot be assigned to an account, so a typo in
+the accounts panel cannot silently create a group nothing grants.
+
+### Sessions, passwords and cookies
+
+| Field | Type | Default | Meaning |
+| ----- | ---- | ------- | ------- |
+| `usersFile` | string | `.webdoc-auth/users.json` | The account file, relative to the project root. The server refuses to start if it sits inside a served source folder. Keep it out of version control. |
+| `sessionIdleMinutes` | int | `480` | Idle timeout. |
+| `sessionMaxHours` | int | `720` | Absolute session lifetime. |
+| `passwordMinLength` | int | `10` | Minimum password length (never below 8). |
+| `pbkdf2Iterations` | int | `210000` | PBKDF2-HMAC-SHA256 cost. Higher is stronger and slower; each sign-in pays it once. |
+| `maxLoginFailures` | int | `8` | Failed sign-ins per account before a lockout. The per-address limit is six times this, so one person's typing cannot lock out a whole office. |
+| `lockoutSeconds` | int | `300` | How long a lockout lasts. |
+| `cookieSecure` | bool | `false` | Marks the session cookie `Secure`. **Set this true whenever the site is served over HTTPS.** |
+| `trustedProxies` | string[] | `[]` | Peers whose `X-Forwarded-For` may be believed, for rate limiting. Empty means never — trusting it from anyone would let a caller mint a new identity per guess. |
+| `securityHeaders` | bool | `true` | Send `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`. |
+| `contentSecurityPolicy` | string | — | Add directives to the required baseline. A conflicting required directive or a script/style element override that weakens it prevents startup. The baseline permits only same-origin scripts/styles and the hashed theme script, with no `unsafe-inline`. |
+
+Sessions live in the server's memory and are never written to disk, so a restart
+signs everyone out — the safe default for a documentation server.
+
+## Global deployment policy
+
+| Top-level field | Default | Meaning |
+| --- | --- | --- |
+| `readOnly` | `false` | Refuse every method except GET/HEAD with 405 before routing; omit mutation/registration and runner modules. Published in `site.json`; the browser omits all mutation controls. `--read-only` also enables it. With accounts enabled, public reading of unrestricted documents is enabled. |
+| `allowedHosts` | loopback names with the listening port | Exact authorities, e.g. `["docs.example:443"]`; IPv6 uses brackets. Configure the Host your reverse proxy forwards. Unknown or duplicated Hosts are refused before routing. |
+| `maxDocBodyBytes` | `2097152` | Document upload ceiling (2 MiB), configurable from 1 byte to 16 MiB. |
+| `servedOverHttps` | `false` | Explicit operator assurance that users access HTTPS; enables HSTS. Never inferred from an untrusted forwarded header. |
+
+COOP, CORP and Permissions-Policy accompany the existing security headers. XML
+results shown to people without run rights omit runner text, paths and arbitrary
+properties. `runTests.env` is the complete explicit runner environment; nothing
+is inherited from the server. Add literal PATH/SystemRoot/tool variables there
+only when the configured runner requires them. Prefer absolute command paths.
+On Windows a runner and everything it starts end with the server, even a runner
+that is still starting when the server is stopped: before its first run the
+server joins a kill-on-close job of its own, which every child is born into.
+
+The index parser runs in a separate process with a 350 ms parse/IPC deadline and
+a bounded three-second cold worker startup. Timeout, malformed input or marker
+limits produce an administrator-only empty index entry. The watcher uses the
+same parser. Repair and edit the file to reindex it after a limit refusal.
 
 ## The server
 

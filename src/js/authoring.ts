@@ -1,0 +1,578 @@
+// authoring.ts - in-app CRUD: create / edit / delete documents, and the small
+// helpers that edit a document's own metadata (assumes / next relationships and a
+// test's verifies list). Extracted from main.ts. It imports the map's graph-model
+// helpers directly (buildDocGraph / ensureGraphModel / invalidateGraphModel) and
+// reaches the shell through the `app` registry (app.navigate / app.showError /
+// app.closeDrawer, wired by main at boot); it registers its own map- and coverage-
+// facing handles (editDocRelation, deleteDocFlow, link/unlinkTestToRequirement).
+import { errorMessage } from './errors.js';
+import { state, mustEl, app, titleFromId, defaultId, getDoc } from './app-shell.js';
+// editor.js is NOT imported statically. It is the largest module graph in the app
+// (editor.js plus editor/{serialize,richtext,widgets,panels,ui}.js, ~1,800 lines),
+// and a reader who only ever reads never opens it. Every entry point below awaits
+// editorModule() first, so the editor is fetched on the first authoring action and
+// cached by the module loader from then on.
+//
+// Configure link search and await the editor stylesheet at this same boundary.
+// Reading a page (including in private mode) needs neither resource.
+let editorMod: Promise<typeof import('./editor.js')> | null = null;
+function editorModule(): Promise<typeof import('./editor.js')> {
+  if (isReadOnly()) return Promise.reject(new Error('Editing is disabled.'));
+  if (!editorMod) editorMod = Promise.all([
+    import('./editor.js'), loadStylesheet('/css/editor.css'),
+  ]).then(([mod]) => {
+    mod.setLinkSearch(async q => (await searchDocs(q, 8)).map(h => ({ id: h.docId, title: h.title })));
+    return mod;
+  }).catch(error => { editorMod = null; throw error; });
+  return editorMod;
+}
+import { isReadOnly } from './policy.js';
+import { loadStylesheet } from './styles.js';
+import { searchDocs } from './search.js';
+import { ensureGraphModel, invalidateGraphModel } from './graph-model.js';
+import { announce } from './announce.js';
+import { mapOpen, requestMapRebuild } from './overlays.js';
+import { loadDoc } from './catalog.js';
+import { buildRequirementIndex, requirementList, testList, resolveRequirementRef } from './requirements.js';
+import { apiFetch, describeFailure, auth, docAccess, invalidateAccess } from './auth.js';
+import { newFolderPageId } from './folders.js';
+import { replaceWidgetContent } from './meta-blocks.js';
+import { renderDoc } from './reader.js';
+
+import type { Doc, SourceConfig } from './catalog.js';
+import type { Block } from './editor.js';
+import type { EditorElement } from './editor.js';
+import type { DocMeta } from './editor/serialize.js';
+import type { GraphDocNode } from './graph-model.js';
+import type { TestCaseEntry } from './requirements.js';
+
+/**
+ * The options object handed to editor/panels.js's openNewDocModal: the source
+ * list, an id-existence-check callback, and a creation callback invoked on submit.
+ */
+export interface NewDocModalOpts {
+  sources: SourceConfig[];
+  exists: (id: string) => boolean;
+  onCreate: (id: string) => void;
+}
+
+/**
+ * One test's or document's `<!--meta-->` header as parsed back out of the raw
+ * markdown. Authors put arbitrary keys in it and the rewriters below only ever
+ * touch two of them (`verifies`, `assumes`/`next`), re-serializing the rest
+ * untouched - so the honest shape is the JSON record it literally is.
+ */
+type RawMetaHeader = Record<string, unknown>;
+
+/** The open editor's root element, so exitEdit can take it back out. */
+let editorEl: EditorElement | null = null;
+let editorHash = '', readerScroll = 0;
+let leavePending: Promise<boolean> | null = null;
+const disabledControls = new Map<HTMLButtonElement | HTMLInputElement | HTMLSelectElement, boolean>();
+
+async function mayLeaveEditor(): Promise<boolean> {
+  if (!editorEl) return true;
+  if (editorEl.isSaving()) return false;
+  if (!editorEl.isDirty()) return true;
+  if (!leavePending) leavePending = editorModule().then(mod => mod.confirmDialog({ title: 'Discard unsaved changes?', message: 'Your edits have not been saved.', confirmLabel: 'Discard', danger: true })).finally(() => { leavePending = null; });
+  return leavePending;
+}
+
+/** Restore the URL synchronously while the modal is pending; the old buffer never masquerades as a new page. */
+export async function guardEditorRoute(hash: string): Promise<boolean> {
+  if (!editorEl) return true;
+  history.replaceState(null, '', location.pathname + location.search + editorHash);
+  if (!await mayLeaveEditor()) return false;
+  exitEdit();
+  history.replaceState(null, '', location.pathname + location.search + hash);
+  return true;
+}
+
+/** Project navigation uses the same discard dialog before leaving this document. */
+export async function guardEditorLeave(): Promise<boolean> {
+  if (!await mayLeaveEditor()) return false;
+  exitEdit();
+  return true;
+}
+
+/**
+ * Re-render the tree after a create/delete (structure changed), wiring each entry to
+ * navigate + close the drawer.
+ */
+/**
+ * Refresh the drawer tree after a structural change (create / delete / move).
+ *
+ * This used to REBUILD the tree from scratch, which threw away every folder the
+ * reader had expanded. It is now a data refresh: the components refetch the
+ * levels that are open and keep the expansion, because that state lives in a
+ * store rather than on the DOM nodes.
+ */
+function rerenderTree(): void {
+  if (app.invalidateTree) app.invalidateTree();
+}
+
+/** Wire the header's new-document / edit / delete buttons. */
+export function setupEditButtons() {
+  if (isReadOnly()) return;
+  document.querySelector('a.skip')?.addEventListener('click', e => { if (editorEl) { e.preventDefault(); editorEl.focus(); } });
+  const newDocBtn = mustEl('newDocBtn');
+  newDocBtn.addEventListener('click', () => openNewDocFlow());
+  mustEl('editBtn').addEventListener('click', () => { if (state.current) editExisting(state.current); });
+  mustEl('deleteBtn').addEventListener('click', () => { if (state.current) deleteDocFlow(state.current.id, { rebuildMap: false }); });
+  newDocBtn.hidden = !auth.canWrite;
+}
+
+/**
+ * Show or hide the edit / delete controls for the document now on screen.
+ *
+ * Presentation only: the server re-checks every write regardless, so this is
+ * about not offering an action that will be refused - not about enforcing
+ * anything. Called by the reader through the `app` registry on each render.
+ */
+async function updateDocActions(docId: string): Promise<void> {
+  const edit = mustEl('editBtn'), del = mustEl('deleteBtn');
+  if (isReadOnly()) { edit.hidden = true; del.hidden = true; return; }
+  if (!auth.enabled) { edit.hidden = false; del.hidden = false; return; }
+  // Hide immediately, reveal once the server has answered - so the buttons never
+  // flash on for a document this account cannot touch.
+  edit.hidden = true; del.hidden = true;
+  const info = await docAccess(docId);
+  if (!info || !state.current || state.current.id !== docId) return;   // navigated away
+  // A page with sections withheld from this reader is read-only for them: saving
+  // it back would overwrite what they were never shown.
+  const partial = (info.redactedSections || 0) > 0;
+  edit.hidden = !info.canWrite || partial;
+  // Deleting a restricted page also needs access-management rights, because
+  // removing the page removes its ACL with it.
+  const restricted = !!(info.effective && (info.effective.read || info.effective.hidden));
+  del.hidden = !info.canWrite || partial || (restricted && !info.canEditAccess);
+}
+app.updateDocActions = updateDocActions;
+
+/**
+ * Open the "new document" modal, from the header ＋. The modal opens OVER the
+ * current view (the map stays put) so nothing shifts while you name the doc; the
+ * map is only dismissed once you confirm and enterEdit opens the editor (which
+ * would otherwise sit behind the map overlay).
+ */
+async function openNewDocFlow(): Promise<void> {
+  // The "already exists" guard must see EVERY doc, not just visited ones - boot is
+  // lazy so state.byId is sparse, and checking it would let a new doc silently
+  // overwrite an existing (unvisited) file. Use the server graph model's full id set.
+  const known = new Set((await ensureGraphModel()).docs.map(d => d.id));
+  // From the map, "New document" just creates the file (and the node appears) - it
+  // does NOT drop you into the editor. From the reader, it opens the editor as usual.
+  const fromMap = mapOpen();
+  const { openNewDocModal } = await editorModule();
+  openNewDocModal({
+    sources: (state.site && state.site.sources) || [],
+    exists: (id) => known.has(id) || state.byId.has(id),
+    onCreate: (id) => fromMap ? createDocInPlace(id) : startNewDoc(id)
+  });
+}
+
+async function startNewDoc(id: string, title = titleFromId(id)) {
+  await enterEdit(id, { title, description: '', assumes: [], next: [] },
+    [{ type: 'heading', level: 1, html: title }, { type: 'paragraph', html: '' }], true);
+}
+
+/**
+ * "Write a page for this folder", from a folder's generated page: open the
+ * editor on a new document that will BE that folder's page once saved - the
+ * sibling `<folder>.md`, or `index.md` inside a source root (see
+ * folders.newFolderPageId). Titled after the folder, not after the file name,
+ * so a source root's page is not called "Index".
+ */
+async function createFolderPage(folderPath: string): Promise<void> {
+  await startNewDoc(newFolderPageId(folderPath), titleFromId(folderPath));
+}
+app.createFolderPage = createFolderPage;
+
+// Create a minimal document on disk WITHOUT opening the editor (used from the map:
+// the file is written + indexed and its node appears; the user stays on the map).
+// The body is just the meta header + an H1 - the same shape serializeDoc emits.
+async function createDocInPlace(id: string) {
+  const title = titleFromId(id);
+  const md = '<!--meta\n' + JSON.stringify({ title: title, description: '', assumes: [], next: [] }, null, 2) +
+    '\n-->\n\n# ' + title + '\n';
+  const slash = id.indexOf('/');
+  const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
+  let res: Response;
+  try {
+    res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
+      { method: 'PUT', body: md });
+  } catch (e) { announce('Create failed: ' + errorMessage(e)); return; }
+  if (!res.ok) { announce('Create failed: ' + await describeFailure(res)); return; }
+  await refreshCatalog();                    // server re-indexed on PUT; invalidate the client graph model
+  await rerenderTree();                      // new file -> tree changed
+  announce('Created “' + title + '”.');
+  await requestMapRebuild();   // no-op unless the map is open; loads map-view.js only if it is
+}
+
+async function editExisting(doc: Doc): Promise<void> {
+  await loadDoc(doc);
+  // A reader who was served a REDACTED copy must not edit it: saving would write
+  // the placeholders over the real sections. The server refuses this too - this
+  // is just a better place to say so than a failed save.
+  const info = await docAccess(doc.id);
+  if (info && info.redactedSections) {
+    await (await editorModule()).confirmDialog({
+      title: 'This page cannot be edited here',
+      message: 'Parts of this page are restricted to groups your account is not in. '
+        + 'Editing it would overwrite the sections you cannot see, so it is read-only for you.',
+      confirmLabel: 'OK', cancelLabel: null
+    });
+    return;
+  }
+  const { parseDoc } = await editorModule();
+  const parsed = parseDoc(doc.body || '', doc.meta || {});
+  if (parsed.lostMarkers) {
+    // A restricted-section marker could not be represented as a block, so saving
+    // would delete a permission boundary. Refuse rather than lose it.
+    await (await editorModule()).confirmDialog({
+      title: 'This page cannot be edited here',
+      message: 'It contains a restricted-section marker in a position the visual editor cannot '
+        + 'represent, and saving would remove it. Edit the Markdown file directly instead.',
+      confirmLabel: 'OK', cancelLabel: null
+    });
+    return;
+  }
+  parsed.meta.title = doc.title || parsed.meta.title;
+  parsed.meta.description = doc.description || parsed.meta.description;
+  parsed.meta.assumes = (doc.assumes || []).slice();
+  parsed.meta.next = (doc.next || []).slice();
+  await enterEdit(doc.id, parsed.meta, parsed.blocks, false);
+}
+
+async function enterEdit(id: string, meta: DocMeta, blocks: Block[], isNew: boolean): Promise<void> {
+  const openingHash = location.hash;
+  // The metadata pickers (Assumed knowledge / Recommended next) need the full doc
+  // list. Boot no longer holds one (lazy/server-backed), so pull it from the same
+  // server graph model the map uses (cached; invalidated after a create/delete/edit).
+  const allDocs: GraphDocNode[] = (await ensureGraphModel()).docs;
+  const access = await docAccess(id);
+  const { openEditor } = await editorModule();
+  if (location.hash !== openingHash) return;
+  if (!await mayLeaveEditor() || location.hash !== openingHash) return;
+  exitEdit();
+  if (app.closeMapView) app.closeMapView();
+  if (app.closeCoverageView) app.closeCoverageView();
+  readerScroll = mustEl('content').scrollTop;
+  editorHash = location.hash;
+  editorEl = openEditor({
+    docId: id, meta, blocks, isNew,
+    sources: (state.site && state.site.sources) || [],
+    allDocs: allDocs,
+    knownGroups: (access && access.knownGroups) || [],
+    docAccess: access,
+    requirements: requirementList(),
+    component: componentFor(id),
+    // serializeDoc has already folded the edited metadata into `md`, so the
+    // second argument is redundant here - only `status` is wanted after it.
+    onSave: async (md, _newMeta, status) => { const ok = await saveDoc(id, md, isNew, status); if (ok) isNew = false; return ok; },
+    onClose: () => {
+      exitEdit();
+      // Back to the document just edited if it is known, else the site default.
+      // With neither there is nowhere to route to, so stay put rather than push a
+      // "#/undefined" the router could only turn into an error screen.
+      const back = state.byId.has(id) ? id : defaultId();
+      if (back && app.navigate) app.navigate(back);
+    }
+  });
+  // The editor mounts into the app-body shell. index.html always has it, and the
+  // whole editing flow is meaningless without it, so a missing host is a broken
+  // template rather than a state worth degrading through.
+  const appBody = document.querySelector('.app-body');
+  if (!appBody) throw new Error('Cannot open the editor: .app-body is missing from the page.');
+  appBody.appendChild(editorEl);
+  document.body.classList.add('is-editing');
+  for (const id of ['newDocBtn', 'graphBtn', 'covBtn', 'splitBtn', 'docSearch']) {
+    const control = document.getElementById(id) as HTMLButtonElement | HTMLInputElement | HTMLSelectElement | null;
+    if (control) { disabledControls.set(control, control.disabled); control.disabled = true; }
+  }
+  const skip = document.querySelector<HTMLAnchorElement>('a.skip'); if (skip) { skip.href = '#document-editor'; skip.textContent = 'Skip to editor'; }
+  // Restore the approximate writing position using the corresponding heading.
+  const headings = [...mustEl('content').querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')];
+  const nearest = headings.filter(h => h.offsetTop <= readerScroll + 80).at(-1)?.textContent?.replace(/^\s*[\d.]+\s*/, '').trim();
+  const target = nearest && [...editorEl.querySelectorAll<HTMLElement>('.blk-heading .blk-edit')].find(h => h.textContent?.trim() === nearest);
+  if (target) { target.scrollIntoView({ block: 'start' }); target.focus({ preventScroll: true }); }
+  else editorEl.querySelector<HTMLElement>('[contenteditable]')?.focus({ preventScroll: true });
+}
+/** Remove the open editor from the DOM, if any, and leave editing mode. */
+function exitEdit() {
+  const wasEditing = !!editorEl;
+  document.body.classList.remove('is-editing');
+  if (editorEl) { editorEl.remove(); editorEl = null; }
+  disabledControls.forEach((disabled, control) => { control.disabled = disabled; }); disabledControls.clear();
+  const skip = document.querySelector<HTMLAnchorElement>('a.skip'); if (skip) { skip.href = '#content'; skip.textContent = 'Skip to content'; }
+  const content = document.getElementById('content'); if (content && wasEditing) content.scrollTop = readerScroll;
+}
+/**
+ * The requirement-id prefix declared for whichever source `id` lives in.
+ */
+function componentFor(id: string): string {
+  const src = id.split('/')[0];
+  // state.site is the parsed site.json, so `sources` is already the declared
+  // SourceConfig list (catalog.ts) and can be searched directly.
+  const s = ((state.site && state.site.sources) || []).find(x => x.name === src);
+  return (s && s.component) || '';   // `component` is an optional per-source key
+}
+
+/**
+ * Write a document back to disk. `md` is the fully serialized document; `status`
+ * is the element to report save progress/errors into.
+ */
+async function saveDoc(id: string, md: string, wasNew: boolean, status: HTMLElement): Promise<boolean> {
+  const slash = id.indexOf('/');
+  const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
+  let res: Response;
+  try {
+    res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
+      { method: 'PUT', body: md });
+  } catch (e) { status.textContent = 'Save failed: ' + errorMessage(e); return false; }
+  if (!res.ok) { status.textContent = 'Save failed: ' + await describeFailure(res); return false; }
+  status.textContent = 'Saved.';
+  const cached = state.byId.get(id); if (cached) cached._loaded = false;   // force a fresh reload of the new body
+  await refreshCatalog();
+  if (wasNew) await rerenderTree();   // new file -> tree structure changed
+  // Keep the buffer mounted and Saved visible. The reading pane refreshes on exit.
+  const saved = getDoc(id);
+  if (saved) { await loadDoc(saved); state.current = saved; const { renderDoc } = await import('./reader.js'); renderDoc(saved, { preserveReading: true }); }
+  if (wasNew) { editorHash = '#/' + id; history.replaceState(null, '', location.pathname + location.search + editorHash); }
+  const checks: Promise<void>[] = [];
+  document.dispatchEvent(new CustomEvent('webdoc:editor-write', { detail: { waitUntil: (task: Promise<void>) => checks.push(task) } }));
+  await Promise.allSettled(checks);
+  return true;
+}
+
+/**
+ * After a write the SERVER index updates itself (serve.py do_PUT/do_DELETE hooks),
+ * so the client only INVALIDATES caches and reloads what's affected - never re-walks
+ * or re-loads the corpus (the old O(N)-on-every-save trap). Tree re-rendering happens
+ * only at the specific create/delete sites, since a plain edit changes no structure.
+ * `extraIds` covers documents whose content just changed on disk but that aren't
+ * state.current (e.g. either end of a relationship edited from the map's
+ * connect/disconnect mode) - without this they'd stay cached with stale
+ * assumes/next until something else happens to invalidate them.
+ */
+async function refreshCatalog(extraIds?: string[]): Promise<void> {
+  invalidateGraphModel();
+  invalidateAccess();   // a write can change the effective ACL of everything downstream
+  await buildRequirementIndex(null, (state.site && state.site.sources) || []);   // refresh the global req index (cheap, server-side)
+  (extraIds || []).forEach(id => { const cached = state.byId.get(id); if (cached) cached._loaded = false; });
+  if (state.current) {
+    state.current._loaded = false;                         // its body may have changed on disk
+    try { await loadDoc(state.current); } catch (e) { /* deleted; caller navigates away */ }
+  }
+}
+
+// ---- Delete a document (CRUD) ---------------------------------------------
+/**
+ * `error` carries a describeFailure() sentence whenever ok is false.
+ */
+async function deleteDocRequest(id: string): Promise<{ ok: boolean, error?: string }> {
+  const slash = id.indexOf('/');
+  const source = id.slice(0, slash), rel = id.slice(slash + 1) + '.md';
+  const url = '/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/');
+  try {
+    const res = await apiFetch(url, { method: 'DELETE' });
+    if (res.ok) return { ok: true };
+    return { ok: false, error: await describeFailure(res) };
+  } catch (e) { return { ok: false, error: errorMessage(e) }; }
+}
+
+/**
+ * Confirm, delete, refresh the catalog, then move off the deleted document.
+ * `rebuildMap` re-renders an open map so the deleted node disappears in place.
+ */
+async function deleteDocFlow(id: string, opts?: { rebuildMap?: boolean }): Promise<void> {
+  if (!id) return;
+  const doc = getDoc(id);
+  const title = (doc && doc.title) || titleFromId(id);
+  const confirmed = await (await editorModule()).confirmDialog({
+    title: 'Delete this document?',
+    message: '“' + title + '” (' + id + '.md) will be permanently deleted from disk. This can’t be undone.',
+    confirmLabel: 'Delete', danger: true
+  });
+  if (!confirmed) return;
+  const wasCurrent = !!(state.current && state.current.id === id);
+  const r = await deleteDocRequest(id);
+  if (!r.ok) {
+    announce('Delete failed: ' + r.error);
+    await (await editorModule()).confirmDialog({ title: 'Delete failed', message: r.error, confirmLabel: 'OK', cancelLabel: null });
+    return;
+  }
+  state.byId.delete(id);
+  await refreshCatalog();
+  await rerenderTree();   // structure changed
+  announce('Deleted “' + title + '”.');
+  // If the reading view was showing the deleted doc, move it to a surviving one.
+  if (wasCurrent) {
+    const next = defaultId();
+    // Both are wired by main.ts at boot, but the registry is optional by design -
+    // every other call site guards, and so does this one.
+    if (next && next !== id) { if (app.navigate) app.navigate(next); }
+    else if (app.showError) app.showError('No documents left.');
+  }
+  // Refresh an open map in place so the deleted node is gone (keep view + animate).
+  if (opts && opts.rebuildMap) await requestMapRebuild();
+}
+
+// Link / unlink a test case and a requirement by editing the requirement id in
+// that test's `verifies` (in the test's own document), then rebuilding the index.
+/**
+ * Add `reqId` to a test's `verifies`. `body` is the raw markdown of the test's own
+ * document and `testKey` is the test's meta `test`/`test-case` key (not its full
+ * T_ id). Returns the rewritten body, unchanged if the test's meta block wasn't
+ * found or it was already linked.
+ */
+function addVerifyToBody(body: string, testKey: string, reqId: string): string {
+  return String(body).replace(/<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->/gi, (m: string, json: string) => {
+    let meta: RawMetaHeader; try { meta = JSON.parse(json); } catch (e) { return m; }
+    if ((meta.test || meta['test-case']) !== testKey) return m;
+    const v = Array.isArray(meta.verifies) ? meta.verifies.map(String) : [];
+    if (v.indexOf(reqId) !== -1) return m;                 // already linked
+    v.push(reqId); meta.verifies = v;
+    return '<!--meta start ' + JSON.stringify(meta) + '-->';
+  });
+}
+/**
+ * Remove `reqId` from a test's `verifies`. Same `body` / `testKey` as above;
+ * `component` is the test's component, used to resolve short-form `verifies`
+ * entries before comparing. Returns the rewritten body, unchanged if the test's
+ * meta block wasn't found or it wasn't linked.
+ */
+function removeVerifyFromBody(body: string, testKey: string, reqId: string, component: string): string {
+  return String(body).replace(/<!--\s*meta\s+start\s*(\{[\s\S]*?\})\s*-->/gi, (m: string, json: string) => {
+    let meta: RawMetaHeader; try { meta = JSON.parse(json); } catch (e) { return m; }
+    if ((meta.test || meta['test-case']) !== testKey) return m;
+    const v: string[] = Array.isArray(meta.verifies) ? meta.verifies.map(String) : [];
+    // drop any ref that IS or RESOLVES to reqId (verifies may hold short forms).
+    const kept = v.filter(ref => ref !== reqId && resolveRequirementRef(ref, component) !== reqId);
+    if (kept.length === v.length) return m;                // wasn't linked
+    meta.verifies = kept;
+    return '<!--meta start ' + JSON.stringify(meta) + '-->';
+  });
+}
+/**
+ * Returns true if nothing needed to change, or the write succeeded.
+ */
+async function writeTestDocBody(t: TestCaseEntry, newBody: string, oldBody: string): Promise<boolean> {
+  if (newBody === oldBody) return true;                    // no change
+  const slash = t.docId.indexOf('/');
+  const source = t.docId.slice(0, slash), rel = t.docId.slice(slash + 1) + '.md';
+  let res: Response;
+  try {
+    res = await apiFetch('/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/'),
+      { method: 'PUT', body: newBody });
+  } catch (e) { return false; }
+  if (!res.ok) return false;
+  await refreshCatalog();
+  return true;
+}
+/**
+ * Fetch a document's RAW markdown - the on-disk bytes, meta header included.
+ *
+ * `doc.body` is NOT this: catalog.loadDoc splits the <!--meta--> header off, so
+ * writing doc.body back erases the header - the title, the assumes/next links,
+ * and the access rule along with them.
+ */
+async function rawDoc(docId: string): Promise<string | null> {
+  const slash = docId.indexOf('/');
+  const url = '/docs/' + encodeURIComponent(docId.slice(0, slash)) + '/'
+    + (docId.slice(slash + 1) + '.md').split('/').map(encodeURIComponent).join('/');
+  try { const r = await fetch(url, { cache: 'no-cache', credentials: 'same-origin' }); return r.ok ? await r.text() : null; }
+  catch (e) { return null; }
+}
+
+/** Returns true on success. */
+async function linkTestToRequirement(testId: string, reqId: string): Promise<boolean> {
+  const t = testList().find(x => x.id === testId);
+  if (!t) return false;
+  const raw = await rawDoc(t.docId);
+  if (raw === null) return false;
+  return writeTestDocBody(t, addVerifyToBody(raw, t.key, reqId), raw);
+}
+/** Returns true on success. */
+async function unlinkTestFromRequirement(testId: string, reqId: string): Promise<boolean> {
+  const t = testList().find(x => x.id === testId);
+  if (!t) return false;
+  const raw = await rawDoc(t.docId);
+  if (raw === null) return false;
+  return writeTestDocBody(t, removeVerifyFromBody(raw, t.key, reqId, t.component), raw);
+}
+
+/**
+ * Add/remove an id in a document's own `<!--meta-->` header list (assumes|next).
+ * Used by the map's "Edit connections" mode to author relationships directly.
+ * `body` is the raw on-disk markdown, including the doc-level meta header;
+ * returns the rewritten raw markdown, unchanged if there is no meta header to edit.
+ */
+function editDocMetaBody(body: string, field: 'assumes' | 'next', addId: string | null, removeId: string | null): string {
+  const s = String(body);
+  const m = s.match(/^(﻿?)<!--meta\s*(\{[\s\S]*?\})\s*-->/);
+  if (!m) return s;                                  // no doc-level meta header to edit
+  let meta: RawMetaHeader; try { meta = JSON.parse(m[2]); } catch (e) { return s; }
+  const declared = meta[field];
+  let arr = Array.isArray(declared) ? declared.map(String) : [];
+  if (addId && arr.indexOf(addId) === -1) arr.push(addId);
+  if (removeId) arr = arr.filter(x => x !== removeId);
+  meta[field] = arr;
+  return (m[1] || '') + '<!--meta\n' + JSON.stringify(meta, null, 2) + '\n-->' + s.slice(m[0].length);
+}
+/**
+ * Returns true on success (including an already-in-the-desired-state no-op).
+ */
+async function editDocRelation(fromId: string, toId: string, field: 'assumes' | 'next', action: 'add' | 'remove'): Promise<boolean> {
+  if (!fromId || !toId || fromId === toId) return false;
+  const slash = fromId.indexOf('/');
+  const source = fromId.slice(0, slash), rel = fromId.slice(slash + 1) + '.md';
+  const url = '/docs/' + encodeURIComponent(source) + '/' + rel.split('/').map(encodeURIComponent).join('/');
+  // Edit the RAW file: discovery strips the doc-level <!--meta--> out of doc.body,
+  // so we fetch the on-disk markdown (header intact), rewrite it, and PUT it back.
+  let raw: string;
+  try { const r = await fetch(url); if (!r.ok) return false; raw = await r.text(); }
+  catch (e) { return false; }
+  const newBody = editDocMetaBody(raw, field, action === 'add' ? toId : null, action === 'remove' ? toId : null);
+  if (newBody === raw) return true;                  // already in the desired state
+  let res: Response;
+  try { res = await apiFetch(url, { method: 'PUT', body: newBody }); }
+  catch (e) { return false; }
+  if (!res.ok) return false;
+  await refreshCatalog([fromId, toId]);   // fromId's file changed; invalidate both ends of the relationship
+  return true;
+}
+
+/**
+ * Save new inner Markdown for one widget on a page, from the reader - a widget
+ * that edits its own content in place (a diagram, say) without opening the page
+ * editor. The widget is found in the page's source by what it held when the page
+ * was rendered (meta-blocks.ts replaceWidgetContent), so nothing else on the
+ * page is touched. Rejects with a sentence for the reader when it cannot save.
+ */
+async function saveWidgetContent(docId: string, options: Record<string, unknown>, oldInner: string, newInner: string): Promise<void> {
+  if (newInner === oldInner) return;
+  const raw = await rawDoc(docId);
+  if (raw === null) throw new Error('The page could not be read. Reload it and try again.');
+  const updated = replaceWidgetContent(raw, options, oldInner, newInner);
+  if (updated === null) throw new Error('This part of the page was changed by someone else. Reload the page to see their change, then edit again.');
+  const slash = docId.indexOf('/');
+  const url = '/docs/' + encodeURIComponent(docId.slice(0, slash)) + '/'
+    + (docId.slice(slash + 1) + '.md').split('/').map(encodeURIComponent).join('/');
+  let res: Response;
+  try { res = await apiFetch(url, { method: 'PUT', body: updated }); }
+  catch (e) { throw new Error('Save failed: ' + errorMessage(e)); }
+  if (!res.ok) throw new Error('Save failed: ' + await describeFailure(res));
+  const cached = state.byId.get(docId); if (cached) cached._loaded = false;
+  await refreshCatalog();   // reloads the open page's source
+  // Show the saved page where the reader was, as a background update would
+  if (state.current && state.current.id === docId) renderDoc(state.current, { preserveReading: true });
+}
+
+// Map + coverage reach these through the shared registry (map: edit-connections +
+// Delete; coverage report panel: link / unlink a test from a requirement).
+app.saveWidgetContent = saveWidgetContent;
+app.editDocRelation = editDocRelation;
+app.deleteDocFlow = deleteDocFlow;
+app.linkTestToRequirement = linkTestToRequirement;
+app.unlinkTestFromRequirement = unlinkTestFromRequirement;

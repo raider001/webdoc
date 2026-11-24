@@ -9,6 +9,17 @@ map button in the header — the ◱ icon, titled "Map" — and the same button 
 Escape key closes it. The map and the test-coverage view are mutually exclusive:
 opening one closes the other.
 
+Opening the map centres and zooms on the page you are reading. The header's
+Document and map button toggles a split view: the document stays on the left,
+with the map on the right. Drag the divider to resize, or focus it and press
+Left/Right. The split-view choice is remembered in this browser when local
+storage is available. Navigation keeps the map centred on the open document.
+
+Focus mode fits the focused document and all of its directly connected
+documents, including prerequisite, recommended-next, requirement-trace and
+page-link neighbours. Distant documents and external URL boxes do not enlarge
+this frame. The layered map layout is unchanged.
+
 ![The map view: document nodes joined by coloured edges, with the legend of toggles, a search box, a minimap, and zoom controls.](/assets/how-to/map.png)
 
 Single-click and double-click do different things:

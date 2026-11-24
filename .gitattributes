@@ -1,0 +1,6 @@
+# The compiled browser output is NOT tracked - see .gitignore. This file is kept
+# so that if anyone ever reinstates a committed artifact, the line ending pin is
+# already here: core.autocrlf is true on at least one dev machine, and without
+# `-text eol=lf` a byte-identical rebuild shows as modified.
+#
+# app/build/islands.js  -diff -merge -text eol=lf linguist-generated=true

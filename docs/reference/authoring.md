@@ -4,15 +4,21 @@
 
 # Authoring Reference
 
-A WebDocs document is a plain Markdown file. There is no build step and no
-front-matter processor to install — you save a `.md` file inside a configured
-source folder and it is discovered the next time the library loads. This page is
-the practical reference for the five things every author touches: the metadata
-header, headings and their automatic numbering, fenced code blocks, links, and
-requirement-group tables.
+For paired Markdown widgets and their visual-editor blocks, see
+[Collapsible Sections](Docs/features/collapsible),
+[Widget Extension API](Docs/features/widget-api) and
+[Auto-Update Sections](Docs/features/live-widget) and
+[Auto-Update Tables](Docs/how-to/live-table).
 
-Everything below is parsed and rendered in the browser by hand-written vanilla
-JavaScript. Nothing here depends on a plugin, a theme package, or a CDN.
+A WebDocs document is a plain Markdown file. There is no build step for a
+document and no front-matter processor to install — you save a `.md` file inside
+a configured source folder and it is discovered the next time the library loads.
+This page is the practical reference for the five things every author touches:
+the metadata header, headings and their automatic numbering, fenced code blocks,
+links, and requirement-group tables.
+
+Everything below is parsed and rendered in the browser by hand-written code.
+Nothing here depends on a plugin, a theme package, or a CDN.
 
 ## Where files live and how ids work
 
@@ -23,6 +29,22 @@ source name. The source named `Docs` is mounted from the `docs/` folder, so
 system — links, `assumes`/`next` edges, deep-links and requirement traces all
 address documents by id. See [Configuration](Docs/reference/config) for how a
 source name maps to a folder.
+
+### Giving a folder a page
+
+Every folder is a page at its own path (`#/Docs/reference`). To write that page
+yourself, add one of these — the first that exists wins:
+
+| File | Id | Notes |
+| --- | --- | --- |
+| `reference.md` beside `reference/` | `Docs/reference` | The id is the folder path itself. |
+| `reference/index.md` | `Docs/reference/index` | Moves with the folder. |
+| `reference/README.md` | `Docs/reference/README` | Also what GitHub shows for the folder. |
+
+A source root has no sibling, so its page is its `index.md` or `README.md`.
+Without any of them WebDocs generates a page listing the folder's contents, so a
+folder never needs a placeholder file just to be reachable. See
+[Navigation](Docs/features/navigation#folder-pages) for how folder pages appear.
 
 ## The metadata header
 
@@ -51,14 +73,96 @@ The recognised fields:
 | `description` | string | A one-line summary. Rendered as a lede beneath the H1. |
 | `assumes` | string[] | Prerequisite document ids. Drawn as **prerequisite** edges on the map. |
 | `next` | string[] | Recommended-next document ids. Drawn as **recommended-next** edges on the map. |
+| `access` | object | Who may read and modify this document. Only meaningful on a server with accounts enabled; inert otherwise. See [Access rules](#access-rules). |
 
 `assumes` and `next` are arrays of document ids, and either may hold several
-entries. A reference to an id that does not resolve to a real document is not an
+entries. Repeated ids are kept once, in first-occurrence order, in both the
+server index and reader. A reference to an id that does not resolve to a real
+document is not an
 error — it is flagged as a dangling link and shown as a placeholder node on the
 map, which is a useful way to spot a document you have not written yet.
 
+### Access rules
+
+On a server with [accounts](Docs/features/access-control) enabled, an `access`
+object restricts the document:
+
+```json
+"access": {
+  "read":  ["staff"],
+  "write": ["release"],
+  "hidden": false,
+  "propagate": true,
+  "inherit": true
+}
+```
+
+| Key | Type | Meaning |
+| --- | ---- | ------- |
+| `read` | string[] | Groups that may open the page. Omit for unrestricted. An empty array locks it to administrators only. |
+| `write` | string[] | Groups that may modify it. Omit to fall back to the server's `writeGroups`. |
+| `hidden` | bool | When the reader is not allowed, make the page indistinguishable from one that does not exist rather than showing it locked. |
+| `propagate` | bool | Whether this rule is inherited by everything downstream of `next`. Default `true`. |
+| `inherit` | bool | Whether this page accepts a rule coming down `next` at it. Default `true`. |
+
+A rule applies to the page that declares it **and, recursively, to everything it
+recommends next** — so locking a chapter's entry point locks the chapter. Writing
+one needs access-management rights, which are separate from write access to the
+page: an author who may edit a locked page must not be able to unlock it.
+
+To restrict part of a page instead, wrap it in a matching pair of markers in the
+body — these are ordinary HTML comments, so they vanish from the rendered page
+for anyone allowed to see the section, and the server removes the whole region
+before sending the file to anyone who is not:
+
+```markdown
+<!--access start {"read": ["ops"], "label": "Production runbook"}-->
+
+Content only the ops group is served.
+
+<!--access end-->
+```
+
+A marker inside a fenced code block or an inline code span is ignored, so you can
+write about the syntax without restricting anything.
+
+On a server with accounts enabled, a metadata header that does not parse makes
+the page administrators-only rather than unrestricted — otherwise a typo in a
+locked page's header would publish it. Fix the JSON and the page returns to
+normal on the next save.
+
+Keep requirement groups and test cases *outside* a restricted section: content
+inside one is deliberately excluded from the index entirely, so anything in there
+would drop out of search and traceability for everybody.
+
 Keep the `title` in the header identical to the H1 that follows it; the H1 is the
 human-visible heading while the metadata `title` feeds the navigation surfaces.
+The visual editor warns visibly if these differ. Its Metadata panel is
+collapsible, and its relationship fields search document titles and ids.
+
+### Visual editing and saving
+
+Enter splits a text block into a paragraph at the caret; Shift+Enter inserts a
+hard line break. Table cells keep their structure on Enter. Adjacent text blocks
+join with Backspace at the start or Delete at the end. Lists split into items
+on Enter, and an empty item exits to a paragraph. The serializer preserves hard
+breaks and treats pasted HTML `div`/`p` boundaries as line breaks.
+
+Block handles provide keyboard menus, type conversion for text/list/code
+blocks, movement and deletion, and support pointer dragging on mouse and touch.
+Structural edits and field edits share the session undo history. Tables permit
+insertion and deletion at any row or column; at least one column remains.
+
+Ctrl/Cmd+S writes the file and keeps the editor open with Saved visible.
+Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y) redoes. Alt+Up/Down reorders
+the current block. Ctrl/Cmd+K opens a link dialog; Ctrl/Cmd+Shift+G inserts an
+inline image. Dialogs contain focus, restore it when closed, and submit their
+forms on Enter. Danger confirmations initially focus Cancel.
+
+Unsaved edits are guarded on Cancel, replacement, document navigation, reload
+and tab close. A new document is unsaved even before typing. A failed save keeps
+the buffer and presents an error. External disk changes are reported visibly;
+close the editor to inspect the latest version before overwriting it.
 
 ## The H1 and body
 

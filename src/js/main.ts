@@ -1,0 +1,768 @@
+import { setupSplitView } from './split-view.js';
+import { projectFetch } from './project.js';
+// main.ts - application entry point. Wires the shell together:
+// theme, discovery, hash routing, the render pipeline, the drawer and search.
+import { errorMessage } from './errors.js';
+import { loadSite, loadDoc, isRestrictedError } from './catalog.js';
+import { searchDocs } from './search.js';
+import { invalidateGraphModel } from './graph-model.js';
+import { ensureOverlayHosts, requestMapRebuild } from './overlays.js';
+import { loadResults, combinedStatus } from './coverage.js';
+import { loadPlugins } from './plugins.js';
+import { buildRequirementIndex, revealRequirement, revealTest, routeParams, requirementList, testList, setCoverageStatus } from './requirements.js';
+import { state, el, mustEl, app, defaultId, getDoc } from './app-shell.js';
+import { loadIslands } from './islands.js';
+import { renderDoc, setupDocSearch, registerMounted, teardownMounted } from './reader.js';
+import { refreshReadingDocument } from './reader-refresh.js';
+import { setReadOnly } from './policy.js';
+import { setupProjectMenu } from './project-menu.js';
+import { renderProjectStart } from './project-start.js';
+import { elem } from './dom.js';
+import { html } from './html.js';
+import { sunIcon, moonIcon } from './icons.js';
+import { auth, loadAuth, signInRequired, invalidateAccess } from './auth.js';
+import { setupAccountButton, mountSignInWall, restrictedPanel } from './auth-ui.js';
+import { announce } from './announce.js';
+import { createIndexWatcher } from './index-watch.js';
+import { fetchFolder } from './folders.js';
+import { showFolderPage } from './folder-view.js';
+
+import type { Doc, RestrictedDetail, SourceConfig } from './catalog.js';
+import type { CoverageResults } from './coverage.js';
+import type { TestCaseEntry } from './requirements.js';
+import type { SearchResult } from './search.js';
+import type { IslandModule } from './islands.js';
+import type { OverlayHandle } from './map-view.js';
+
+/**
+ * The drawer's open/close handle returned by setupDrawer(); stashed as
+ * `appDrawer` and handed to setupDrawerSearch and app.closeDrawer.
+ */
+interface DrawerHandle {
+  open: () => void;
+  close: () => void;
+}
+
+/**
+ * Detail payload of the `webdoc:run-test` CustomEvent, dispatched by a
+ * document's per-test-case Run button and consumed by setupTestRun.
+ */
+export interface RunTestEventDetail {
+  testId: string;
+}
+
+// The event is dispatched on `document` by TestCase.svelte and ReportPanel.svelte
+// and listened for exactly once, in setupTestRun. Declaring it on DocumentEventMap
+// is what makes that listener's parameter the real CustomEvent it receives instead
+// of a bare Event the handler would have to cast back.
+declare global {
+  interface DocumentEventMap {
+    'webdoc:run-test': CustomEvent<RunTestEventDetail>;
+  }
+}
+
+/**
+ * The JSON body of GET /api/index/status, polled by waitForIndex while the
+ * server builds its first-run SQLite index - and again, on a timer, by
+ * pollForChanges, which watches `generation` for an external edit.
+ */
+interface IndexStatus {
+  /** e.g. 'building' | 'ready' | 'error' */
+  state: string;
+  /** percent complete (0 while unknown) */
+  pct: number;
+  /** documents indexed so far (0 while unknown) */
+  docs: number;
+  /** bumped by the server every time it rescans and finds the corpus changed */
+  generation?: number;
+  version?: string;
+}
+
+/**
+ * The first-run index-build overlay's live DOM handle, held in the
+ * module-level `indexOverlay` while the overlay is shown.
+ */
+interface IndexOverlayHandle {
+  /** the overlay root, appended to <body> */
+  ov: Element;
+  /** the progress bar track (toggles .is-indeterminate) */
+  track: HTMLElement;
+  /** the progress bar fill (width set to a percentage) */
+  fill: HTMLElement;
+  /** the status line text */
+  stat: HTMLElement;
+}
+
+/**
+ * The options object built for a single ad-hoc test run (triggered by a
+ * document's per-test Run button) and handed to runner.js's openRunner, which
+ * reads every field back out to render the run screen and later save results.
+ */
+export interface RunnerOpts {
+  tests: TestCaseEntry[];
+  results: CoverageResults;
+  sources: SourceConfig[];
+  onSaved: () => void;
+}
+
+// The drawer handle (open/close), created at boot; exposed to modules via app.closeDrawer.
+let appDrawer: DrawerHandle | null = null;
+
+// ---- Theme ----------------------------------------------------------------
+function setupTheme() {
+  const btn = mustEl('themeBtn'), root = document.documentElement;
+  const sync = () => {
+    const dark = root.getAttribute('data-theme') === 'dark';
+    btn.setAttribute('aria-pressed', String(dark));
+    btn.textContent = '';
+    // The icon builders return the fragment's firstElementChild, so they are
+    // typed nullable; a button with no glyph beats a boot that throws over one.
+    const icon = dark ? sunIcon() : moonIcon();
+    if (icon) btn.appendChild(icon);
+  };
+  btn.addEventListener('click', () => {
+    const dark = root.getAttribute('data-theme') === 'dark';
+    const next = dark ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('wd-theme', next); } catch (e) {}
+    sync();
+  });
+  sync();
+}
+
+// ---- The drawer island ----------------------------------------------------
+/**
+ * Mount the Svelte drawer tree and search-results list, and publish the two
+ * calls the rest of the shell makes into them on the `app` registry.
+ *
+ * The registry, not an import: reader.ts marks the active document on EVERY
+ * render and authoring.ts invalidates after every create/delete, and neither
+ * should have to await a dynamic import on a hot path or grow a dependency on
+ * the bundle. Both call sites already guard (`if (app.setTreeActive)`), so the
+ * shell degrades to an unhighlighted tree rather than throwing if the island
+ * ever fails to load.
+ */
+async function mountShellIslands(): Promise<void> {
+  const select = (id: string) => { navigate(id); if (appDrawer) appDrawer.close(); };
+  const islands = await loadIslands();
+
+  // Drawer.
+  islands.mountDocTree(mustEl('treeList'), select);
+  islands.mountSearchHits(mustEl('searchResults'), select);
+  app.setTreeActive = islands.setActive;
+  app.invalidateTree = islands.invalidateTree;
+
+  // The article's teardown registry, published so a module that MOUNTS something
+  // inside the article can register it without importing reader.ts. auth-ui.ts is
+  // the first caller and the reason this is a registry entry at all: reader.ts
+  // imports auth-ui.ts for the restricted-section notice, so the reverse import
+  // would close a cycle.
+  app.registerMounted = registerMounted;
+
+  // Reading-view satellites. Mounted ONCE, here, and driven by props for the
+  // rest of the session - see app/svelte/islands/reader.js for why.
+  islands.mountCrumbs(mustEl('crumbs'));
+  islands.mountToc(mustEl('tocList'), mustEl('content'));
+  islands.mountFooter(mustEl('footPrev'), mustEl('footNext'));
+  app.setDocChrome = (docId, toc, assumes, next) => {
+    islands.setCrumbs(docId);
+    islands.setToc(toc);
+    islands.setFootLinks(assumes, next);
+    // Apply NOW, not on the next microtask: reader.ts reads the produced TOC
+    // links back in this same tick for scroll-spy, and boot sets
+    // data-app-ready="1" as soon as route() returns.
+    islands.flushSync();
+  };
+
+  searchIsland = islands;
+  if (state.current) islands.setActive(state.current.id);
+}
+// The island's export surface, stashed at mount so setupDrawerSearch can push
+// results into the store without re-importing the bundle on every keystroke.
+let searchIsland: IslandModule | null = null;
+
+// ---- Lazy feature modules -------------------------------------------------
+/**
+ * Wire a header button to a feature module that is only fetched when the button
+ * is first pressed.
+ *
+ * The map (map-view.js -> graph.js -> graph/*.js, ~2,000 lines) and the coverage
+ * view (which pulls the graph AND the report generator) used to be imported
+ * statically here, so every reader downloaded and parsed both just to read one
+ * page, whether or not they ever opened either.
+ *
+ * The setup function returns an OverlayHandle rather than wiring the button
+ * itself: by the time the module has loaded, the click that triggered the load
+ * is over, so THIS listener has to open it for that first press. If the module
+ * also attached its own listener, every later click would toggle twice.
+ */
+function lazyOverlayButton(btnId: string, load: () => Promise<OverlayHandle>): void {
+  const btn = mustEl(btnId);
+  let ready: Promise<OverlayHandle> | null = null;
+  btn.addEventListener('click', async () => {
+    const first = !ready;
+    if (!ready) ready = load();
+    let handle: OverlayHandle;
+    try {
+      handle = await ready;
+    } catch (e) {
+      ready = null;                       // a failed fetch can be retried by pressing again
+      return showError('Could not load that view: ' + errorMessage(e));
+    }
+    await (first ? handle.open() : handle.toggle());
+  });
+}
+
+// ---- Drawer ---------------------------------------------------------------
+function setupDrawer(): DrawerHandle {
+  const drawer = mustEl('doc-tree'), scrim = mustEl('scrim'), btn = mustEl('hamburger');
+  /** Where focus was before the drawer took it, to hand back on close. */
+  let lastFocus: HTMLElement | null = null;
+  const open = () => {
+    lastFocus = document.activeElement as HTMLElement;
+    drawer.hidden = false; scrim.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    document.documentElement.style.overflow = 'hidden';
+    ((drawer.querySelector('#treeSearch') || drawer) as HTMLElement).focus();
+  };
+  const close = () => {
+    drawer.hidden = true; scrim.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    document.documentElement.style.overflow = '';
+    if (lastFocus) lastFocus.focus();
+  };
+  btn.addEventListener('click', () => (drawer.hidden ? open() : close()));
+  mustEl('drawerClose').addEventListener('click', close);
+  scrim.addEventListener('click', close);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !drawer.hidden) close(); });
+  return { open, close };
+}
+
+// ---- All-documents search (titles + headings) in the drawer ---------------
+function setupDrawerSearch() {
+  const input = mustEl('treeSearch') as HTMLInputElement;
+  const results = mustEl('searchResults');
+  const tree = mustEl('treeList');
+  let seq = 0, ctrl: AbortController | null = null,
+    timer: ReturnType<typeof setTimeout> | null = null;
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (timer) clearTimeout(timer);
+    if (ctrl) { try { ctrl.abort(); } catch (e) {} ctrl = null; }
+    // #searchResults and #treeList are the islands' MOUNT TARGETS, so their
+    // hidden flags stay here - a component cannot set an attribute on the element
+    // it was mounted into.
+    if (!q) { results.hidden = true; tree.hidden = false; return; }
+    tree.hidden = true; results.hidden = false;
+    // The FETCHING stays vanilla and unchanged. Debounce keystrokes; the
+    // AbortController cancels the in-flight request; the sequence guard drops
+    // out-of-order responses. BOTH guards are needed - aborting only rejects the
+    // fetch, while a response that already parsed can still resolve late.
+    // Only the RENDERING moved: the island draws whatever lands in the store.
+    timer = setTimeout(async () => {
+      const mySeq = ++seq;
+      ctrl = new AbortController();
+      if (searchIsland) searchIsland.beginSearch(q);
+      let hits: SearchResult[] = [];
+      try { hits = await searchDocs(q, 50, ctrl.signal); } catch (e) { hits = []; }
+      if (mySeq !== seq) return;   // superseded by a newer keystroke
+      if (searchIsland) searchIsland.showHits(hits);
+    }, 200);
+  });
+}
+
+// ---- Test coverage view -------------------------------------------------
+// The full-screen Test Coverage overlay lives in ./coverage-view.js
+// (setupCoverageView); it hangs its close() on app.closeCoverageView.
+
+// ---- Routing --------------------------------------------------------------
+/**
+ * Hash-route handler: resolves the current #/<id>?req=...&test=... route to a
+ * document (lazily loading it via getDoc/loadDoc), renders it, and reveals any
+ * deep-linked requirement or test.
+ */
+// Read-only navigation never imports authoring, including the project menu.
+let guardEditorLeave: () => Promise<boolean> = async () => true;
+let guardEditorRoute: (hash: string) => Promise<boolean> = async () => true;
+
+let routeSequence = 0;
+async function route(): Promise<void> {
+  const sequence = ++routeSequence;
+  const hash = location.hash || '';
+  if (!hash.startsWith('#/')) return; // ignore in-page anchors etc.
+  if (!await guardEditorRoute(hash) || sequence !== routeSequence) return;
+  const raw = hash.slice(2);
+  const q = raw.indexOf('?');                      // split off ?req=<ID>
+  const id = decodeURIComponent(q === -1 ? raw : raw.slice(0, q));
+  const query = q === -1 ? '' : raw.slice(q + 1);
+  // lazy: id -> stub -> loadDoc on demand. defaultId() is undefined when neither a
+  // configured defaultDoc nor a cached doc exists, which is the same "nothing to
+  // fall back to" the !doc branch below already reports.
+  const fallback = defaultId();
+  if (state.site?.sources && id.includes('/') && !state.site.sources.some(s => s.name === id.split('/')[0])) {
+    state.current = null;
+    state.folder = null;
+    return showError('Unresolved document in this project: ' + id);
+  }
+  // A source's own name is its root FOLDER (#/Docs). It has no file of its own,
+  // so there is no document stub to try - only the folder.
+  const sourceRoot = !!state.site?.sources?.some(s => s.name === id);
+  const doc = sourceRoot ? null : (getDoc(id) || (fallback ? getDoc(fallback) : null));
+  if (!doc && !sourceRoot) return showError('No documents found.');
+  try {
+    // Navigation also checks the index; disk edits need no full-page reload.
+    // Raw-document ETags catch an edit even before the ten-second rescan.
+    try { await indexWatcher.check(); } catch (e) { /* document fetch can still succeed */ }
+    if (sequence !== routeSequence) return;
+    if (!doc) {
+      if (await routeFolder(id, query, sequence)) return;
+      throw new Error('Document not found: ' + id);
+    }
+    try {
+      await loadDoc(doc, true);
+    } catch (e) {
+      // Not a document - but every folder is a page too (#/Docs/features).
+      // A refusal is an answer about a real document, so it is never retried as
+      // a folder, and neither is the default document standing in for an id.
+      if (!isRestrictedError(e) && doc.id === id && await routeFolder(id, query, sequence)) return;
+      throw e;
+    }
+    if (sequence !== routeSequence) return;
+    showDocument(doc, null, query);
+  } catch (e) {
+    if (sequence !== routeSequence) return;
+    if (doc) doc._loaded = false;
+    // A restricted page is not an error - it is a page with a different body.
+    // loadDoc attaches the server's refusal so the reader is told which groups
+    // would open it rather than being shown "could not load".
+    if (doc && isRestrictedError(e)) return showRestricted(doc.id, e.detail || {});
+    state.current = null;
+    state.folder = null;
+    mustEl('editBtn').hidden = true;
+    mustEl('deleteBtn').hidden = true;
+    // Clear the failed render's pending chrome too, so resolving tree promises
+    // cannot keep retrying it in the shell's shared Svelte flush.
+    if (app.setDocChrome) app.setDocChrome(doc ? doc.id : id, [], [], []);
+    showError('Could not load "' + id + '": ' + errorMessage(e));
+  }
+}
+
+/**
+ * Make a loaded document the page on screen. `folder` is the folder path it is
+ * being shown AS (its README.md / index.md, at #/Docs/kit), or null for a
+ * document at its own address.
+ */
+function showDocument(doc: Doc, folder: string | null, query: string): void {
+  // Re-showing the page already on screen at the same address (a guarded route
+  // back to it after the editor closes, a deep link within it) keeps the reader's
+  // place. The same file at another address (its own id vs. its folder's) is a
+  // new page: an unchanged preserved render returns early and would leave the
+  // breadcrumb and tree highlight on the old address.
+  const sameAddress = state.current?.id === doc.id && state.folder === folder;
+  state.current = doc;
+  state.folder = folder;
+  document.dispatchEvent(new CustomEvent('webdoc:current', { detail: doc.id }));
+  renderDoc(doc, { preserveReading: sameAddress });
+  const { req, test } = routeParams(query);      // deep-link to a requirement or test
+  if (req) requestAnimationFrame(() => revealRequirement(req));
+  if (test) requestAnimationFrame(() => revealTest(test));
+}
+
+/**
+ * Show the folder at `path` as a page, if there is such a folder. Its page is a
+ * document inside it (README.md / index.md) when it has one - shown at the
+ * folder's own address - and otherwise a page generated from its contents. (A
+ * sibling page file, how-to.md beside how-to/, has the folder's path as its id
+ * and was already rendered as an ordinary document before this was reached.)
+ *
+ * Resolves false only when there is no such folder for this reader, so the
+ * caller reports the original "not found". A superseded route resolves true: it
+ * has nothing left to do, and must not report an error over the newer page.
+ */
+async function routeFolder(path: string, query: string, sequence: number): Promise<boolean> {
+  let info = await fetchFolder(path).catch(() => null);
+  if (sequence !== routeSequence) return true;
+  if (!info) return false;
+  if (info.page && info.page.id !== path) {
+    const page = getDoc(info.page.id);
+    if (page) {
+      try {
+        await loadDoc(page, true);
+        if (sequence !== routeSequence) return true;
+        showDocument(page, path, query);
+        return true;
+      } catch (e) {
+        if (sequence !== routeSequence) return true;
+        page._loaded = false;
+        if (isRestrictedError(e)) { showRestricted(page.id, e.detail || {}); return true; }
+        // The page file went away between the two requests; list the folder instead.
+        info = { ...info, page: null };
+      }
+    }
+  }
+  await showFolderPage(info, () => sequence === routeSequence);
+  return true;
+}
+/**
+ * Render the "this page is restricted" screen in place of the document, and
+ * reset the chrome around it so nothing from the previous page lingers.
+ */
+function showRestricted(docId: string, detail: RestrictedDetail): void {
+  // Clear the current document first. Leaving it set meant Edit and Delete stayed
+  // armed for the page the reader was on BEFORE hitting the restricted one - the
+  // buttons acted on a document that is no longer what they are looking at.
+  state.current = null;
+  state.folder = null;
+  mustEl('editBtn').hidden = true;
+  mustEl('deleteBtn').hidden = true;
+  const content = mustEl('content');
+  teardownMounted(content);          // the restricted panel replaces the article
+  content.textContent = '';
+  // restrictedPanel() returns a `.wd-mounted` host straight away and mounts the
+  // island into it once the bundle resolves; it registers its own teardown
+  // through app.registerMounted, so the NEXT navigation's teardownMounted()
+  // above destroys it. Appending must come first - the pending mount checks that
+  // the host is still connected, which is how a reader who routes away in that
+  // one microtask does not leave a component running against a detached node.
+  content.appendChild(restrictedPanel(docId, detail));
+  // Through the store, not by writing #tocList / #crumbs directly: those are the
+  // satellites' MOUNT TARGETS now, and a direct write would be reverted the next
+  // time the component updated - or, worse, would fight it silently.
+  if (app.setDocChrome) app.setDocChrome(docId, [], [], []);
+  mustEl('footPrev').hidden = true;
+  mustEl('footNext').hidden = true;
+  const tocPane = el('toc');
+  if (tocPane) tocPane.hidden = true;
+  document.title = 'Restricted — ' + ((state.site && state.site.siteTitle) || 'Documentation');
+  announce('This page is restricted.');
+}
+function showError(msg: string) {
+  // mustEl, not el: a missing #content here is exactly the case the boot catch
+  // below wraps in its own try/catch and falls back to <body> for.
+  const content = mustEl('content');
+  teardownMounted(content);          // this replaces the article too
+  content.textContent = '';
+  content.appendChild(elem('div', 'doc-error', msg));
+}
+function navigate(id: string) {
+  if (location.hash === '#/' + id) route(); else location.hash = '#/' + id;
+}
+
+// Wire the shell's own handles onto the service registry so the feature modules
+// (map, coverage, authoring) can route, report errors and close the drawer without
+// importing main.ts. The rest of the registry is set by those modules at load.
+app.navigate = navigate;
+app.showError = showError;
+app.closeDrawer = () => { if (appDrawer) appDrawer.close(); };
+
+/**
+ * Per-test "Run" from a test-case block in a document: listens for the
+ * `webdoc:run-test` CustomEvent ({@link RunTestEventDetail}), loads results,
+ * opens the runner for that one test (via a {@link RunnerOpts}), and refreshes
+ * badges after saving.
+ */
+function setupTestRun() {
+  document.addEventListener('webdoc:run-test', async (e) => {
+    const id = e.detail && e.detail.testId;
+    const t = testList().find(x => x.id === id);
+    if (!t) return;
+    const sources = (state.site && state.site.sources) || [];
+    const res = await loadResults(sources);
+    // runner.js imports editor.js (for richText), so it drags the whole editor
+    // graph. Fetch it only when a reader actually presses Run on a test case.
+    const { openRunner } = await import('./runner.js');
+    openRunner({
+      tests: [t], results: res, sources: sources,
+      onSaved: () => {
+        setCoverageStatus(combinedStatus(requirementList(), testList(), res));
+        if (state.current) renderDoc(state.current);
+      }
+    });
+  });
+}
+
+// ---- First-run index build progress ---------------------------------------
+// While the server builds its SQLite index for the first time on a large corpus,
+// the /api/index/* endpoints aren't ready - so show a progress bar (driven by
+// /api/index/status) instead of a blank app. Warm restarts report "ready" at once,
+// so this returns immediately and nothing is shown.
+let indexOverlay: IndexOverlayHandle | null = null;
+function showIndexOverlay() {
+  if (indexOverlay) return;
+  const fill = elem('div', 'index-progress-fill');
+  const track = elem('div', 'index-progress is-indeterminate', fill);
+  const stat = elem('div', 'index-loading-stat', 'Scanning files…');
+  const brand = (state.site && state.site.siteTitle) || 'Documentation';
+  const ov = html`
+    <div class="index-loading">
+      <div class="index-loading-card">
+        <div class="index-loading-brand">${brand}</div>
+        <div class="index-loading-title">Preparing the document index…</div>
+        ${track}
+        ${stat}
+        <div class="index-loading-note">First-time indexing of this library. Later starts are near-instant.</div>
+      </div>
+    </div>
+  `.firstElementChild!;   // the template above has exactly one root <div>, so never null
+  document.body.appendChild(ov);
+  announce('Preparing the document index.');
+  indexOverlay = { ov: ov, track: track, fill: fill, stat: stat };
+}
+function updateIndexOverlay(s: IndexStatus) {
+  if (!indexOverlay) return;
+  const pct = Math.max(0, Math.min(100, s.pct || 0));
+  const scanning = !pct && !s.docs;   // walk phase: total not known yet -> indeterminate
+  indexOverlay.track.classList.toggle('is-indeterminate', scanning);
+  if (!scanning) indexOverlay.fill.style.width = pct + '%';
+  indexOverlay.stat.textContent = scanning
+    ? 'Scanning files…'
+    : (Number(s.docs || 0).toLocaleString() + ' documents indexed · ' + pct + '%');
+}
+function hideIndexOverlay() {
+  if (!indexOverlay) return;
+  indexOverlay.ov.remove();
+  indexOverlay = null;
+}
+// Block boot until the server index is ready, showing progress if it's a cold build.
+async function waitForIndex(): Promise<void> {
+  for (;;) {
+    let s: IndexStatus;
+    try {
+      const r = await projectFetch('/api/index/status', { cache: 'no-cache' });
+      if (!r.ok) break;              // index disabled / unavailable -> proceed (app degrades gracefully)
+      s = await r.json();
+      await indexWatcher.observe(s);
+    } catch (e) { break; }
+    if (!s || s.state === 'ready' || s.state === 'error') break;
+    showIndexOverlay();
+    updateIndexOverlay(s);
+    await new Promise(res => setTimeout(res, 600));
+  }
+  hideIndexOverlay();
+}
+
+// ---- Live reload for externally-changed files ------------------------------
+// The server rescans its source folders on a timer (config "watchIntervalSec")
+// so .md files added/edited/removed OUTSIDE the app (a text editor, git, etc)
+// are picked up without a restart. Poll the same /api/index/status endpoint
+// boot already uses and react when its "generation" counter moves.
+/** Shared navigation/timer watcher, seeded by waitForIndex at boot. */
+const indexWatcher = createIndexWatcher(onExternalChange);
+document.addEventListener('webdoc:editor-write', event => {
+  const detail = (event as CustomEvent<{ waitUntil: (task: Promise<void>) => void }>).detail;
+  detail.waitUntil(indexWatcher.check());
+});
+async function pollForChanges(): Promise<void> {
+  if (document.hidden) return;
+  try { await indexWatcher.check(); } catch (e) { /* retry at the next scheduled check */ }
+}
+function startChangeWatcher(): void { setInterval(pollForChanges, 4000); }
+/**
+ * Refresh the tree/map/current doc after the server reports files changed on
+ * disk. Never touches an in-progress edit - an open editor buffer is left
+ * alone (just a status note) so unsaved work is never silently discarded.
+ */
+async function onExternalChange(): Promise<void> {
+  const current = state.current;
+  const sequence = routeSequence;
+  // Keep the current successful entry so conditional revalidation can use its
+  // ETag. Other pages are loaded lazily on navigation, never rendered here.
+  for (const doc of state.byId.values()) if (doc !== current) doc._loaded = false;
+  invalidateGraphModel();
+  invalidateAccess();   // an edit anywhere can change a whole chapter's inherited ACL
+  await buildRequirementIndex(null, (state.site && state.site.sources) || []);
+  if (app.invalidateTree) app.invalidateTree();   // refetch open levels; keep the reader's expansion
+  if (document.body.classList.contains('is-editing')) {
+    const status = document.querySelector<HTMLElement>('.editor-status');
+    // Consume our own write's index generation while the save is still pending.
+    // Later external generations remain visible without replacing the buffer.
+    if (status?.dataset.state !== 'saving') {
+      announce('Files changed on disk. Close the editor to see the latest version.');
+      if (status) { status.dataset.state = 'error'; status.textContent = 'Files changed on disk. Close the editor to see the latest version before saving.'; }
+    }
+  } else if (current && current === state.current && sequence === routeSequence) {
+    try {
+      await refreshReadingDocument(current, () => current === state.current && sequence === routeSequence);
+    }
+    catch (e) {
+      if (current !== state.current || sequence !== routeSequence) { /* moved on */ }
+      // A folder's page file that was removed leaves the folder behind, and the
+      // folder is still a page: re-route so the reader lands on its listing.
+      else if (await fetchFolder(state.folder || current.id).catch(() => null)) void route();
+      else showError('This document is no longer available.');
+    }
+  } else if (!current && state.folder && sequence === routeSequence) {
+    // A generated folder page lists the folder's contents, which is exactly what
+    // just changed. Redraw it in place; if a page file has appeared for the
+    // folder, or the folder is gone, route again so the reader sees that instead.
+    const folder = state.folder;
+    const info = await fetchFolder(folder).catch(() => undefined);
+    const still = () => sequence === routeSequence && !state.current && state.folder === folder;
+    if (info === undefined || !still()) { /* unreachable, or the reader moved on: leave it */ }
+    else if (info && !info.page) await showFolderPage(info, still, { preserveScroll: true });
+    else void route();
+  }
+  await requestMapRebuild();
+}
+
+// ---- Shell contract -------------------------------------------------------
+// Every element id the app resolves through el(). This list is derived from the
+// el('...') call sites across app/js, NOT from index.html - it is the code's side
+// of the contract, so a template id that gets renamed or dropped fails HERE, by
+// name, instead of surfacing three modules away as "cannot read property of null".
+// The two overlay hosts are absent from this list because they are not in the
+// template either: overlays.ensureOverlayHosts() creates them at boot. They get
+// their own list and their own assertion, run AFTER that call.
+const REQUIRED_IDS = [
+  'accountBtn', 'brand', 'content', 'covBtn', 'crumbs', 'deleteBtn', 'doc-tree',
+  'docSearch', 'drawerClose', 'editBtn', 'footNext', 'footPrev', 'graphBtn',
+  'hamburger', 'live', 'newDocBtn', 'scrim', 'searchResults', 'themeBtn',
+  'tocList', 'treeList', 'treeSearch'
+];
+// Created by overlays.ensureOverlayHosts() rather than declared in index.html,
+// so they are asserted separately - AFTER that call, not before it.
+const REQUIRED_OVERLAY_IDS = ['graphOverlay', 'covOverlay'];
+/**
+ * Fail fast, and once, if index.html and the code have drifted apart. One error
+ * naming every missing id beats discovering them a null dereference at a time.
+ */
+function assertShellIds(): void {
+  const missing = REQUIRED_IDS.filter(id => !el(id));
+  if (!missing.length) return;
+  const err = new Error('index.html is missing ' + missing.length +
+    ' element id(s) the app requires: ' + missing.join(', '));
+  err.name = 'ShellTemplateError';   // named so the boot catch below can say WHAT broke
+  throw err;
+}
+/**
+ * The same check for the hosts overlays.ts builds. Separate because it can only
+ * run after ensureOverlayHosts(), and because a failure here means a different
+ * thing: not "the template drifted" but "the host module stopped building them",
+ * which is what would silently reintroduce the null dereference this contract
+ * exists to remove.
+ */
+function assertOverlayIds(): void {
+  const missing = REQUIRED_OVERLAY_IDS.filter(id => !el(id));
+  if (!missing.length) return;
+  const err = new Error('overlays.ensureOverlayHosts() did not create: ' + missing.join(', '));
+  err.name = 'ShellOverlayError';
+  throw err;
+}
+
+// ---- Boot -----------------------------------------------------------------
+/**
+ * Application entry point: wires theme/drawer/search/graph/coverage/authoring,
+ * loads site config and the server-backed requirement/test index, renders the
+ * initial tree, and resolves the starting route.
+ */
+async function boot(): Promise<void> {
+  // Before anything touches a node: prove the template still has what we ask for.
+  assertShellIds();
+  // Then create the two overlay hosts, BEFORE any module that asks about them.
+  // They are cheap empty divs; the modules that fill them may load much later,
+  // or never.
+  ensureOverlayHosts();
+  assertOverlayIds();
+  setupTheme();
+  setupSplitView();
+  appDrawer = setupDrawer();
+  setupDocSearch();
+  lazyOverlayButton('graphBtn', async () => (await import('./map-view.js')).setupGraphButton());
+  lazyOverlayButton('covBtn', async () => (await import('./coverage-view.js')).setupCoverageView());
+
+
+  try {
+    state.site = await loadSite();
+  } catch (e) {
+    return showError('Could not reach the server config. Is serve.py running? (' + errorMessage(e) + ')');
+  }
+  setReadOnly(!!state.site.readOnly);
+  if (!state.site.readOnly) {
+    const authoring = await import('./authoring.js');
+    authoring.setupEditButtons();
+    guardEditorLeave = authoring.guardEditorLeave;
+    guardEditorRoute = authoring.guardEditorRoute;
+    setupTestRun();
+  } else {
+    for (const id of ['editBtn', 'deleteBtn', 'newDocBtn']) mustEl(id).hidden = true;
+  }
+  setupProjectMenu(state.site, guardEditorLeave);
+
+  // Accounts. loadAuth() is also what mints this browser's CSRF token, so it has
+  // to happen before anything can be saved - and before the index calls below,
+  // which the server answers differently depending on who is asking.
+  await loadAuth();
+  if (!state.site.readOnly) setupAccountButton();
+  else mustEl('accountBtn').hidden = true;
+  if (signInRequired()) {
+    // BOOT IS SUSPENDED HERE, and that is the point. Nothing below this line -
+    // waitForIndex, buildRequirementIndex, the tree mount, route(), the change
+    // watcher - runs until there is a real session. Rendering the router behind
+    // a reactive `signedIn` flag instead would let all of it fire from a
+    // locked-out browser; the server refuses each request, so it is not a leak,
+    // but it turns "no request was made" into "a request was made and denied".
+    await new Promise(resolve => mountSignInWall(document.body, { onSignedIn: () => resolve(undefined) }));
+    await loadAuth();            // the session, and this browser's CSRF token
+  }
+  document.body.setAttribute('data-auth', auth.enabled ? (auth.user ? 'user' : 'anon') : 'off');
+
+  if (state.site.startPage) {
+    renderProjectStart(state.site);
+    // Hash-only bookmarks entered while on the splash still resolve by source at boot.
+    window.addEventListener('hashchange', () => { if (location.hash.startsWith('#/')) location.reload(); });
+    document.body.setAttribute('data-app-ready', '1');
+    return;
+  }
+
+  // Load any opted-in renderer plugins (config "plugins"). Fault-tolerant: a
+  // missing plugin or absent library is skipped, never blocking boot.
+  await loadPlugins(state.site.plugins || []);   // `plugins` is an optional site.json key
+
+  // On a first-time cold index build, wait here with a progress bar (the tree /
+  // search / map all need the index). Warm starts pass through instantly.
+  await waitForIndex();
+
+  // LAZY boot: do NOT discover + load every document body (the old ceiling). The
+  // global requirement/test index comes from the server's SQLite index; individual
+  // documents load on demand when viewed; the tree, all-docs search and the map are
+  // all server-backed. Boot cost is now flat regardless of corpus size.
+  state.docs = [];
+  await buildRequirementIndex(null, state.site.sources);
+
+  // Results are optional. Missing/empty feeds leave neutral badges, and even
+  // an unfinished request must not delay the document or the app-ready gate.
+  // Mounted badges subscribe to status changes, so results can arrive later.
+  void loadResults(state.site.sources).then(cov => {
+    setCoverageStatus(combinedStatus(requirementList(), testList(), cov));
+  }).catch(() => { /* no results -> badges stay neutral */ });
+
+  await mountShellIslands();
+  setupDrawerSearch();
+
+  window.addEventListener('hashchange', route);
+  if (!location.hash || !location.hash.startsWith('#/')) {
+    location.replace('#/' + defaultId());
+  }
+  await route();
+  startChangeWatcher();
+
+  document.body.setAttribute('data-app-ready', '1');
+}
+
+// Nothing awaits boot(), so until now a rejection anywhere inside it left the page
+// at data-app-ready="0" forever with the reason only in the devtools console - the
+// exact shape of "one line of JS threw and the whole Playwright suite timed out".
+// Report the cause through both channels: showError() puts it on screen for a human,
+// #live puts it somewhere a test can read without a console listener.
+boot().catch(e => {
+  const why = (e && e.name && e.name !== 'Error' ? e.name + ': ' : '') + (errorMessage(e) || String(e));
+  const msg = 'WebDocs failed to start. ' + why;
+  console.error(msg, e);
+  // showError() renders into #content - which may itself be the id that is missing,
+  // so fall back to the body rather than throwing a second time inside the handler.
+  try { showError(msg); } catch (e2) { document.body.appendChild(elem('div', 'doc-error', msg)); }
+  announce(msg);   // owns the missing-#live guard this path used to carry inline
+  // Not '1' - the ready gate still (correctly) never opens. But a distinct value
+  // lets a waiter fail immediately with a reason instead of sitting out its timeout.
+  document.body.setAttribute('data-app-ready', 'error');
+});

@@ -56,8 +56,9 @@ Every id in `assumes` and `next` must be a real document id.
 
 ## Edit an existing document
 
-To change a document you are reading, click the floating pencil button (✎, "Edit
-this document") at the bottom of the content. WebDocs turns the stored Markdown
+To change a document you are reading, click **Edit** (the pencil, "Edit
+this document") at the top right of the content. **Delete** is labelled separately
+below it. WebDocs turns the stored Markdown
 back into editable blocks — headings, text, lists, code, tables, quotes,
 images, requirement groups, and test cases — with the auto-generated section
 numbers stripped, so you only ever see and edit the heading text.
@@ -66,8 +67,8 @@ numbers stripped, so you only ever see and edit the heading text.
 
 ## Link to other documents
 
-Inside a text block, select some text and click the 🔗 button to open the link
-popover. Its URL box autocompletes against your documents: pick one and it
+Inside a text block, select some text and click **Link**, or press Ctrl/Cmd+K
+at a caret, to open the link dialog. Its URL box autocompletes against your documents: pick one and it
 inserts that document's id — no `.md`, no leading slash. Type a real URL (one
 starting with a scheme, `/`, `./`, `../`, `#`, `mailto:`, or `tel:`) and the
 document suggestions step aside so external links work freely. A bare domain
@@ -85,8 +86,36 @@ show up as structure, not clutter — use them freely but deliberately.
 
 ## Save
 
-Click Save. WebDocs serializes every block back to Markdown, writes the whole
+Click Save, or press Ctrl/Cmd+S. WebDocs serializes every block back to Markdown, writes the whole
 file to its source folder, and then re-discovers the set — so a brand-new
 document appears in the tree, search, and map straight away, with no config
-change and no restart. The header is always written with the four fields
+change and no restart. The editor stays open with a visible **Saved** status.
+Cancel returns to reading; if there are unsaved changes it first asks whether
+to discard them. Navigation, reload and closing the tab also guard unsaved work.
+The header is always written with the four fields
 `title`, `description`, `assumes`, and `next`, in that order.
+
+## Work with blocks
+
+Enter splits text at the caret into a new paragraph. Shift+Enter inserts a line
+break. Backspace at the start joins adjacent text blocks; Delete at the end
+joins the next one. In a list, Enter makes another item; Enter on an empty item
+returns to a paragraph. Plain Enter in a table cell keeps the cell intact.
+
+Each block has one actions handle. Click it for Move up/down, Insert below,
+Change block type (text, headings, quotes, lists and code), or Delete block.
+Drag the handle to reorder, including on touch screens. Escape moves focus to
+the handle; Up/Down move between handles, Enter opens its menu, and the menu
+supports Up/Down, Home/End and Escape. Alt+Up/Down move the current block.
+Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z undo and redo edits. A deleted block also offers
+an Undo message. Undo history lasts for this editing session.
+
+Tables offer insert-before, insert-after and delete controls for each row and
+column. The final column is kept. Image blocks show a preview; the URL and alt
+text remain editable. Ctrl/Cmd+Shift+G opens the inline image dialog.
+
+Open **Metadata** to edit the title, description and relationships. The panel
+starts collapsed to leave room for writing, and relationship pickers search by
+title or document id. A visible warning appears whenever Title differs from
+the first H1 (or the H1 is missing); update either field to make them agree.
+Requirement descriptions and test names grow to show their full text.

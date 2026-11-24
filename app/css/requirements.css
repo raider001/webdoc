@@ -70,12 +70,44 @@
 .tc-result-partial  { background: color-mix(in srgb, var(--cov-partial, #c98a00) 18%, transparent); color: var(--cov-partial, #c98a00); }
 .tc-result-untested { background: transparent; color: var(--cov-untested, #3b7fd4); box-shadow: inset 0 0 0 1px var(--cov-untested, #3b7fd4); }
 
-/* Deep-link flash when arriving via a trace link (#/<doc>?req=<id> or ?test=<id>). */
-tr.req-flash { animation: reqFlash 1.6s ease-out; }
+/* Deep-link flash when arriving via a trace link (#/<doc>?req=<id> or ?test=<id>).
+
+   NOT `tr.req-flash`, which is what this was: requirements.js's reveal() puts
+   the class on whatever element carries the id, and for ?test= that is the
+   `figure#test-<ID>` block, not a row. Restricted to <tr> the test half of the
+   documented behaviour never painted anything at all. */
+.req-flash { animation: reqFlash 1.6s ease-out; }
 @keyframes reqFlash {
   0% { background: var(--accent-soft); }
   100% { background: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  tr.req-flash { animation: none; outline: 2px solid var(--accent); outline-offset: -2px; }
+  .req-flash { animation: none; outline: 2px solid var(--accent); outline-offset: -2px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Mounted-component hosts inside the article.
+
+   From Phase 6 onward, requirement tables and test-case blocks are rendered by
+   Svelte components mounted INTO placeholder nodes that the Markdown pipeline
+   left behind. Those placeholders are structural, not visual: `display:contents`
+   removes the host's own box so its children lay out exactly as if they were
+   direct children of the article, and a wrapper div cannot break table or list
+   layout it happens to sit inside.
+
+   The class is also the marker the reader's post-render passes use to LEAVE
+   these subtrees alone - find-in-page, link resolution and image resolution all
+   skip .wd-mounted, because Svelte owns that DOM and a foreign mutation to it
+   would be silently reverted on the component's next update.
+
+   Landed in Phase 4, before anything is mounted inside the article, so the
+   contract exists and is testable before the first component relies on it.
+
+   NOTE ON SELECTORS. `display: contents` removes the host's BOX, not the host
+   itself - it is still a real element in the DOM tree, so a child combinator
+   still sees it. Every rule above is therefore written as a descendant selector
+   (`.req-tbl th`, not `.doc > figure`), and adding a `.doc > *` rule anywhere
+   would silently stop matching a mounted figure. app/css/app.css's `.doc`
+   rules are descendant selectors for the same reason.
+   --------------------------------------------------------------------------- */
+.wd-mounted { display: contents; }

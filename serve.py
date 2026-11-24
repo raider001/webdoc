@@ -13,16 +13,55 @@ Usage:
     python serve.py --config other.json
 """
 import argparse
+import base64
 import gzip
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
+import re
+import secrets
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import webdoc_access
+import webdoc_auth
+
+try:
+    import webdoc_index
+except Exception:                  # the index is optional; the ACL check is not
+    webdoc_index = None
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(HERE, "app")
+
+# Request body ceilings. Without these a single request can pin an arbitrary
+# amount of memory, and the JSON APIs have no business receiving megabytes.
+MAX_DOC_BODY = 2 * 1024 * 1024
+MAX_JSON_BODY = 1 * 1024 * 1024
+MAX_AUTH_BODY = 16 * 1024
+MAX_DATA_BYTES = 2 * 1024 * 1024
+
+
+class _Missing(Exception):
+    pass
+
+
+class _Refused(Exception):
+    """A policy refusal raised deep in a handler and turned into a 400 by the
+    dispatcher, so guard code can bail out without threading a return value back
+    through every caller."""
+
+
+class _ValidationError(Exception):
+    """An intentional user-facing validation message, written by this app.
+
+    Only raise with safe explanatory text, never an underlying exception or a
+    filesystem/runner diagnostic. Other exceptions remain generic on the wire.
+    """
 
 # Force correct content types. Windows' registry sometimes maps .js -> text/plain,
 # which breaks ES module loading; be explicit.
@@ -41,6 +80,8 @@ CONTENT_TYPES = {
     ".webp": "image/webp",
     ".ico": "image/x-icon",
     ".woff2": "font/woff2",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
     ".txt": "text/plain; charset=utf-8",
 }
 
@@ -50,12 +91,71 @@ def content_type(path):
     return CONTENT_TYPES.get(ext) or mimetypes.guess_type(path)[0] or "application/octet-stream"
 
 
+# Which static bodies are worth gzipping. Text-shaped payloads - JS, CSS, HTML,
+# JSON, SVG, Markdown, plain text - shrink 3-5x, and the app ships ~600 kB of
+# uncompressed JavaScript on a cold load, so this is the largest single win the
+# server has. PNG/JPEG/GIF/WebP/ICO/WOFF2 are ALREADY compressed: re-gzipping
+# them burns CPU and typically makes the body a few bytes LARGER, so they go out
+# verbatim. The test is on the media type, not the extension, so anything
+# mimetypes guesses is classified by the same rule.
+GZIP_TYPES = {
+    "application/javascript", "application/json", "application/xml",
+    "image/svg+xml",
+}
+
+# Below one TCP segment the body already arrives in a single packet, so
+# compressing it cannot save a round trip - meanwhile gzip's ~20 bytes of header
+# and trailer plus the Content-Encoding and Vary header lines can leave the
+# response LARGER than it started. 1400 is the number _json already uses (just
+# under the 1460-byte payload of a 1500-byte-MTU segment): one threshold, one
+# rule, nothing new to keep in sync.
+GZIP_MIN_BYTES = 1400
+
+
+def gzippable(ctype):
+    """Whether a response of this content type benefits from compression."""
+    base = (ctype or "").split(";", 1)[0].strip().lower()
+    return base.startswith("text/") or base in GZIP_TYPES
+
+
 def load_config(path):
     with open(path, encoding="utf-8") as fh:
         cfg = json.load(fh)
+    hosts = cfg.get("allowedHosts")
+    if hosts is not None and (not isinstance(hosts, list) or not hosts or any(
+            not isinstance(h, str) or not re.fullmatch(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]{1,5}", h)
+            for h in hosts)):
+        raise SystemExit("config error: allowedHosts must contain explicit host:port authorities")
+    projects = cfg.get("projects")
+    legacy = projects is None
+    if legacy:
+        projects = [{"name": "default", "title": cfg.get("siteTitle", "Documentation"),
+                     "sources": cfg.get("sources", []), "defaultDoc": cfg.get("defaultDoc"),
+                     "indexDir": cfg.get("indexDir")}]
+    if not isinstance(projects, list) or not projects:
+        raise SystemExit("config error: projects must be a non-empty list")
+    projects = [dict(p) for p in projects]
+    names, source_names, index_dirs = set(), set(), set()
+    base_index = os.environ.get("WEBDOC_INDEX_DIR") or cfg.get("indexDir") or os.path.join(HERE, ".webdoc-index")
+    for project in projects:
+        name = project.get("name", "")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name) or name in names:
+            raise SystemExit("config error: invalid or duplicate project name: " + str(name))
+        names.add(name)
+        project["title"] = project.get("title") or name
+        index_dir = base_index if legacy else (os.path.join(base_index, name) if os.environ.get("WEBDOC_INDEX_DIR") else project.get("indexDir") or os.path.join(base_index, name))
+        project["indexDir"] = os.path.abspath(os.path.join(HERE, index_dir))
+        key = os.path.normcase(os.path.realpath(project["indexDir"]))
+        if key in index_dirs:
+            raise SystemExit("config error: projects must have separate index locations")
+        index_dirs.add(key)
+        project["sources"] = [dict(s, project=name) for s in project.get("sources", [])]
     sources = []
-    for src in cfg.get("sources", []):
-        name = str(src["name"]).strip("/")
+    for src in [s for p in projects for s in p["sources"]]:
+        name = src["name"]
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name) or name in source_names:
+            raise SystemExit("config error: invalid or duplicate source name: " + str(name))
+        source_names.add(name)
         folder = os.path.abspath(os.path.join(HERE, src["path"]))
         if not os.path.isdir(folder):
             print(f"  ! source '{name}' path not found: {folder}")
@@ -66,70 +166,583 @@ def load_config(path):
             raise SystemExit(
                 f"config error: source '{name}' is missing a required 'component' name"
             )
+        if not re.fullmatch(r"[A-Za-z0-9]+", str(component).strip()):
+            raise SystemExit("config error: component must contain letters and digits only")
         # Optional per-source automated results (xUnit/JUnit). A path relative to
         # the source folder (served under /docs/<name>/) or an absolute served URL.
         sources.append({"name": name, "path": folder, "component": str(component).strip(),
-                        "testResults": src.get("testResults")})
+                        "testResults": src.get("testResults"), "runTests": src.get("runTests"),
+                        "project": src["project"], "readOnly": bool(src.get("readOnly", False)),
+                        "excludeDirectories": src.get("excludeDirectories", [])})
+    for project in projects:
+        project["sources"] = [s for s in sources if s["project"] == project["name"]]
+        default = project.get("defaultDoc")
+        if default and default.split("/", 1)[0] not in {s["name"] for s in project["sources"]}:
+            raise SystemExit("config error: defaultDoc must belong to its project")
+    # A runner config must never sit in a browser-writable document source.
+    if any(src.get("runTests") for src in sources):
+        from pathlib import Path
+        config_path = Path(path).resolve()
+        if any(config_path.is_relative_to(Path(src["path"]).resolve()) for src in sources):
+            raise SystemExit("runner configuration must be outside document sources")
     # Renderer plugins are bare file stems loaded from app/thirdpartyrenderer/.
     plugins = cfg.get("plugins", [])
     if not isinstance(plugins, list):
         raise SystemExit("config error: 'plugins' must be a list of plugin names")
+    # Accounts + access groups. Absent or "enabled": false means the server behaves
+    # exactly as it always has: no sign-in, anonymous read AND write.
+    auth = webdoc_auth.AuthConfig(cfg.get("auth"), HERE)
+    # Which meta relations an access lock is inherited along. "next" (Recommended
+    # next) is the default; add "assumes" to follow prerequisite edges too.
+    propagate_via = cfg.get("auth", {}).get("propagateVia") if isinstance(cfg.get("auth"), dict) else None
+    if not isinstance(propagate_via, list):
+        propagate_via = ["next"]
+    # The account file must never be reachable through a source mount, however the
+    # operator has arranged their folders.
+    if _within(auth.auth_dir, APP_DIR) or _within(APP_DIR, auth.auth_dir):
+        raise SystemExit(
+            "config error: the auth folder %s overlaps the served app folder %s; "
+            "move usersFile somewhere neither is served" % (auth.auth_dir, APP_DIR))
+    for src in sources:
+        if _within(auth.auth_dir, src["path"]) or _within(src["path"], auth.auth_dir):
+            raise SystemExit(
+                "config error: the auth folder %s overlaps the source '%s' (%s); "
+                "move usersFile outside every served source" % (auth.auth_dir, src["name"], src["path"]))
     return {
+        "readOnly": bool(cfg.get("readOnly", False)),
+        "allowedHosts": cfg.get("allowedHosts"),
+        "servedOverHttps": bool(cfg.get("servedOverHttps", False)),
+        "maxDocBodyBytes": max(1, min(16 * 1024 * 1024, _as_int(cfg.get("maxDocBodyBytes"), MAX_DOC_BODY))),
+        "projects": projects,
+        "legacy": legacy,
         "siteTitle": cfg.get("siteTitle", "Documentation"),
         "defaultDoc": cfg.get("defaultDoc"),
         "theme": cfg.get("theme", "auto"),
         "testResults": cfg.get("testResults"),
         "plugins": [str(p) for p in plugins],
         "indexBody": bool(cfg.get("indexBody", False)),
-        "indexDir": cfg.get("indexDir"),
+        # A preview worktree can reuse the real source config while keeping its
+        # writable SQLite index separate from the live dashboard's index.
+        "indexDir": os.environ.get("WEBDOC_INDEX_DIR") or cfg.get("indexDir"),
+        # Seconds between background filesystem re-scans that pick up .md files
+        # added/edited/removed OUTSIDE the app (a text editor, git, etc). 0/false
+        # disables the watcher; the app's own writes (PUT/DELETE) stay instant
+        # regardless, since those already call index.update_doc/delete_doc directly.
+        "watchIntervalSec": cfg.get("watchIntervalSec", 3),
         "sources": sources,
+        "auth": auth,
+        "propagateVia": [str(p) for p in propagate_via],
     }
 
 
+# Characters and shapes Windows silently normalises away, which is what makes
+# them dangerous: `page.md.` and `page.md::$DATA` both OPEN page.md, but neither
+# ENDS in ".md", so a routing decision made on the URL text sends them down the
+# non-Markdown branch - past document redaction and onto the looser asset rule.
+# Rejecting the spellings outright is simpler and safer than trying to normalise
+# them, and none of them is a filename anyone can create on Windows anyway.
+_HOSTILE_CHARS = re.compile(r'[<>:"|?*\x00-\x1f]')
+
+
+def long_path(path):
+    """Expand Windows aliases with the filesystem, never with URL heuristics."""
+    if os.name != "nt":
+        return os.path.realpath(path)
+    import ctypes
+    from ctypes import wintypes
+    fn = ctypes.WinDLL("kernel32", use_last_error=True).GetLongPathNameW
+    fn.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    fn.restype = wintypes.DWORD
+    size = fn(path, None, 0)
+    if not size:
+        raise OSError("cannot resolve path")
+    buf = ctypes.create_unicode_buffer(size)
+    if not fn(path, buf, size):
+        raise OSError("cannot resolve path")
+    return os.path.realpath(buf.value)
+
+
+def canonical_path(root, full):
+    """Refuse aliases/junction escapes, including aliases in a new file's parent."""
+    existing, suffix = full, []
+    while not os.path.exists(existing):
+        parent, leaf = os.path.split(existing)
+        if parent == existing:
+            return None
+        suffix.append(leaf)
+        existing = parent
+    try:
+        resolved = os.path.join(long_path(existing), *reversed(suffix))
+        base = long_path(os.path.abspath(root))
+        if os.path.commonpath([os.path.normcase(base), os.path.normcase(resolved)]) != os.path.normcase(base):
+            return None
+        # Require the source-relative spelling returned by the filesystem.
+        # A configured root may have different drive/root casing; the URL may
+        # not substitute a short name, symlink, junction or differently cased leaf.
+        if os.path.relpath(resolved, base) != os.path.relpath(full, os.path.abspath(root)):
+            return None
+        return resolved
+    except (OSError, ValueError):
+        return None
+
+
+def blocked_path(src, rel):
+    from fnmatch import fnmatchcase
+    patterns = [str(p).lower() for p in src.get("excludeDirectories", [])]
+    return any(p.startswith(".") or any(fnmatchcase(p.lower(), pat) for pat in patterns)
+               for p in rel.replace("\\", "/").split("/") if p)
+
+
 def safe_join(root, rel):
-    """Join rel onto root, refusing to escape root (path-traversal guard)."""
+    """Join rel onto root, refusing to escape root (path-traversal guard) and
+    refusing any path component that a filesystem would silently rewrite."""
     rel = rel.replace("\\", "/")
     parts = [p for p in rel.split("/") if p not in ("", ".", "..")]
+    for part in parts:
+        if _HOSTILE_CHARS.search(part) or part != part.rstrip(" ."):
+            return None
     full = os.path.abspath(os.path.join(root, *parts))
     root_abs = os.path.abspath(root)
     if full != root_abs and not full.startswith(root_abs + os.sep):
         return None
-    return full
+    return canonical_path(root, full)
+
+
+def safe_data_path(root, rel):
+    """Strict read-only data path, including symlink/junction containment."""
+    if not rel or '\\' in rel or '%' in rel:
+        return None
+    parts = rel.split('/')
+    if any(not p or p.startswith('.') or _HOSTILE_CHARS.search(p) or p != p.rstrip(' .') for p in parts):
+        return None
+    base = os.path.normcase(os.path.realpath(root))
+    full = os.path.realpath(os.path.join(root, *parts))
+    try:
+        if os.path.commonpath([base, os.path.normcase(full)]) != base:
+            return None
+    except ValueError:
+        return None
+    return canonical_path(root, full)
+
+
+def _as_int(value, default):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _within(inner, outer):
+    """True when `inner` is `outer` or sits underneath it."""
+    a, b = os.path.abspath(inner), os.path.abspath(outer)
+    return a == b or a.startswith(b + os.sep)
+
+
+def _inline_script_hashes(html_path):
+    """CSP hashes for the inline <script> blocks in app/index.html.
+
+    The app resolves the colour theme in an inline script so the first paint is
+    never the wrong theme. Hashing it keeps 'unsafe-inline' out of the policy
+    instead of trading that guarantee away.
+    """
+    try:
+        with open(html_path, encoding="utf-8") as fh:
+            html = fh.read()
+    except OSError:
+        return []
+    out = []
+    for m in re.finditer(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S | re.I):
+        digest = hashlib.sha256(m.group(1).encode("utf-8")).digest()
+        out.append("'sha256-%s'" % base64.b64encode(digest).decode("ascii"))
+    return out
 
 
 class DocHandler(BaseHTTPRequestHandler):
-    server_version = "WebDocTool/0.1"
+    # A connection that stops talking must not pin a worker thread forever: one
+    # client announcing a large body and then going silent would otherwise hold a
+    # thread indefinitely, and enough of them would hold all of them.
+    timeout = 30
+
+    server_version = "Kalynx"
+
+    def version_string(self):
+        return self.server_version
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        hosts = self.headers.get_all("Host") or []
+        port = self.server.server_port
+        allowed = self.config.get("allowedHosts")
+        if allowed is None:
+            allowed = ["127.0.0.1:" + str(port), "localhost:" + str(port), "[::1]:" + str(port)]
+        if len(hosts) != 1 or hosts[0].lower() not in {h.lower() for h in allowed}:
+            self._drain_early_body()
+            self._json(403, {"error": "host refused"})
+            return False
+        if self.config.get("readOnly") and self.command not in ("GET", "HEAD"):
+            self._drain_early_body()
+            self._json(405, {"error": "read-only"}, [("Allow", "GET, HEAD")])
+            return False
+        return True
+
+    def _drain_early_body(self):
+        # Avoid a TCP reset discarding the refusal when the client already sent
+        # a small body. Never wait for a slow upload before enforcing policy.
+        if getattr(self, '_body_consumed', False):
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            self.connection.settimeout(.05)
+            if 0 < length <= MAX_DOC_BODY:
+                self._drain(length)
+        except (ValueError, OSError):
+            pass
+        finally:
+            self.connection.settimeout(self.timeout)
+
+    def send_error(self, code, message=None, explain=None):
+        self._json(code, {"error": "request refused"})
+    protocol_version = "HTTP/1.0"   # one request per connection; no keep-alive framing to get wrong
     config = None  # attached to the class before serving
+    indexes = None  # project name -> isolated Index
     index = None   # webdoc_index.Index, attached before serving (None if disabled)
+    runs = None
+    users = None      # webdoc_auth.UserStore  (None when auth is disabled)
+    sessions = None   # webdoc_auth.SessionStore
+    # Document writes are serialised. The window between "may they write this?"
+    # and the write itself is small but real, and an interleaved pair of PUTs can
+    # land a body that no check ever approved. Writes are rare; a single lock is
+    # the honest fix.
+    write_lock = threading.Lock()
+    login_limiter = None      # strict, per ACCOUNT
+    ip_limiter = None         # loose, per SOURCE ADDRESS (a proxy is one address)
+    register_limiter = None
+    csp = None        # the Content-Security-Policy header value, built at start-up
+
+    # ---- per-request identity ---------------------------------------------
+    def _begin(self):
+        """Resolve who is calling, once per request, before any routing.
+
+        Sets self.principal (never None), self.session (the live session record or
+        None) and self.gate (the single object every access decision goes through).
+        """
+        self._select_project()
+        self._extra_cookies = []
+        self._asset_cache = {}      # folder -> readable, memoised for this request
+        cfg = self.config["auth"]
+        self.principal = webdoc_auth.anonymous_principal(cfg)
+        self.session = None
+        if cfg.enabled and self.sessions is not None:
+            cookies = webdoc_auth.parse_cookies(self.headers.get("Cookie"))
+            # A background poll is not activity. The app asks for the index status
+            # every few seconds; counting that as a touch made sessionIdleMinutes
+            # unreachable for as long as a tab stayed open.
+            path_now = urllib.parse.urlparse(self.path).path
+            touch = not path_now.startswith("/api/index/status")
+            sess = self.sessions.get(cookies.get(webdoc_auth.SESSION_COOKIE), touch=touch)
+            if sess:
+                rec = self.users.get(sess["username"]) if self.users else None
+                if rec and not rec.get("disabled"):
+                    self.principal = webdoc_auth.make_principal(cfg, rec)
+                    self.session = sess
+                else:
+                    # The account vanished or was disabled mid-session: drop it.
+                    self.sessions.destroy_user(sess["username"])
+        # The ACL map is authoritative only once the index has finished building.
+        # While it is building - or if it failed outright - an empty map must NOT
+        # read as "nothing is restricted", so the gate is marked not-ready and
+        # every document request answers 503 instead of handing out the file.
+        ready = bool(self.index) and self.index.state == "ready"
+        acl = self.index.access_map() if (cfg.enabled and ready) else {}
+        self.gate = webdoc_access.Gate(cfg, self.principal, acl, ready=ready or not cfg.enabled)
+
+    def _select_project(self):
+        # Resolve from an explicit URL parameter, or the globally unique mount.
+        # Instance attributes only: concurrent tabs never change a shared index.
+        cfg = type(self).config
+        projects = cfg.get("projects")
+        if not projects:  # existing embedded/test handlers remain compatible
+            return
+        url = urllib.parse.urlsplit(self.path)
+        qs = urllib.parse.parse_qs(url.query)
+        requested = qs.get("project", [None])[0]
+        path = urllib.parse.unquote(url.path)
+        match = re.match(r"/(?:docs|api/(?:tests|auto|xml|results))/([^/]+)", path)
+        source = match.group(1) if match else qs.get("source", [None])[0]
+        owner = next((p for p in projects if any(s["name"] == source for s in p["sources"])), None)
+        project = next((p for p in projects if p["name"] == requested), None) if requested else owner or projects[0]
+        if not project or (owner and project is not owner):
+            raise _Refused("unknown project or source outside project")
+        self.project = project
+        self.config = dict(cfg, sources=project["sources"], defaultDoc=project.get("defaultDoc"))
+        if self.indexes is not None:
+            self.index = self.indexes.get(project["name"])
+
+    def _client_ip(self):
+        """The address to rate-limit against.
+
+        X-Forwarded-For is believed ONLY when the peer is a configured trusted
+        proxy - otherwise any caller could forge a fresh identity for every login
+        attempt and walk straight past the limiter. With no proxy configured,
+        everyone behind one shares a bucket, which is why the per-IP threshold is
+        deliberately looser than the per-account one.
+        """
+        try:
+            peer = self.client_address[0]
+        except Exception:
+            return "?"
+        cfg = self.config["auth"]
+        if peer in cfg.trusted_proxies:
+            fwd = self.headers.get("X-Forwarded-For")
+            if fwd:
+                # Right-most hop is the one this trusted proxy actually saw.
+                hop = fwd.split(",")[-1].strip()
+                if hop and len(hop) <= 64:
+                    return hop
+        return peer
 
     # -- response helpers ---------------------------------------------------
-    def _send(self, status, body, ctype="application/octet-stream"):
-        if isinstance(body, str):
-            body = body.encode("utf-8")
+    def _security_headers(self):
+        cfg = self.config["auth"]
+        if not cfg.security_headers:
+            return
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        if self.config.get("servedOverHttps"):
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
+        if self.csp:
+            self.send_header("Content-Security-Policy", self.csp)
+
+    def _emit_headers(self, status, ctype, length, extra=()):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(length))
         self.send_header("Cache-Control", "no-store, must-revalidate")
+        self._security_headers()
+        for name, value in extra:
+            self.send_header(name, value)
+        for cookie in getattr(self, "_extra_cookies", ()):
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
+
+    # _send / _json return True - "a response has been sent". That makes
+    # `return self._json(...)` compose inside a guard: a guard can answer the
+    # request AND report that it did, in one statement. Without it a guard's
+    # refusal is indistinguishable from its approval (both None) and the caller
+    # carries on doing the thing it just refused.
+    def _send(self, status, body, ctype="application/octet-stream", extra=()):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self._emit_headers(status, ctype, len(body), extra)
         if self.command != "HEAD":
             self.wfile.write(body)
+        return True
 
-    def _json(self, status, obj):
+    def _json(self, status, obj, extra=()):
         body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
         # gzip large index payloads (the whole-graph payload is multi-MB at scale)
         # when the client accepts it - stdlib gzip, no dependency.
         if len(body) > 1400 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
             body = gzip.compress(body, 5)
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Encoding", "gzip")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store, must-revalidate")
-            self.end_headers()
+            self._emit_headers(status, "application/json; charset=utf-8", len(body),
+                               list(extra) + [("Content-Encoding", "gzip")])
             if self.command != "HEAD":
                 self.wfile.write(body)
-            return
-        self._send(status, body, "application/json; charset=utf-8")
+            return True
+        return self._send(status, body, "application/json; charset=utf-8", extra)
+
+    def _send_static(self, status, body, ctype, extra=()):
+        """Send bytes read off disk, gzipped when that is allowed AND worthwhile.
+
+        Only the ENCODING changes here - the bytes the client ends up holding are
+        the same bytes either way.
+
+        Vary: Accept-Encoding goes on EVERY compressible response, compressed or
+        not. A cache that stored the plain copy must not hand it to a client that
+        asked for gzip, and - the half that actually breaks - must not hand the
+        gzipped copy to a client that never offered gzip and will render it as
+        binary soup. The response is negotiated on that header, so it has to say
+        so whichever branch it took. Incompressible types (PNG, WOFF2) never
+        vary, so they do not carry it.
+        """
+        if not gzippable(ctype):
+            return self._send(status, body, ctype, extra)
+        extra = list(extra) + [("Vary", "Accept-Encoding")]
+        # No Accept-Encoding means "identity only", not "probably fine" - the
+        # same substring test _json uses, so there is one gzip rule in this file.
+        if len(body) >= GZIP_MIN_BYTES and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            body = gzip.compress(body, 5)
+            extra.append(("Content-Encoding", "gzip"))
+        # _send measures the body it is about to write, so Content-Length is the
+        # COMPRESSED length for free, and HEAD (which routes through here exactly
+        # like GET) still advertises what a GET would return while writing no
+        # body. Range requests are not a concern: this server has never served a
+        # 206 or advertised Accept-Ranges, so there is no partial response for
+        # compression to misalign.
+        return self._send(status, body, ctype, extra)
+
+    def _set_cookie(self, cookie):
+        self._extra_cookies.append(cookie)
+
+    # -- standard refusals ---------------------------------------------------
+    def _deny(self, eff=None, what="document"):
+        """403 with the groups that WOULD open it - the map shows a locked page
+        exists, so naming its groups tells the reader who to ask, and reveals
+        nothing they could not already see."""
+        groups = sorted((eff or {}).get("read") or ()) if eff else []
+        groups = [g for g in groups if g not in webdoc_access.UNPARSABLE]
+        return self._json(403, {"error": "restricted", "what": what,
+                                "requiresGroups": groups,
+                                "authenticated": self.principal.authenticated,
+                                "signInRequired": not self.principal.authenticated})
+
+    def _not_found(self):
+        """404 for anything hidden. A hidden document must be indistinguishable
+        from one that does not exist, so this is the ONLY response it ever gets."""
+        return self._json(404, {"error": "not found"})
+
+    def _not_ready(self):
+        """503 while the ACL map is unknown. Serving the document anyway would be
+        the bypass; pretending it is missing would be a lie the client caches."""
+        status = self.index.status() if self.index else {"state": "disabled"}
+        return self._json(503, {"error": "index building", "status": status},
+                          extra=[("Retry-After", "2")])
+
+    def _acl_blocked(self):
+        """True when access decisions cannot be made yet and this caller is not an
+        administrator."""
+        return (self.config["auth"].enabled and not self.gate.ready
+                and not self.principal.admin)
+
+    def _doc_id_for(self, src, fspath):
+        """The canonical index id for a file, derived from the RESOLVED filesystem
+        path rather than the URL.
+
+        Building it from the URL was a complete bypass: `/docs/Docs/./ref/cfg.md`
+        and `/docs/Docs/REF/CFG.md` both open the same file, but produce ids no
+        ACL is stored under - so the lookup came back "unrestricted" and the file
+        was served. relpath collapses `.` and `..`, and canonical_id fixes the
+        casing against what the index actually stored.
+        """
+        rel = os.path.relpath(fspath, src["path"]).replace("\\", "/")
+        doc_id = src["name"] + "/" + re.sub(r"\.md$", "", rel, flags=re.I)
+        if self.index:
+            canon = self.index.canonical_id(doc_id)
+            if canon:
+                return canon
+        if os.path.exists(fspath):
+            raise _Missing()
+        return doc_id
+
+    # -- request bodies ------------------------------------------------------
+    def _read_body(self, limit):
+        """-> bytes, or None if the request is unacceptable.
+
+        Rejects chunked transfer encoding and duplicated Content-Length outright:
+        this server does not decode chunked bodies, so accepting the header would
+        leave undrained bytes in the socket for the next parse to pick up.
+        """
+        self._body_consumed = True
+        if self.headers.get("Transfer-Encoding"):
+            return None
+        lengths = self.headers.get_all("Content-Length") or []
+        if len(lengths) > 1:
+            return None
+        try:
+            length = int(lengths[0]) if lengths else 0
+        except (TypeError, ValueError):
+            return None
+        if length < 0:
+            return None
+        if length > limit:
+            # Drain (and discard) what the client is still sending, up to a hard
+            # cap, so the refusal actually reaches them. Answering and hanging up
+            # mid-upload just gives the caller a connection reset and no reason.
+            self._drain(min(length, 32 * 1024 * 1024))
+            return None
+        if not length:
+            return b""
+        data = self.rfile.read(length)
+        return data if len(data) == length else None
+
+    def _drain(self, count):
+        """Discard up to `count` bytes of an unwanted body, giving up on a stall.
+        Bounded by the handler socket timeout, so a client that stops sending
+        halfway costs one timeout, not a permanently parked thread."""
+        left = count
+        try:
+            while left > 0:
+                chunk = self.rfile.read(min(65536, left))
+                if not chunk:
+                    break
+                left -= len(chunk)
+        except OSError:
+            pass
+
+    def _read_json(self, limit=MAX_JSON_BODY):
+        raw = self._read_body(limit)
+        if raw is None:
+            return None
+        try:
+            obj = json.loads(raw.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            return None
+        return obj if isinstance(obj, dict) else None
+
+    # -- CSRF / origin -------------------------------------------------------
+    def _same_origin(self):
+        """Reject a state-changing request whose Origin names a different site.
+        Belt to the SameSite cookie's braces - and the check that still holds if a
+        browser ever relaxes SameSite defaults."""
+        origin = self.headers.get("Origin")
+        if origin == "null":
+            return False
+        if not origin:
+            return True                       # non-browser client, or same-origin navigation
+        host = (self.headers.get("Host") or "").strip()
+        try:
+            parsed = urllib.parse.urlparse(origin)
+        except ValueError:
+            return False
+        return bool(parsed.netloc) and parsed.netloc == host
+
+    def _csrf_ok(self):
+        """Double-submit: the X-WebDoc-CSRF header must match the wd_csrf cookie,
+        and (once signed in) the token the session was issued.
+
+        A cross-site page can neither read our SameSite=Strict cookie nor set a
+        custom header without a CORS preflight we never answer, so a forged
+        request fails both halves.
+        """
+        if not self.config["auth"].enabled:
+            return True
+        sent = self.headers.get(webdoc_auth.CSRF_HEADER)
+        if not sent:
+            return False
+        cookies = webdoc_auth.parse_cookies(self.headers.get("Cookie"))
+        cookie_token = cookies.get(webdoc_auth.CSRF_COOKIE) or ""
+        if not cookie_token or not hmac.compare_digest(str(sent), str(cookie_token)):
+            return False
+        if self.session and not hmac.compare_digest(str(sent), str(self.session["csrf"])):
+            return False
+        return True
+
+    def _guard_mutation(self):
+        """Every unsafe method funnels through here. -> True when it may proceed."""
+        if not self._same_origin():
+            self._drain_early_body()
+            self._json(403, {"error": "cross-origin request refused"})
+            return False
+        if not self._csrf_ok():
+            self._drain_early_body()
+            self._json(403, {"error": "missing or invalid CSRF token", "csrf": True})
+            return False
+        return True
 
     def _index_route(self, rest):
         idx = self.index
@@ -138,23 +751,336 @@ class DocHandler(BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         first = rest.strip("/").split("/", 1)[0]
         if first == "status":
-            return self._json(200, idx.status())
+            st = idx.status()
+            if not self._readable_site():
+                # Boot needs state/pct to show the index-build progress bar; the
+                # document count is library data and waits for a sign-in.
+                st = {"state": st["state"], "pct": st["pct"], "generation": st["generation"], "version": st["version"], "docs": 0}
+            elif not self.gate.unrestricted:
+                # Start-page cards use this count. Hidden pages must leave no
+                # trace there either; count only documents visible in this gate.
+                st["docs"] = max(0, st["docs"] - sum(self.gate.is_hidden(doc_id) for doc_id in self.gate.acl)) if self.gate.ready else 0
+            return self._json(200, st)
         if idx.state != "ready":
             return self._json(503, {"error": "index building", "status": idx.status()})
+        # Everything below returns document data, so it is behind the sign-in wall
+        # whenever one is configured.
+        if not self._readable_site():
+            return self._deny(what="library")
+        if self._acl_blocked():
+            return self._not_ready()
+        gate = self.gate
         if first == "search":
             q = (qs.get("q") or [""])[0]
-            limit = int((qs.get("limit") or ["50"])[0] or 50)
-            offset = int((qs.get("offset") or ["0"])[0] or 0)
-            return self._json(200, {"results": idx.search(q, limit, offset)})
+            limit = max(0, min(200, _as_int((qs.get("limit") or ["50"])[0], 50)))
+            offset = max(0, min(10000, _as_int((qs.get("offset") or ["0"])[0], 0)))
+            return self._json(200, {"results": idx.search(q, limit, offset, gate)})
         if first == "tree":
-            return self._json(200, idx.tree((qs.get("path") or [""])[0]))
+            return self._json(200, idx.tree((qs.get("path") or [""])[0], gate))
+        if first == "folder":    # a folder's page: its own document, sub-folders, documents
+            info = idx.folder((qs.get("path") or [""])[0], gate)
+            # A folder of hidden pages answers exactly like one that does not exist.
+            return self._json(200, info) if info else self._not_found()
         if first == "resolve":   # batch-resolve in-body link targets -> doc ids
-            return self._json(200, {"resolved": idx.resolve((qs.get("base") or [""])[0], qs.get("p") or [])})
+            paths = (qs.get("p") or [])[:100]
+            return self._json(200, {"resolved": idx.resolve((qs.get("base") or [""])[0], paths, gate)})
         if first == "graph":
-            return self._json(200, idx.graph())
+            return self._json(200, idx.graph(gate))
         if first == "coverage":
-            return self._json(200, idx.coverage())
+            return self._json(200, idx.coverage(gate))
+        if first == "access":    # effective + declared ACL for one document
+            return self._access_info((qs.get("id") or [""])[0])
         return self._json(404, {"error": "unknown index endpoint"})
+
+    def _readable_site(self):
+        """Whether this caller may see ANY document data at all: signed in, or the
+        library is configured as publicly readable."""
+        cfg = self.config["auth"]
+        return (not cfg.enabled) or self.principal.authenticated or cfg.public_read
+
+    def _access_info(self, doc_id):
+        """What the editor's access panel needs: this document's declared block,
+        its effective (possibly inherited) ACL, and whether this user may change it."""
+        cfg = self.config["auth"]
+        if not doc_id:
+            return self._json(400, {"error": "id required"})
+        canon = self.index.canonical_id(doc_id) if self.index else None
+        # A hidden document and a nonexistent one must answer identically, or the
+        # difference between 404 and 200 becomes an oracle for enumerating hidden ids.
+        if not canon or self.gate.is_hidden(canon):
+            return self._not_found()
+        doc_id = canon
+        eff = self.gate.eff(doc_id)
+        # How many sections of THIS document are withheld from this reader. A
+        # document with any is read-only for them (saving it would overwrite the
+        # withheld sections), so the editor needs to know before offering an Edit
+        # button that could only ever fail.
+        redacted = self._redacted_count(doc_id)
+        return self._json(200, {
+            "id": doc_id,
+            "declared": self.index.declared_access(doc_id) if self.index else None,
+            "redactedSections": redacted,
+            "effective": {
+                "read": list(eff.get("read") or []) if eff.get("read") is not None else None,
+                "write": list(eff.get("write") or []) if eff.get("write") is not None else None,
+                "hidden": bool(eff.get("hidden")),
+                "explicit": bool(eff.get("explicit")),
+                "inheritedFrom": list(eff.get("inheritedFrom") or ()),
+            },
+            "canRead": self.gate.can_read(doc_id),
+            "canWrite": not self.config.get("readOnly") and self.gate.can_write(doc_id) and not (self._source(doc_id.split('/', 1)[0]) or {}).get('readOnly'),
+            "canEditAccess": not self.config.get("readOnly") and webdoc_access.can_edit_acl(cfg, self.principal),
+            "knownGroups": sorted(set(cfg.known_groups()) | set(self.index.access_groups() if self.index else [])),
+        })
+
+    def _redacted_count(self, doc_id):
+        """How many sections of one document this caller would not be served."""
+        cfg = self.config["auth"]
+        if not cfg.enabled or self.principal.admin:
+            return 0
+        source, _, rel = str(doc_id).partition("/")
+        src = self._source(source)
+        if not src or not rel:
+            return 0
+        fspath = safe_join(src["path"], rel + ".md")
+        if not fspath or not os.path.isfile(fspath):
+            return 0
+        try:
+            with open(fspath, encoding="utf-8-sig") as fh:
+                text = fh.read()
+        except OSError:
+            return 0
+        return webdoc_access.redact_sections(cfg, self.principal, text)[1]
+
+    # ---- authentication API ------------------------------------------------
+    def _auth_route_get(self, rest):
+        cfg = self.config["auth"]
+        first = rest.strip("/").split("/", 1)[0]
+        if first == "me":
+            return self._auth_me()
+        if first == "users":
+            if not (cfg.enabled and self.principal.admin):
+                return self._json(403, {"error": "administrators only"})
+            return self._json(200, {"users": self.users.list_users(),
+                                    "groups": [cfg.groups[k] for k in sorted(cfg.groups)]})
+        return self._json(404, {"error": "unknown auth endpoint"})
+
+    def _auth_me(self):
+        """Identity + the CSRF token this browser must echo on every write.
+
+        Also the ONLY place a wd_csrf cookie is minted, so the client can call it
+        once at boot and be able to write from then on.
+        """
+        cfg = self.config["auth"]
+        csrf = self.session["csrf"] if self.session else None
+        if cfg.enabled and not csrf:
+            # Anonymous callers still need a token: sign-in and registration are
+            # themselves state-changing and must not be forgeable cross-site.
+            cookies = webdoc_auth.parse_cookies(self.headers.get("Cookie"))
+            # Reuse the caller's token only if it LOOKS like one we issued. It is
+            # attacker-controlled and about to be written into a Set-Cookie header,
+            # where a stray ";" would inject cookie attributes.
+            csrf = cookies.get(webdoc_auth.CSRF_COOKIE) or ""
+            if not webdoc_auth.TOKEN_RE.match(csrf):
+                csrf = secrets.token_urlsafe(32)
+        if cfg.enabled:
+            self._set_cookie(webdoc_auth.cookie_header(
+                webdoc_auth.CSRF_COOKIE, csrf, http_only=False, secure=cfg.cookie_secure,
+                max_age=cfg.session_max_hours * 3600))
+        return self._json(200, {
+            "auth": cfg.to_json(),
+            "user": self.principal.to_json() if self.principal.authenticated else None,
+            "csrf": csrf,
+            "canWrite": not self.config.get("readOnly") and webdoc_access.can_write(cfg, self.principal, webdoc_access.UNRESTRICTED),
+            "canEditAccess": not self.config.get("readOnly") and webdoc_access.can_edit_acl(cfg, self.principal),
+            "needsBootstrap": False,  # administrator creation is an offline CLI step
+        })
+
+    def _auth_route_post(self, rest):
+        cfg = self.config["auth"]
+        if not cfg.enabled:
+            return self._json(404, {"error": "accounts are disabled on this server"})
+        first = rest.strip("/").split("/", 1)[0]
+        if first == "login":
+            return self._auth_login()
+        if first == "logout":
+            return self._auth_logout()
+        if first == "register":
+            return self._auth_register()
+        if first == "password":
+            return self._auth_change_password()
+        if first == "users":
+            return self._auth_admin_users(rest.strip("/").split("/")[1:])
+        return self._json(404, {"error": "unknown auth endpoint"})
+
+    def _auth_login(self):
+        cfg = self.config["auth"]
+        body = self._read_json(MAX_AUTH_BODY)
+        if body is None:
+            return self._json(400, {"error": "invalid request"})
+        username = str(body.get("username") or "")
+        password = str(body.get("password") or "")
+        ip = self._client_ip()
+        user_key = webdoc_auth.normalize_username(username)
+        # Two limiters with different jobs. Per-ACCOUNT is strict: it stops many
+        # hosts hammering one password. Per-ADDRESS is loose: it stops one host
+        # spraying many accounts, but must not lock a whole office (or everyone
+        # behind a reverse proxy) out because one colleague fat-fingered a login.
+        wait = self.login_limiter.retry_after("user:" + user_key) or self.ip_limiter.retry_after("ip:" + ip)
+        if wait:
+            return self._json(429, {"error": "Too many attempts. Try again in %d seconds." % wait,
+                                    "retryAfter": wait}, extra=[("Retry-After", str(wait))])
+        rec, reason = self.users.verify(username, password)
+        if not rec:
+            self.ip_limiter.fail("ip:" + ip)
+            self.login_limiter.fail("user:" + user_key)
+            if reason == "disabled":
+                return self._json(403, {"error": "That account is awaiting approval or has been disabled."})
+            # One message for "no such user" and "wrong password": the pair is what
+            # turns a login form into an account-enumeration oracle.
+            return self._json(401, {"error": "Incorrect username or password."})
+        # Only the ACCOUNT bucket is cleared. Clearing the address bucket would let
+        # anyone holding one valid credential reset it between guesses and spray
+        # every other account without limit.
+        self.login_limiter.reset("user:" + user_key)
+        return self._start_session(rec)
+
+    def _start_session(self, rec):
+        """Issue a brand-new session (and CSRF token) - never reuse an existing
+        one, so a token planted before sign-in cannot be ridden afterwards."""
+        cfg = self.config["auth"]
+        old = webdoc_auth.parse_cookies(self.headers.get("Cookie")).get(webdoc_auth.SESSION_COOKIE)
+        if old:
+            self.sessions.destroy(old)
+        token, csrf = self.sessions.create(rec["username"])
+        self.users.touch_login(rec["username"])
+        self._set_cookie(webdoc_auth.cookie_header(
+            webdoc_auth.SESSION_COOKIE, token, http_only=True, secure=cfg.cookie_secure,
+            max_age=cfg.session_max_hours * 3600))
+        self._set_cookie(webdoc_auth.cookie_header(
+            webdoc_auth.CSRF_COOKIE, csrf, http_only=False, secure=cfg.cookie_secure,
+            max_age=cfg.session_max_hours * 3600))
+        principal = webdoc_auth.make_principal(cfg, rec)
+        return self._json(200, {"ok": True, "user": principal.to_json(), "csrf": csrf})
+
+    def _auth_logout(self):
+        cfg = self.config["auth"]
+        token = webdoc_auth.parse_cookies(self.headers.get("Cookie")).get(webdoc_auth.SESSION_COOKIE)
+        if token:
+            self.sessions.destroy(token)
+        self._set_cookie(webdoc_auth.clear_cookie_header(webdoc_auth.SESSION_COOKIE, secure=cfg.cookie_secure))
+        self._set_cookie(webdoc_auth.clear_cookie_header(webdoc_auth.CSRF_COOKIE, secure=cfg.cookie_secure,
+                                                         http_only=False))
+        return self._json(200, {"ok": True})
+
+
+    def _auth_change_password(self):
+        cfg = self.config["auth"]
+        if not self.principal.authenticated:
+            return self._json(401, {"error": "Sign in first."})
+        body = self._read_json(MAX_AUTH_BODY)
+        if body is None:
+            return self._json(400, {"error": "invalid request"})
+        current = str(body.get("currentPassword") or "")
+        new = str(body.get("newPassword") or "")
+        ip = self._client_ip()
+        wait = self.login_limiter.retry_after("pw:" + ip)
+        if wait:
+            return self._json(429, {"error": "Too many attempts. Try again in %d seconds." % wait})
+        rec, _reason = self.users.verify(self.principal.username, current)
+        if not rec:
+            self.login_limiter.fail("pw:" + ip)
+            return self._json(403, {"error": "Your current password is not correct."})
+        ok, msg = webdoc_auth.validate_password(new, cfg.password_min_length)
+        if not ok:
+            return self._json(400, {"error": msg})
+        self.users.set_password(self.principal.username, new)
+        # Changing a password invalidates every session, including this one, then
+        # issues a fresh one so the tab the user is in keeps working.
+        self.sessions.destroy_user(self.principal.username)
+        return self._start_session(self.users.get(self.principal.username))
+
+    # -- administration ------------------------------------------------------
+    def _auth_admin_users(self, parts):
+        cfg = self.config["auth"]
+        if not self.principal.admin:
+            return self._json(403, {"error": "administrators only"})
+        action = parts[0] if parts else ""
+        body = self._read_json(MAX_AUTH_BODY)
+        if body is None:
+            return self._json(400, {"error": "invalid request"})
+        target = str(body.get("username") or "").strip()
+        if not target:
+            return self._json(400, {"error": "username required"})
+        rec = self.users.get(target)
+        if action == "create":
+            password = str(body.get("password") or "")
+            ok, msg = webdoc_auth.validate_password(password, cfg.password_min_length)
+            if not ok:
+                return self._json(400, {"error": msg})
+            created, err = self.users.create(
+                target, password, body.get("displayName"),
+                groups=self._clean_groups(body.get("groups")), admin=bool(body.get("admin")),
+                disabled=bool(body.get("disabled")))
+            if err:
+                return self._json(409, {"error": err})
+            return self._json(201, {"ok": True, "user": webdoc_auth.public_user(created)})
+        if not rec:
+            return self._json(404, {"error": "No such account."})
+        if action == "update":
+            self._guard_last_admin(rec, body)
+            if "groups" in body:
+                self.users.set_groups(target, self._clean_groups(body.get("groups")))
+            if "admin" in body:
+                self.users.set_admin(target, bool(body.get("admin")))
+            if "disabled" in body:
+                self.users.set_disabled(target, bool(body.get("disabled")))
+            if "displayName" in body:
+                self.users.set_display_name(target, body.get("displayName"))
+            # A permission change must bite immediately, not at the next sign-in.
+            self.sessions.destroy_user(target)
+            return self._json(200, {"ok": True, "user": webdoc_auth.public_user(self.users.get(target))})
+        if action == "reset-password":
+            password = str(body.get("password") or "")
+            ok, msg = webdoc_auth.validate_password(password, cfg.password_min_length)
+            if not ok:
+                return self._json(400, {"error": msg})
+            self.users.set_password(target, password)
+            self.sessions.destroy_user(target)
+            return self._json(200, {"ok": True})
+        if action == "delete":
+            if webdoc_auth.normalize_username(target) == webdoc_auth.normalize_username(self.principal.username):
+                return self._json(400, {"error": "You cannot delete the account you are signed in as."})
+            if rec.get("admin") and self.users.admin_count(cfg.admin_groups) <= 1:
+                return self._json(400, {"error": "That is the last administrator."})
+            self.users.delete(target)
+            self.sessions.destroy_user(target)
+            return self._json(200, {"ok": True})
+        return self._json(404, {"error": "unknown action"})
+
+    def _guard_last_admin(self, rec, body):
+        """Refuse an edit that would leave the server with no usable administrator -
+        a lockout nobody can undo without hand-editing the account file."""
+        cfg = self.config["auth"]
+        was_admin = bool(rec.get("admin")) or cfg.is_admin_groups(rec.get("groups") or ())
+        # Losing the flag, being disabled, OR being removed from every admin group
+        # all end administrator rights, so all three count as "removing".
+        losing_groups = ("groups" in body and was_admin
+                         and not cfg.is_admin_groups(self._clean_groups(body.get("groups")))
+                         and not (body.get("admin", rec.get("admin"))))
+        removing = (("admin" in body and not body.get("admin")) or
+                    ("disabled" in body and body.get("disabled")) or losing_groups)
+        if was_admin and removing and self.users.admin_count(cfg.admin_groups) <= 1:
+            raise _ValidationError("That is the last administrator; promote another account first.")
+
+    def _clean_groups(self, raw):
+        """Only groups declared in config.json may be assigned - otherwise an admin
+        typo silently creates a group nothing grants and the user loses access."""
+        cfg = self.config["auth"]
+        if not isinstance(raw, list):
+            return []
+        known = set(cfg.known_groups())
+        return [g for g in webdoc_auth.normalize_groups(raw) if g in known]
 
     def _file(self, fspath):
         try:
@@ -162,7 +1088,11 @@ class DocHandler(BaseHTTPRequestHandler):
                 data = fh.read()
         except OSError:
             return self._json(404, {"error": "not found"})
-        self._send(200, data, content_type(fspath))
+        if content_type(fspath).startswith("text/html"):
+            # Match the universal-newline text used by _inline_script_hashes
+            # and the browser's HTML parser, even after a CRLF checkout.
+            data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        self._send_static(200, data, content_type(fspath))
 
     def _source(self, name):
         for s in self.config["sources"]:
@@ -175,6 +1105,7 @@ class DocHandler(BaseHTTPRequestHandler):
             names = sorted(os.listdir(fsdir), key=str.lower)
         except OSError:
             return self._json(404, {"error": "not found"})
+        filtering = not self.gate.unrestricted
         entries = []
         for n in names:
             if n.startswith("."):
@@ -182,11 +1113,84 @@ class DocHandler(BaseHTTPRequestHandler):
             fp = os.path.join(fsdir, n)
             is_dir = os.path.isdir(fp)
             rel_child = (rel + "/" + n).strip("/")
+            if blocked_path(self._source(name), rel_child) or not safe_join(self._source(name)["path"], rel_child):
+                continue
+            if filtering and not self._listing_visible(name, rel_child, is_dir):
+                continue
             url = "/docs/" + name + "/" + urllib.parse.quote(rel_child)
             if is_dir:
                 url += "/"
             entries.append({"name": n, "type": "dir" if is_dir else "file", "url": url})
+        if filtering and names and not entries:
+            return self._not_found()
         self._json(200, {"type": "dir", "source": name, "path": rel, "entries": entries})
+
+    def _listing_visible(self, source, rel_child, is_dir):
+        """Whether one directory-listing entry may be named to this caller.
+
+        The listing is a second way to discover what exists, so it applies the same
+        rule as the tree: a hidden document is omitted, and a folder that contains
+        nothing but hidden documents is omitted with it.
+        """
+        base = source + "/" + rel_child
+        if is_dir:
+            if not self.index:
+                return True
+            # Exactly the rule the drawer's tree uses, so the two never disagree:
+            # a folder is worth naming only if something inside it is visible.
+            level = self.index.tree(base, self.gate)
+            return bool(level["docs"] or level["folders"])
+        if rel_child.lower().endswith(".md"):
+            return not self.gate.is_hidden(base[:-3])
+        return self._asset_readable(source, rel_child)
+
+    def _asset_readable(self, source, rel_child):
+        """Whether a non-Markdown file (an image, an XML report) may be served.
+
+        A file carries no metadata of its own, so it borrows its answer from the
+        documents around it, in two steps:
+
+        1. If any page in the library LINKS to it, it is exactly as visible as
+           those pages: readable if the caller can read at least one of them. That
+           is the honest rule - a diagram embedded in a public page is public, and
+           the same diagram embedded only in a locked page is locked.
+        2. If nothing links to it, fall back to the folder: every document in the
+           nearest folder above it that has any must be readable. Nothing in the
+           app can surface an unreferenced file, so being strict there costs
+           nobody anything.
+
+        Step 1 exists because the folder rule alone was unusable: one locked page
+        at a source root made every logo and diagram at that level disappear.
+        """
+        if blocked_path(self._source(source), rel_child):
+            return False
+        if self.gate.unrestricted:
+            return True
+        if not self.index:
+            return self._readable_site()
+        asset_path = source + "/" + rel_child
+        referrers = self.index.asset_referrers(asset_path)
+        if referrers:
+            return any(self.gate.can_read(d) for d in referrers)
+        folder = asset_path.rsplit("/", 1)[0]
+        # Memoised per request: a directory listing asks this once per file, and
+        # every file in the same folder resolves to the same query.
+        if folder in self._asset_cache:
+            return self._asset_cache[folder]
+        # Walk UP to the nearest folder that actually holds documents. A folder of
+        # nothing but images has no ACL of its own; without this it fell through to
+        # "any signed-in account", so dropping a diagram beside a locked chapter -
+        # in its own subfolder - published it.
+        probe = folder
+        siblings = []
+        while True:
+            siblings = self.index.docs_in_folder(probe)
+            if siblings or "/" not in probe:
+                break
+            probe = probe.rsplit("/", 1)[0]
+        ok = self._readable_site() if not siblings else all(self.gate.can_read(d) for d in siblings)
+        self._asset_cache[folder] = ok
+        return ok
 
     def _res_url(self, s):
         """Resolve a source's automated-results reference to a fetchable URL. A
@@ -197,15 +1201,48 @@ class DocHandler(BaseHTTPRequestHandler):
             return None
         if tr.startswith("/") or "://" in tr:
             return tr
-        return "/docs/" + s["name"] + "/" + tr.lstrip("/")
+        return "/api/results/" + s["name"]
+
+    def _results_get(self, name):
+        src = self._source(name)
+        if not src or not self._readable_site():
+            return self._not_found()
+        if self._acl_blocked():
+            return self._not_ready()
+        rel = src.get("testResults") or self.config.get("testResults")
+        if not isinstance(rel, str) or rel.startswith("/") or "://" in rel:
+            return self._not_found()
+        # Only the exact configured feed may use a dot filename through this
+        # API. Dot directories and excluded components remain inaccessible.
+        parent, leaf = os.path.split(rel.replace("\\", "/"))
+        from fnmatch import fnmatchcase
+        excluded = any(fnmatchcase(leaf.lower(), str(p).lower()) for p in src.get('excludeDirectories', []))
+        if not leaf or blocked_path(src, parent) or excluded:
+            return self._not_found()
+        path = safe_join(src["path"], rel)
+        if not path or not os.path.isfile(path):
+            return self._not_found()
+        if self._can_run_source(name):
+            return self._file(path)
+        return self._reader_xml(path, name)
 
     def _site_json(self):
         cfg = self.config
         self._json(200, {
+            "readOnly": bool(cfg.get("readOnly", False)),
             "siteTitle": cfg["siteTitle"],
             "defaultDoc": cfg["defaultDoc"],
+            "legacy": cfg.get("legacy", False),
+            "project": getattr(self, "project", {}).get("name"),
+            "projects": [{"name": p["name"], "title": p["title"],
+                          "description": p.get("description"), "defaultDoc": p.get("defaultDoc"),
+                          "sources": [s["name"] for s in p["sources"]]} for p in cfg.get("projects", [])],
             "theme": cfg["theme"],
             "plugins": cfg.get("plugins", []),
+            # The auth block is published unauthenticated on purpose: the browser
+            # has to know whether to render a sign-in wall before it can sign in.
+            # It carries policy only - never an account, never a token.
+            "auth": cfg["auth"].to_json(),
             "sources": [
                 {"name": s["name"], "url": "/docs/" + s["name"] + "/",
                  "component": s["component"], "testResults": self._res_url(s)}
@@ -215,31 +1252,269 @@ class DocHandler(BaseHTTPRequestHandler):
 
     # -- routing ------------------------------------------------------------
     def do_GET(self):
-        self.route()
+        self._dispatch(self.route)
 
     def do_HEAD(self):
-        self.route()
+        self._dispatch(self.route)
+
+    def do_POST(self):
+        self._dispatch(self._post)
+
+    def _dispatch(self, fn):
+        """Every verb enters here: resolve the caller once, run the route, and turn
+        a policy refusal into a clean 400 instead of a stack trace."""
+        if self.config.get("readOnly") and self.command not in ("GET", "HEAD"):
+            return self._json(405, {"error": "read-only"}, [("Allow", "GET, HEAD")])
+        try:
+            self._begin()
+        except _Refused as e:
+            return self._json(404, {"error": "request failed"})
+        except Exception as e:
+            return self._json(500, {"error": "service unavailable"})
+        try:
+            fn()
+        except _Missing:
+            self._not_found()
+        except _ValidationError as exc:
+            self._json(400, {"error": str(exc)})
+        except _Refused:
+            self._json(400, {"error": "request refused"})
+        except Exception as exc:
+            print("  ! request failed:", exc)
+            self._json(500, {"error": "request failed"})
+
+    def _run_described(self, source, write=False):
+        if not self.index or self.index.state != "ready":
+            raise ValueError("test index is not ready")
+        tests = self.index.coverage(self.gate)["tests"]
+        return {t["id"]: t for t in tests if t["docId"].split("/", 1)[0] == source
+                and (not write or self.gate.can_write(t["docId"]))}
+
+    def _can_run_source(self, source):
+        if self.config.get("readOnly") or self.runs is None or source not in self.runs.specs:
+            return False
+        described = self._run_described(source)
+        configured = self.runs.specs[source]['cases']
+        return self._may_run(source, list(configured), described)
+
+    def _may_run(self, source, ids, described=None):
+        if not self._can_write_source(source):
+            return False
+        described = described if described is not None else self._run_described(source)
+        return all(tid in described and self.gate.can_write(described[tid]["docId"]) for tid in ids)
+
+
+    def _runs_get(self, path):
+        if not self._readable_site(): return self._deny(what="test runs")
+        try:
+            if self.runs is None: raise ValueError("test running unavailable")
+            if path == "/api/runs":
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                source = qs.get("source", [""])[0]
+                if not self._source(source): raise ValueError("unknown source")
+                described = self._run_described(source)
+                catalog = self.runs.catalog(source, described)
+                for tid, item in catalog.items():
+                    if not self._may_run(source, [tid], described):
+                        for key in list(item):
+                            if key not in ("automated", "runnable", "result", "lastRun", "duration", "startedBy"):
+                                del item[key]
+                    item["runnable"] = item["runnable"] and self._can_write_source(source) and self.gate.can_write(described[tid]["docId"])
+                return self._json(200, {"cases": catalog})
+            rid = path[len("/api/runs/"):]
+            if not re.fullmatch(r"[a-f0-9]{32}", rid): raise KeyError("unknown run")
+            rec = self.runs.status(rid)
+            if not self._source(rec['source']): return self._not_found()
+            described = self._run_described(rec["source"])
+            # Output may mention any selected case: refuse the whole status if one is hidden.
+            if any(tid not in described for tid in rec["ids"]): return self._not_found()
+            if not self._may_run(rec["source"], rec["ids"], described):
+                rec = {k: rec[k] for k in ("id", "source", "ids", "state", "duration", "startedBy") if k in rec}
+            return self._json(200, rec)
+        except KeyError: return self._not_found()
+        except (ValueError, OSError) as exc: return self._json(400, {"error": "request failed"})
+
+    def _post(self):
+        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
+        if path == "/api/runs":
+            return self._runs_post()
+        if not path.startswith("/api/auth/"):
+            return self._json(405, {"error": "unsupported"})
+        # Sign-in and registration change server state, so they are CSRF-guarded
+        # like any other write; /api/auth/me hands the browser the token first.
+        if not self._guard_mutation():
+            return
+        return self._auth_route_post(path[len("/api/auth/"):])
 
     def route(self):
         path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
+        if path == "/api/runs" or path.startswith("/api/runs/"):
+            return self._runs_get(path)
         if path == "/site.json":
             return self._site_json()
+        if path.startswith("/api/auth/"):
+            return self._auth_route_get(path[len("/api/auth/"):])
         if path.startswith("/api/index/"):
             return self._index_route(path[len("/api/index/"):])
+        if path.startswith("/api/data/"):
+            return self._data_get(path[len("/api/data/"):])
         if path.startswith("/api/tests/"):
             return self._tests_get(path[len("/api/tests/"):])
         if path.startswith("/api/auto/"):
             return self._auto_get(path[len("/api/auto/"):])
         if path.startswith("/api/xml/"):
             return self._xml_list(path[len("/api/xml/"):])
+        if path.startswith("/api/results/"):
+            return self._results_get(path[len("/api/results/"):])
         if path.startswith("/docs/"):
             return self.route_docs(path[len("/docs/"):])
         if path in ("", "/"):
             path = "/index.html"
+        # The app shell itself is always served: the sign-in screen is part of it,
+        # so gating it would leave a signed-out visitor with a blank page.
         fspath = safe_join(APP_DIR, path.lstrip("/"))
         if fspath and os.path.isfile(fspath):
             return self._file(fspath)
         return self._json(404, {"error": "not found", "path": path})
+
+    def _data_folder_visible(self, source, rel, kind):
+        """Also discover data-only directories without naming unreadable files."""
+        if self.gate.unrestricted or self._listing_visible(source['name'], rel, True):
+            return True
+        pending, visited, budget = [(rel, 0)], set(), 1000
+        while pending and budget:
+            current, depth = pending.pop()
+            folder = safe_data_path(source['path'], current) if current else os.path.realpath(source['path'])
+            if not folder or folder in visited or depth > 16:
+                continue
+            visited.add(folder)
+            try:
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        budget -= 1
+                        child = (current + '/' + entry.name).strip('/')
+                        full = safe_data_path(source['path'], child) if not blocked_path(source, child) else None
+                        if full and os.path.isdir(full):
+                            pending.append((child, depth + 1))
+                        elif full and entry.name.lower().endswith('.' + kind) and self._asset_readable(source['name'], child):
+                            return True
+                        if not budget:
+                            break
+            except OSError:
+                continue
+        return False
+
+    def _data_get(self, action):
+        """CSV/JSON GET/HEAD only; borrow the existing asset access policy."""
+        if not self._readable_site():
+            return self._deny(what="data")
+        if self._acl_blocked():
+            return self._not_ready()
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        if action == 'page':
+            return self._table_page(qs)
+        if action == 'tree':
+            path = (qs.get('path') or [''])[0]
+            kind = (qs.get('format') or [''])[0]
+            if kind not in ('csv', 'json'):
+                return self._json(400, {'error': 'format must be csv or json'})
+            if not path:
+                return self._json(200, {'folders': [s['name'] for s in self.config['sources']
+                    if self._data_folder_visible(s, '', kind)], 'files': []})
+            name, _, rel = path.partition('/')
+            source = self._source(name)
+            folder = safe_data_path(source['path'], rel) if source and rel and not blocked_path(source, rel) else (source['path'] if source and not rel else None)
+            if not folder or not os.path.isdir(folder):
+                return self._not_found()
+            folders, files = [], []
+            try:
+                names = sorted(os.listdir(folder))
+            except OSError:
+                return self._not_found()
+            for entry in names:
+                child = (rel + '/' + entry).strip('/')
+                full = safe_data_path(source['path'], child) if not blocked_path(source, child) else None
+                if not full:
+                    continue
+                if os.path.isdir(full):
+                    if self._data_folder_visible(source, child, kind):
+                        folders.append(entry)
+                elif entry.lower().endswith('.' + kind) and self._asset_readable(name, child):
+                    files.append({'id': name + '/' + child, 'title': entry})
+                if len(folders) + len(files) >= 1000:
+                    break
+            return self._json(200, {'folders': folders, 'files': files})
+        if action != 'file':
+            return self._not_found()
+        identifier = (qs.get('src') or [''])[0]
+        name, _, rel = identifier.partition('/')
+        source = self._source(name)
+        full = safe_data_path(source['path'], rel) if source and not blocked_path(source, rel) else None
+        if not full or not rel.lower().endswith(('.csv', '.json')) or not os.path.isfile(full):
+            return self._not_found()
+        # Match the raw-asset endpoint: never name a refused data file.
+        if not self._asset_readable(name, rel):
+            return self._not_found()
+        try:
+            with open(full, 'rb') as stream:
+                data = stream.read(MAX_DATA_BYTES + 1)
+        except OSError:
+            return self._not_found()
+        if len(data) > MAX_DATA_BYTES:
+            return self._json(413, {'error': 'Data source exceeds 2 MiB'})
+        etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+        if self.headers.get('If-None-Match') == etag:
+            return self._send(304, b'', content_type(full), [('ETag', etag)])
+        return self._send_static(200, data, 'text/csv; charset=utf-8' if rel.lower().endswith('.csv') else 'application/json; charset=utf-8', [('ETag', etag)])
+
+    def _table_page(self, qs):
+        # Same source resolution, traversal guard, sign-in/ACL wall and asset
+        # visibility as _data_get. The database itself is never sent to a client.
+        from webdoc_tables import Tables
+        identifier = (qs.get('src') or [''])[0]
+        name, _, rel = identifier.partition('/')
+        source = self._source(name)
+        full = safe_data_path(source['path'], rel) if source and not blocked_path(source, rel) else None
+        if not full or not rel.lower().endswith('.json') or not self._asset_readable(name,rel):
+            return self._not_found()
+        tables = None
+        try:
+            with open(full, encoding='utf-8-sig') as stream:
+                raw = stream.read(65537)
+            if len(raw)>65536: raise ValueError('not a bounded table descriptor')
+            spec = json.loads(raw)
+            if spec.get('webdocTable') != 1: raise ValueError('not an indexed table descriptor')
+            database = spec['database']
+            if not isinstance(database,str) or not re.fullmatch(r'[A-Za-z0-9_.-]+\.sqlite',database) or database in ('.','..'):
+                raise ValueError('invalid table database')
+            db_rel = (rel.rsplit('/',1)[0]+'/' if '/' in rel else '')+database
+            db_path = safe_data_path(source['path'],db_rel)
+            if not db_path or not self._asset_readable(name,db_rel): return self._not_found()
+            filter_text=(qs.get('filters') or ['[]'])[0]; sort_text=(qs.get('sort') or ['[]'])[0]
+            if len(filter_text)+len(sort_text)>16384: raise ValueError('settings too large')
+            limit=int((qs.get('limit') or ['100'])[0])
+            tables=Tables(db_path,readonly=True)
+            # Do not return records belonging to restricted sections: generated
+            # assets cannot reproduce per-section redaction safely.
+            visible=lambda owner: self.gate.can_read(owner) and not self._redacted_count(owner)
+            result=tables.page(spec['dataset'],json.loads(filter_text),json.loads(sort_text),
+                (qs.get('cursor') or [None])[0],limit,(qs.get('search') or [''])[0],
+                None if self.gate.unrestricted else visible)
+            # The stored subsection string remains the filter key. Present its
+            # companion document link only after server-side filtering/paging.
+            if spec['dataset'] == 'questions':
+                for row in result['rows']:
+                    if isinstance(row.get('subsection'),str) and isinstance(row.get('link'),str):
+                        row['subsection']={'label':row['subsection'],'href':'#/'+row['link']}
+            return self._json(200,result)
+        except (ValueError,KeyError,TypeError,IndexError) as error:
+            return self._json(400,{'error':'invalid request'})
+        except OSError:
+            return self._not_found()
+        except Exception:
+            return self._json(503,{'error':'table unavailable; retry or refine the filter'})
+        finally:
+            if tables: tables.close()
 
     def route_docs(self, rest):
         rest = rest.strip("/")
@@ -247,14 +1522,127 @@ class DocHandler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "no source"})
         name, _, rel = rest.partition("/")
         src = self._source(name)
+        if src and blocked_path(src, rel):
+            return self._not_found()
         if not src:
             return self._json(404, {"error": f"unknown source '{name}'"})
         fspath = safe_join(src["path"], rel)
         if not fspath or not os.path.exists(fspath):
             return self._json(404, {"error": "not found"})
+        if self._acl_blocked():
+            return self._not_ready()
         if os.path.isdir(fspath):
+            if not self._readable_site():
+                return self._deny(what="library")
             return self._listing(name, rel, fspath)
+        if rel.lower().endswith(".md"):
+            return self._doc_file(src, fspath)
+        if rel.lower().endswith(('.sqlite','.sqlite-wal','.sqlite-shm')):
+            return self._not_found()
+        # The per-source results sidecars are served through this same mount.
+        # They are index data, not documents, and have their own filtered API -
+        # serving the raw file would hand over results for pages the caller
+        # cannot read.
+        if os.path.basename(fspath) in (self.TESTS_FILE, self.AUTO_FILE):
+            if not self._can_write_source(name):
+                return self._not_found()
+        if not self._asset_readable(name, rel):
+            # 403 confirms the file exists; 404 does not. Only say "forbidden"
+            # when the folder itself is visible - otherwise probing filenames one
+            # at a time would map out a folder that is meant to be invisible.
+            folder = (name + "/" + rel).rsplit("/", 1)[0]
+            level = self.index.tree(folder, self.gate) if self.index else None
+            visible = bool(level and (level["docs"] or level["folders"]))
+            if visible and self._readable_site():
+                return self._deny(what="file")
+            return self._not_found()
+        if rel.lower().endswith(".xml") and not self._can_run_source(name):
+            return self._reader_xml(fspath, name)
         return self._file(fspath)
+
+    def _reader_xml(self, path, source):
+        import xml.etree.ElementTree as ET
+        try:
+            with open(path, "rb") as stream:
+                raw = stream.read(16 * 1024 * 1024 + 1)
+            if len(raw) > 16 * 1024 * 1024 or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+                return self._not_found()
+            text = raw.decode("utf-8-sig")
+            if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
+                return self._not_found()
+            original = ET.fromstring(text)
+            suite = ET.Element("testsuite")
+            owners = self.index.result_key_owner() if self.index else {}
+            for case in original.iter("testcase"):
+                # IDs are necessary for coverage matching; never echo arbitrary
+                # names that could themselves be paths or runner output.
+                identity = case.get("classname", "")
+                name = case.get("name", "")
+                ids = set(re.findall(r"[TR]_[A-Za-z0-9]+_[A-Za-z0-9_.-]+", identity + ' ' + name))
+                for prop in case.findall('./properties/property'):
+                    if prop.get('name') in ('requirement', 'test', 'testId', 'webdoc.id'):
+                        ids.add(prop.get('value', ''))
+                if not self.gate.unrestricted and not any(
+                        owners.get(tid, '').startswith(source + '/') and self.gate.can_read(owners[tid])
+                        and not self._redacted_count(owners[tid]) for tid in ids if tid in owners):
+                    continue
+                strict = re.compile(r"[A-Za-z0-9_.-]{1,200}")
+                clean = ET.SubElement(suite, "testcase", classname=identity if strict.fullmatch(identity) else "case",
+                                      name=name if strict.fullmatch(name) else "case")
+                # Keep coverage ownership without retaining arbitrary runner
+                # properties, stdout, failure messages or path-shaped names.
+                for prop in case.findall('./properties/property'):
+                    value = prop.get('value', '')
+                    if prop.get('name') == 'requirement' and re.fullmatch(r'[TR]_[A-Za-z0-9]+_[A-Za-z0-9_.-]+', value):
+                        if self.gate.unrestricted or value in owners and self.gate.can_read(owners[value]):
+                            props = clean.find('properties')
+                            if props is None:
+                                props = ET.SubElement(clean, 'properties')
+                            ET.SubElement(props, 'property', name='requirement', value=value)
+                duration = case.get("time", "0")
+                clean.set("time", duration if re.fullmatch(r"[0-9.]{1,30}", duration) else "0")
+                for state in ("failure", "error", "skipped"):
+                    if case.find(state) is not None:
+                        ET.SubElement(clean, state)
+            return self._send(200, ET.tostring(suite), "application/xml; charset=utf-8")
+        except (OSError, ET.ParseError, UnicodeError):
+            return self._not_found()
+
+    def _doc_file(self, src, fspath):
+        """Serve one document, section-redacted for this reader.
+
+        The browser gets the file verbatim, so this is the ONLY place a restricted
+        section can be withheld - filtering it client-side would be decoration.
+        """
+        doc_id = self._doc_id_for(src, fspath)
+        vis = self.gate.visibility(doc_id)
+        if vis == webdoc_access.HIDDEN:
+            return self._not_found()
+        if vis == webdoc_access.LOCKED:
+            return self._deny(self.gate.eff(doc_id))
+        try:
+            with open(fspath, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            return self._not_found()
+        cfg = self.config["auth"]
+        if cfg.enabled:
+            text = data.decode("utf-8-sig", "replace")
+            # Neutralise any ```wd-restricted fence the AUTHOR wrote before adding
+            # the server's own. Otherwise a document could forge the redaction
+            # notice, and - the part that actually matters - wrap real content in a
+            # fake one so a cleared reader never sees it.
+            text = webdoc_access.neutralise_forged_notices(text)
+            redacted, n = webdoc_access.redact_sections(cfg, self.principal, text)
+            data = redacted.encode("utf-8")
+        # Same read-a-file-and-send path as _file, so it gets the same encoding
+        # treatment - documents are Markdown, and Markdown compresses well.
+        # Validate only AFTER access checks and section redaction. The validator
+        # describes exactly the bytes this session may see, including ACL edits.
+        etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+        if self.headers.get('If-None-Match') == etag:
+            return self._send(304, b'', content_type(fspath), [('ETag', etag)])
+        self._send_static(200, data, content_type(fspath), [('ETag', etag)])
 
     # -- writing (authoring) ------------------------------------------------
     # Per-source hidden sidecars INSIDE each source folder (dotfiles, omitted from
@@ -265,32 +1653,57 @@ class DocHandler(BaseHTTPRequestHandler):
 
     def _sidecar_path(self, name, filename):
         src = self._source(name.strip("/"))
-        return os.path.join(src["path"], filename) if src else None
+        if not src:
+            return None
+        return canonical_path(src["path"], os.path.join(src["path"], filename))
 
     def _sidecar_get(self, name, filename):
         fp = self._sidecar_path(name, filename)
         if fp is None:
             return self._json(404, {"error": "unknown source"})
+        if not self._readable_site():
+            return self._deny(what="results")
         try:
             with open(fp, encoding="utf-8") as fh:
                 data = json.load(fh)
         except (OSError, ValueError):
             data = {}
-        return self._json(200, data)
+        return self._json(200, self._filter_results(data))
 
-    def _sidecar_put(self, name, filename):
-        fp = self._sidecar_path(name, filename)
-        if fp is None:
-            return self._json(404, {"error": "unknown source"})
-        try:
-            length = int(self.headers.get("Content-Length", 0) or 0)
-            body = self.rfile.read(length) if length else b"{}"
-            obj = json.loads(body.decode("utf-8"))  # validate it's JSON
-            with open(fp, "w", encoding="utf-8") as fh:
-                json.dump(obj, fh, indent=2)
-        except (OSError, ValueError) as e:
-            return self._json(400, {"error": str(e)})
-        return self._json(200, {"ok": True})
+    def _filter_results(self, data):
+        """Drop stored results whose requirement or test lives in a document this
+        reader cannot open - a pass/fail keyed by `T_WD_deploy` would otherwise
+        confirm that a restricted test exists, and name it."""
+        if self.gate.unrestricted or not isinstance(data, dict) or not self.index:
+            return data
+        owner = self.index.result_key_owner()
+        out = {}
+        for key, value in data.items():
+            doc_id = owner.get(key)
+            if doc_id is None:
+                # No owner in the index: either stale, or - the case that matters -
+                # a test declared inside a restricted section, which is deliberately
+                # not indexed. Withhold it rather than guess.
+                continue
+            if not self.gate.can_read(doc_id):
+                continue
+            out[key] = value
+        return out
+
+
+    def _can_write_source(self, name):
+        """Whether this caller may write a source's shared sidecar. Modelled on an
+        unrestricted document in that source: if they could not edit an ordinary
+        page, they cannot record results either."""
+        src = self._source(str(name).strip("/"))
+        if self.config.get("readOnly") or not src or src.get("readOnly"):
+            return False
+        cfg = self.config["auth"]
+        if not cfg.enabled:
+            return True
+        if not self._source(str(name).strip("/")):
+            return False
+        return webdoc_access.can_write(cfg, self.principal, webdoc_access.UNRESTRICTED)
 
     def _tests_get(self, name):
         return self._sidecar_get(name, self.TESTS_FILE)
@@ -310,123 +1723,209 @@ class DocHandler(BaseHTTPRequestHandler):
         src = self._source(name.strip("/"))
         if not src:
             return self._json(404, {"error": "unknown source"})
+        if not self._readable_site():
+            return self._deny(what="reports")
         out = []
         for root, _dirs, files in os.walk(src["path"]):
+            _dirs[:] = [d for d in _dirs if not blocked_path(src, os.path.relpath(os.path.join(root, d), src["path"]))]
             for f in files:
                 if f.lower().endswith(".xml"):
                     rel = os.path.relpath(os.path.join(root, f), src["path"]).replace("\\", "/")
+                    if blocked_path(src, rel) or not safe_join(src["path"], rel) or not self._asset_readable(src["name"], rel):
+                        continue
                     out.append("/docs/" + src["name"] + "/" + urllib.parse.quote(rel))
         out.sort()
         return self._json(200, out)
 
+
     def do_PUT(self):
-        """Write a document (PUT /docs/<source>/<path>.md, raw Markdown body) or a
-        source's results sidecar (PUT /api/tests/<source>, JSON body)."""
-        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
-        if path.startswith("/api/tests/"):
-            return self._tests_put(path[len("/api/tests/"):])
-        if path.startswith("/api/auto/"):
-            return self._auto_put(path[len("/api/auto/"):])
-        if not path.startswith("/docs/"):
-            return self._json(405, {"error": "writes are only allowed under /docs/"})
-        rest = path[len("/docs/"):].strip("/")
-        name, _, rel = rest.partition("/")
-        src = self._source(name)
-        if not src:
-            return self._json(404, {"error": f"unknown source '{name}'"})
-        if not rel or not rel.lower().endswith(".md"):
-            return self._json(400, {"error": "path must be a .md file"})
-        fspath = safe_join(src["path"], rel)
-        if not fspath:
-            return self._json(400, {"error": "invalid path"})
-        try:
-            length = int(self.headers.get("Content-Length", 0) or 0)
-            body = self.rfile.read(length) if length else b""
-            existed = os.path.exists(fspath)
-            os.makedirs(os.path.dirname(fspath), exist_ok=True)
-            with open(fspath, "wb") as fh:
-                fh.write(body)
-        except (OSError, ValueError) as e:
-            return self._json(500, {"error": str(e)})
-        if self.index:   # keep the index in step with the write (incremental, cheap)
-            try:
-                self.index.update_doc(name, rel, body.decode("utf-8", "replace"))
-            except Exception as e:
-                print("  ! index update failed:", e)
-        doc_id = name + "/" + rel[:-3]  # drop the .md
-        return self._json(200 if existed else 201,
-                          {"ok": True, "id": doc_id, "created": not existed})
+        self._dispatch(self._put)
+
+
 
     def do_DELETE(self):
-        """Delete a document: DELETE /docs/<source>/<path>.md. Removes the .md
-        file and prunes any parent folders it leaves empty (never the source
-        root). This is how the in-app CRUD "delete document" action removes a doc."""
-        path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
-        if not path.startswith("/docs/"):
-            return self._json(405, {"error": "deletes are only allowed under /docs/"})
-        rest = path[len("/docs/"):].strip("/")
-        name, _, rel = rest.partition("/")
-        src = self._source(name)
-        if not src:
-            return self._json(404, {"error": f"unknown source '{name}'"})
-        if not rel or not rel.lower().endswith(".md"):
-            return self._json(400, {"error": "path must be a .md file"})
-        fspath = safe_join(src["path"], rel)
-        if not fspath:
-            return self._json(400, {"error": "invalid path"})
-        if not os.path.isfile(fspath):
-            return self._json(404, {"error": "not found"})
-        try:
-            os.remove(fspath)
-            # Prune now-empty parent directories up to (but never including) the
-            # source root, so deleting the last doc in a folder doesn't leave an
-            # empty branch in the tree.
-            root_abs = os.path.abspath(src["path"])
-            d = os.path.dirname(os.path.abspath(fspath))
-            while d != root_abs and d.startswith(root_abs + os.sep):
-                if os.listdir(d):
-                    break
-                os.rmdir(d)
-                d = os.path.dirname(d)
-        except OSError as e:
-            return self._json(500, {"error": str(e)})
-        if self.index:
-            try:
-                self.index.delete_doc(name, rel)
-            except Exception as e:
-                print("  ! index delete failed:", e)
-        doc_id = name + "/" + rel[:-3]  # drop the .md
-        return self._json(200, {"ok": True, "id": doc_id, "deleted": True})
+        self._dispatch(self._delete)
+
 
     def log_message(self, fmt, *args):
         print("  %s - %s" % (self.address_string(), fmt % args))
 
 
+def watch_loop(idx, interval):
+    """Background thread: periodically re-scan the source folders so .md files
+    added/edited/removed OUTSIDE the app (not via PUT/DELETE) get picked up
+    without a restart. idx.reconcile() is the same incremental, mtime/size-gated
+    scan used for the cold build, so an idle poll is cheap - it does real work
+    only when a file has actually changed."""
+    while True:
+        time.sleep(interval)
+        try:
+            idx.reconcile()
+        except Exception as e:
+            print("  ! index watch reconcile failed:", e)
+
+
+def session_sweeper(sessions, interval=300):
+    while True:
+        time.sleep(interval)
+        try:
+            sessions.sweep()
+        except Exception as e:
+            print("  ! session sweep failed:", e)
+
+
+def setup_auth(cfg, host):
+    """Attach the account store, session store and rate limiters to the handler,
+    and print exactly what the security posture is - an operator should never have
+    to read the code to find out whether their server is open."""
+    auth = cfg["auth"]
+    DocHandler.csp = build_csp(auth, cfg.get("plugins", []))
+    if DocHandler.csp and inline_style_plugins(cfg.get("plugins", [])):
+        print("  csp: inline styles allowed for the %s plugin; scripts stay hash-only"
+              % ", ".join(inline_style_plugins(cfg.get("plugins", []))))
+    if not auth.enabled:
+        print("  auth: DISABLED - " + ("global read-only mode" if cfg.get("readOnly") else "anyone who can reach this server can read AND edit every document"))
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            print("        (bound to %s, so that means anyone on the network)" % host)
+        return
+    DocHandler.users = webdoc_auth.UserStore(auth.users_file, auth.pbkdf2_iterations)
+    DocHandler.sessions = webdoc_auth.SessionStore(
+        idle_seconds=auth.session_idle_minutes * 60, absolute_seconds=auth.session_max_hours * 3600)
+    DocHandler.login_limiter = webdoc_auth.RateLimiter(auth.max_login_failures, 300, auth.lockout_seconds)
+    DocHandler.ip_limiter = webdoc_auth.RateLimiter(auth.max_login_failures * 6, 300, auth.lockout_seconds)
+    DocHandler.register_limiter = webdoc_auth.RateLimiter(max(3, auth.max_login_failures // 2), 3600, 900)
+    threading.Thread(target=session_sweeper, args=(DocHandler.sessions,), daemon=True).start()
+    n = DocHandler.users.count()
+    print("  auth: ENABLED - %d account(s), %s" % (
+        n, "registration open" if auth.allow_registration else "registration closed"))
+    print("        accounts: %s" % auth.users_file)
+    print("        groups:   %s" % (", ".join(auth.known_groups()) or "(none declared)"))
+    if auth.public_read:
+        print("        publicRead is ON: unrestricted documents are readable without signing in")
+    if n == 0 and auth.allow_registration:
+        print("        create the first administrator with bootstrap_admin.py")
+    if n == 0 and not auth.allow_registration:
+        print("        ! no accounts exist and registration is closed - nobody can sign in")
+    if host not in ("127.0.0.1", "localhost", "::1") and not auth.cookie_secure:
+        print("        ! bound to %s over plain HTTP: passwords and session cookies travel in the clear."
+              % host)
+        print("          Put this behind HTTPS and set auth.cookieSecure true.")
+
+
+# Renderer plugins whose bring-your-own library styles itself inline. The
+# Software Designer embed build injects its components' CSS as <style> elements
+# at run time and its editor writes style attributes (software-design.ts adds a
+# <style> for its theme tokens too), so under style-src 'self' a design renders
+# unstyled. Enabling such a plugin restores the pre-154E style policy, for
+# styles only: script-src stays hash-only. Drop the entry once the library ships
+# its CSS as a file and no inline style attributes.
+INLINE_STYLE_PLUGINS = frozenset({"software-design"})
+
+
+def inline_style_plugins(plugins):
+    """The configured plugins that need inline styles (see INLINE_STYLE_PLUGINS)."""
+    return sorted(INLINE_STYLE_PLUGINS.intersection(plugins or ()))
+
+
+def build_csp(auth, plugins=()):
+    """The Content-Security-Policy sent with every response.
+
+    Everything this app needs is same-origin, so the policy is simply 'self' plus
+    a hash for the theme-resolving inline script - no 'unsafe-inline', so a
+    sanitizer escape does not become script execution. `plugins` are the
+    configured renderer plugins (see INLINE_STYLE_PLUGINS).
+    """
+    if not auth.security_headers:
+        return None
+    script_src = ["'self'"] + _inline_script_hashes(os.path.join(APP_DIR, "index.html"))
+    baseline = [
+        "default-src 'self'",
+        "script-src " + " ".join(script_src),
+        "style-src 'self'" + (" 'unsafe-inline'" if inline_style_plugins(plugins) else ""),   # see INLINE_STYLE_PLUGINS
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",                            # the app never submits a form
+        "frame-ancestors 'none'",
+    ]
+    required = {line.split()[0]: line for line in baseline}
+    override = auth.content_security_policy
+    if isinstance(override, str):
+        for directive in override.split(";"):
+            parts = directive.strip().split()
+            if not parts:
+                continue
+            key = parts[0].lower()
+            if key in required:
+                if " ".join(parts) != required[key]:
+                    raise ValueError("CSP override conflicts with required directive: " + key)
+            elif key in ("script-src-elem", "script-src-attr", "style-src-elem", "style-src-attr"):
+                if parts[1:] != ["'none'"]:
+                    raise ValueError("CSP override would weaken required policy")
+                required[key] = " ".join(parts)
+            else:
+                if any("\r" in p or "\n" in p for p in parts):
+                    raise ValueError("invalid CSP directive")
+                required[key] = " ".join(parts)
+    return "; ".join(required.values())
+
+
+def handler_class(read_only=False):
+    if read_only:
+        return type("ReadOnlyHandler", (DocHandler,), {})
+    from webdoc_mutations import MutationHandler
+    return type("InteractiveHandler", (MutationHandler, DocHandler), {})
+
+
 def main():
+    # When launched as a script, avoid importing a second copy from the mixin.
+    import sys
+    sys.modules.setdefault("serve", sys.modules[__name__])
     ap = argparse.ArgumentParser(description="Web Document Tool static server")
     ap.add_argument("--config", default=os.path.join(HERE, "config.json"))
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--read-only", action="store_true")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    cfg["readOnly"] = cfg["readOnly"] or args.read_only
+    if cfg["readOnly"]:
+        cfg["auth"].allow_registration = False
+        cfg["auth"].public_read = True
     DocHandler.config = cfg
+    handler = handler_class(cfg["readOnly"])
+    if not cfg["readOnly"]:
+        import webdoc_runs
+        handler.runs = webdoc_runs.Runs(cfg["sources"], args.host, cfg["auth"].enabled)
+    setup_auth(cfg, args.host)
 
-    # Build the SQLite index in the BACKGROUND so serving starts immediately; the
-    # client polls /api/index/status. Optional + fault-tolerant: if it can't start,
-    # the server still serves files (the client can fall back to client-side discovery).
-    try:
-        from webdoc_index import Index
-        idx = Index(HERE, cfg["sources"], index_body=cfg.get("indexBody", False), index_dir=cfg.get("indexDir"))
-        DocHandler.index = idx
-        threading.Thread(target=idx.reconcile, daemon=True).start()
-        print("  index: sqlite (.webdoc-index/), building in background"
-              + ("  [+full-text body]" if cfg.get("indexBody") else ""))
-    except Exception as e:
-        DocHandler.index = None
-        print(f"  ! index disabled ({e})")
+    # Separate databases and resolvers make references project-local by construction.
+    from webdoc_index import Index
+    DocHandler.indexes = {
+        p["name"]: Index(HERE, p["sources"], index_body=cfg.get("indexBody", False),
+                         index_dir=p["indexDir"], propagate_via=cfg.get("propagateVia", ("next",)))
+        for p in cfg["projects"]
+    }
+    DocHandler.index = DocHandler.indexes[cfg["projects"][0]["name"]]
+    def reconcile_projects():
+        for idx in DocHandler.indexes.values():
+            try:
+                idx.reconcile()
+            except Exception as exc:
+                print("  ! project index reconcile failed:", exc)
+    threading.Thread(target=reconcile_projects, daemon=True).start()
+    interval = cfg.get("watchIntervalSec", 3)
+    if interval:
+        def watch_projects():
+            while True:
+                time.sleep(max(1, float(interval)))
+                reconcile_projects()
+        threading.Thread(target=watch_projects, daemon=True).start()
 
-    httpd = ThreadingHTTPServer((args.host, args.port), DocHandler)
+    httpd = ThreadingHTTPServer((args.host, args.port), handler)
     print(f"Web Document Tool  -  http://{args.host}:{args.port}")
     print(f"  site: {cfg['siteTitle']}")
     for s in cfg["sources"]:
@@ -440,3 +1939,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

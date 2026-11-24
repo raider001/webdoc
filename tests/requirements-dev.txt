@@ -1,6 +1,7 @@
 # Dev-only test dependencies for the Web Document Tool.
-# This is the project's ONLY third-party dependency, and it is dev-time only,
-# isolated in tests/. NO Node.js, NO npm, NO package.json anywhere: Playwright
-# is used purely through its Python binding.
+# Playwright is used purely through its Python binding, so no Node is involved in
+# running the tests. The repository does carry a build-time-only package.json
+# (typescript, and later the Svelte toolchain); the runtime dependencies object
+# stays empty and serve.py stays Python-standard-library-only.
 pytest
 pytest-playwright
