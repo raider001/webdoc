@@ -80,6 +80,8 @@ CONTENT_TYPES = {
     ".webp": "image/webp",
     ".ico": "image/x-icon",
     ".woff2": "font/woff2",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
     ".txt": "text/plain; charset=utf-8",
 }
 

@@ -5,5 +5,5 @@
   ],
   "defaultDoc": "Docs/overview",
   "theme": "auto",
-  "plugins": ["mermaid", "widget-panel", "software-design"]
+  "plugins": ["mermaid", "widget-panel", "software-design", "model-viewer"]
 }

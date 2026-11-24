@@ -53,3 +53,9 @@ app/thirdpartyrenderer/widget-panel.js
 app/thirdpartyrenderer/widget-panel.d.ts
 app/thirdpartyrenderer/software-design.js
 app/thirdpartyrenderer/software-design.d.ts
+app/thirdpartyrenderer/model-viewer.js
+app/thirdpartyrenderer/model-viewer.d.ts
+# model-viewer's helper modules compile here too; its stylesheet is hand-written
+# and stays tracked.
+app/thirdpartyrenderer/model-viewer/*.js
+app/thirdpartyrenderer/model-viewer/*.d.ts
